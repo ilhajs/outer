@@ -1,8 +1,10 @@
 import { test, describe, beforeAll, expect } from "bun:test";
+
 import { PGlite } from "@electric-sql/pglite";
 import { Kysely, PGliteDialect } from "kysely";
-import { schema } from "./schema";
+
 import { createMigrator } from "./migrator";
+import { schema } from "./schema";
 import { createSola } from "./sola";
 
 // ── Shared setup ──────────────────────────────────────────────────────────

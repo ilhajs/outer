@@ -1,5 +1,6 @@
-import { Outer, schema } from "../src/index";
 import { serve } from "srvx";
+
+import { Outer, schema } from "../src/index";
 
 const v1_0 = schema("1.0.0")
   .table("user", (t) => ({

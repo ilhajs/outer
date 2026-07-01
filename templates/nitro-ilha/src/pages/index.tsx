@@ -1,81 +1,63 @@
-import { head } from "@ilha/router";
-import { store } from "@ilha/store";
-import { preventDefault } from "@ilha/store/form";
-import { Badge, Button, Checkbox, Input, LayerCard } from "areia";
+import type { AuthSession } from "$lib/types";
+import { head, navigate } from "@ilha/router";
+import { LayerCard, Link } from "areia";
 import ilha from "ilha";
-import { each } from "quando";
 
-const DEFAULT_TODOS: Todo[] = [
-  { id: "1", text: "Start Ilha Dev Server", completed: true },
-  { id: "2", text: "Develop my Ilha app", completed: false },
-  { id: "3", text: "Deploy my Ilha app", completed: false },
-];
-
-type Todo = { id: string; text: string; completed: boolean };
-
-const todos = store({ draft: "", items: [] as Todo[] })
-  .derived("pending", ({ get }) => (get().items ?? []).filter((t) => !t.completed))
-  .action("addItem", (_, { get }) => {
-    const text = get().draft.trim();
-    if (!text) return;
-    const item = { id: crypto.randomUUID(), text, completed: false };
-    return { items: [...get().items, item], draft: "" };
-  })
-  .action("deleteItem", (index: number, { get }) => {
-    return { items: get().items.filter((_, i) => i !== index) };
-  })
-  .action("toggleItem", (index: number, { get }) => {
-    return {
-      items: get().items.map((item, i) =>
-        i === index ? { ...item, completed: !item.completed } : item,
-      ),
-    };
-  })
-  .build();
-
-const getIndex = (target: Element) => {
-  const el = target.closest("[data-index]") ?? target;
-  const index = Number.parseInt(el.getAttribute("data-index") ?? "", 10);
-  return Number.isNaN(index) ? -1 : index;
-};
+const codeClass = "bg-areia-background rounded-lg p-3 text-sm overflow-x-auto";
 
 export default ilha
-  .on("#todo-form@submit", preventDefault(todos.addItem))
-  .on("[data-action=delete_todo]@click", ({ target }) => todos.deleteItem(getIndex(target)))
-  .onMount(() => {
-    todos.items(DEFAULT_TODOS);
+  .input<{ session: AuthSession }>()
+  .onMount(({ input }) => {
+    if (input.session) return;
+    navigate("/login");
   })
   .render(() => {
     head({ title: "Home" });
     return (
       <div class="flex flex-col gap-4">
         <LayerCard>
-          <LayerCard.Title>
-            <span>To Do</span>
-            <Badge>{todos.pending()?.length}</Badge>
-          </LayerCard.Title>
-          <LayerCard.Content>
-            <form id="todo-form">
-              <div class="flex items-center gap-2">
-                <Input placeholder="Add a new todo" class="w-full" bind:value={todos.draft} />
-                <Button type="submit">Add</Button>
-              </div>
-            </form>
-            <div class="flex flex-col gap-2">
-              {each(todos.items())
-                .as((todo, index) => (
-                  <div key={todo.id} class="flex items-center justify-between gap-2">
-                    <Checkbox
-                      label={todo.text}
-                      bind:checked={todos.bind((s) => s.items[index]?.completed ?? false)}
-                    />
-                    <Button data-action="delete_todo" data-index={index}>
-                      Delete
-                    </Button>
-                  </div>
-                ))
-                .else(<p>No todos.</p>)}
-            </div>
+          <LayerCard.Title>Get Started</LayerCard.Title>
+          <LayerCard.Content class="flex flex-col gap-4">
+            <ol class="flex list-decimal flex-col gap-4 pl-5">
+              <li>
+                <p class="font-medium">Add a table to your schema</p>
+                <p class="text-sm">
+                  Edit <code>src/lib/schemas/v1-0-0.ts</code> and add a <code>.table(...)</code> to
+                  the chain.
+                </p>
+              </li>
+              <li>
+                <p class="font-medium">
+                  Expose it in <code>src/server.ts</code>
+                </p>
+                <p class="text-sm">
+                  Register CRUD procedures for a table with <code>.resource()</code>, or write your
+                  own with <code>.procedure()</code>:
+                </p>
+                <pre class={codeClass}>
+                  <code>{`.resource("post")\n.procedure("hello", (base) => base.handler(() => "world"))`}</code>
+                </pre>
+              </li>
+              <li>
+                <p class="font-medium">Call it from any page</p>
+                <p class="text-sm">
+                  Import the type-safe client and use it directly — no fetch, no manual typing:
+                </p>
+                <pre class={codeClass}>
+                  <code>{`import { client } from "$lib/outer";\n\nconst posts = await client.post.list();`}</code>
+                </pre>
+              </li>
+              <li>
+                <p class="font-medium">Add a page</p>
+                <p class="text-sm">
+                  Drop a new file in <code>src/pages</code> — ilha wires up routing for you
+                  automatically, just like this one.
+                </p>
+              </li>
+            </ol>
+            <Link href="https://github.com/ilhajs/outer/blob/main/SPEC.md" external>
+              Outer's full API reference →
+            </Link>
           </LayerCard.Content>
         </LayerCard>
       </div>

@@ -20,6 +20,7 @@ const v1_0 = schema("1.0.0")
 const outer = new Outer({ name: "My API", baseUrl: "http://localhost:3000" })
   .schema(v1_0)
   .auth({ secret: process.env.AUTH_SECRET! })
+  .openapi()
   .resource("post", {
     permissions: { create: "authenticated", update: "owner", delete: "owner" },
     ownerColumn: "userId",
@@ -33,11 +34,11 @@ serve({ fetch: (req) => outer.handle(req) });
 
 This gets you, with zero extra setup:
 
-- A local Postgres (PGlite) database, schema-driven migrations, and a typed `context.db` (Kysely + a read-focused ORM layer)
-- Auth (sign-up/sign-in/sessions) via Better Auth, mounted at `/api/auth/**`
-- Auto-generated CRUD procedures per table via `.resource()`, with per-action permissions (`public` / `authenticated` / `admin` / `owner` / custom function)
-- Type-safe RPC procedures via oRPC, served at `/rpc/**`, plus an opt-in OpenAPI spec at `/openapi.json` (`.openapi({ enabled: true })`)
-- Realtime streaming (SSE) via oRPC event iterators — no extra infrastructure
+- A local **Postgres (PGlite) database**, schema-driven migrations, and a typed `context.db` (Kysely + a read-focused ORM layer)
+- **Auth** (sign-up/sign-in/sessions) via Better Auth, mounted at `/api/auth/**`
+- Auto-generated **CRUD procedures** per table via `.resource()`, with per-action permissions (`public` / `authenticated` / `admin` / `owner` / custom function)
+- **Type-safe RPC** procedures via oRPC, served at `/rpc/**`, plus an opt-in OpenAPI spec at `/openapi.json` (`.openapi()`)
+- **Realtime streaming** (SSE) via oRPC event iterators — no extra infrastructure
 
 Pair it with `@outerjs/sdk` on the client for a type-safe RPC + auth client in one call:
 

@@ -39,7 +39,20 @@ export class OuterClientBuilder<
     if (!this.authEnabled) return rpc as RouterClient<TRouter> & TExtra;
 
     const auth = createAuthClient({ baseURL: this.params.baseUrl, ...this.authOptions });
-    return Object.assign(rpc, { auth }) as unknown as RouterClient<TRouter> & TExtra;
+
+    // `rpc` is itself a Proxy whose `get` trap unconditionally returns a nested
+    // RPC client for any string key (see @orpc/client's createORPCClient) — it
+    // never consults own properties, so `Object.assign(rpc, { auth })` silently
+    // does nothing and `.auth` would still resolve to an RPC call at path
+    // ["auth"]. Wrap it in another Proxy that shadows just the `auth` key.
+    const client = new Proxy(rpc as object, {
+      get(target, prop, receiver) {
+        if (prop === "auth") return auth;
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+
+    return client as RouterClient<TRouter> & TExtra;
   }
 }
 

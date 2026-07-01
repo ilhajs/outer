@@ -1,5 +1,6 @@
 import { Kysely, sql } from "kysely";
 import { Migrator, MigrationProvider, Migration } from "kysely/migration";
+
 import { SchemaResult, ColumnDef, TablesDef } from "./schema";
 
 const SQL_TYPE: Record<string, any> = {

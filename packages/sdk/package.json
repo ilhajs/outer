@@ -35,7 +35,8 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc && tsdown"
+    "build": "tsc && tsdown",
+    "test": "bun test --parallel"
   },
   "dependencies": {
     "@better-auth/core": "^1.6.23",

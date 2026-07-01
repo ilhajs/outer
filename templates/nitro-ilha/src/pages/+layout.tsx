@@ -1,19 +1,22 @@
-import { isActive, defineLayout } from "@ilha/router";
-import { LinkButton } from "areia";
+import { Navbar } from "$lib/components/navbar";
+import { client } from "$lib/outer";
+import { defineLayout } from "@ilha/router";
+import { Toaster } from "areia/sonner";
 import ilha from "ilha";
 
-export default defineLayout((children) =>
-  ilha.render(() => (
-    <div class="mt-2 flex flex-col gap-2">
-      <nav class="container mx-auto flex max-w-xl items-center gap-2">
-        <LinkButton href="/" variant={isActive("/") ? "secondary" : "ghost"}>
-          Home
-        </LinkButton>
-        <LinkButton href="/learn" variant={isActive("/learn") ? "secondary" : "ghost"}>
-          Learn
-        </LinkButton>
-      </nav>
-      <main class="container mx-auto max-w-xl">{children}</main>
-    </div>
-  )),
+export default defineLayout((Children) =>
+  ilha
+    .derived("session", () => client.auth.getSession())
+    .render(({ derived }) => {
+      if (derived.session.loading) return "";
+      return (
+        <div class="bg-areia-surface-elevated flex min-h-screen flex-col gap-4">
+          <Navbar session={derived.session()?.data} />
+          <main class="container mx-auto flex flex-1 flex-col p-2">
+            {Children({ session: derived.session()?.data })}
+          </main>
+          <Toaster closeButton theme="system" />
+        </div>
+      );
+    }),
 );

@@ -1,7 +1,7 @@
 import { pages } from "@ilha/router/vite";
 import tailwindcss from "@tailwindcss/vite";
-import { defineConfig } from "vite";
 import { nitro } from "nitro/vite";
+import { defineConfig } from "vite";
 
 // https://vite.dev/config/
 export default defineConfig({
