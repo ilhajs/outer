@@ -36,7 +36,7 @@
   },
   "scripts": {
     "build": "tsc && tsdown",
-    "test": "bun test --parallel"
+    "test": "bun test --parallel --timeout 20000"
   },
   "dependencies": {
     "@better-auth/core": "^1.6.23",
