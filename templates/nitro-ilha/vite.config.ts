@@ -27,6 +27,11 @@ export default defineConfig({
   server: {
     watch: {
       usePolling: true,
+      // Outer's PGlite data dir (.outer/pglite) and Nitro's fs storage
+      // (.outer/data) live under the project root — every DB write/task
+      // touches files there, which would otherwise trigger spurious
+      // HMR/reload cycles (e.g. on every form submission that hits auth).
+      ignored: ["**/.outer/**"],
     },
   },
 });

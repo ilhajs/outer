@@ -13,6 +13,9 @@ dist-ssr
 *.local
 .ilha
 
+# Outer's PGlite data dir + Nitro's fs storage
+.outer
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
