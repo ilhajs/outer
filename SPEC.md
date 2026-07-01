@@ -52,7 +52,19 @@ Toggles `GET /openapi.json`. Not mounted unless this is called — calling it wi
 
 Enables Better Auth and mounts `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain. Returns a new `Outer` whose `context.auth` type is narrowed to required (non-optional) for everything chained after this call (like `.middleware()`'s `next({ context })`). When `.auth()` is not called, `context.auth` is `undefined` and `/api/auth/**` is not mounted — resource permissions other than `"public"` will throw a configuration error.
 
-`config` is `Omit<BetterAuthOptions, "database"> & { secret: string; baseURL?: string }` — every Better Auth option (`plugins`, `emailAndPassword`, `trustedOrigins`, etc.) is accepted directly, with `secret` made required. `database` is owned by Outer (wired to the internal PGlite dialect) and cannot be overridden here. `baseURL` defaults to the `baseUrl` passed to `new Outer({ baseUrl })`, but can be overridden per-call via `.auth({ baseURL })` if you need a different value just for auth.
+`config` is `Omit<BetterAuthOptions, "database"> & { secret: string }` — every Better Auth option (`plugins`, `emailAndPassword`, `trustedOrigins`, etc.) is accepted directly, with `secret` made required. `database` is owned by Outer (wired to the internal PGlite dialect) and cannot be overridden here. `baseURL` defaults to the `baseUrl` passed to `new Outer({ baseUrl })`, but can be overridden per-call via `.auth({ baseURL })` if you need a different value just for auth.
+
+`baseURL` accepts either a static string or Better Auth's `DynamicBaseURLConfig` (`{ allowedHosts: string[], fallback?: string, protocol?: "http" | "https" | "auto" }`), which derives the correct origin per-request from the `Host` header instead of a fixed value. Use this for deployments behind a dynamic/preview domain (Vercel previews, StackBlitz, Coolify preview deployments, etc.) where the real origin isn't known at build time — a fixed `baseUrl` there causes Better Auth to scope session cookies to the wrong origin, so sign-in appears to succeed but the session is never actually persisted:
+
+```ts
+.auth({
+  secret: process.env.AUTH_SECRET!,
+  baseURL: {
+    allowedHosts: ["*.webcontainer.io", "localhost"],
+    fallback: "http://localhost:3000",
+  },
+})
+```
 
 Outer's core does not set any Better Auth defaults (no default plugins, no default email options) — configure everything explicitly.
 

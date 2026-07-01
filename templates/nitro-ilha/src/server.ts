@@ -11,6 +11,13 @@ const outer = new Outer({ name: "Outer", baseUrl: import.meta.env.VITE_APP_URL }
   .schema(v1_0_0)
   .auth({
     secret: runtimeConfig.authSecret,
+    // A static baseURL breaks on dynamic/preview domains (StackBlitz,
+    // Vercel previews, etc.) — derive it from the request's Host header
+    // instead, falling back to VITE_APP_URL for anything unrecognized.
+    baseURL: {
+      allowedHosts: ["localhost", "127.0.0.1", "*.webcontainer.io", "*.vercel.app"],
+      fallback: import.meta.env.VITE_APP_URL,
+    },
     plugins: [
       emailOTP({
         sendVerificationOTP: async ({ email, otp }) => {

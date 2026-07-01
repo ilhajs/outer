@@ -53,8 +53,12 @@ type MergeRouters<A, B> = {
 export type AuthConfig = Omit<BetterAuthOptions, "database"> & {
   /** Secret used by Better Auth to sign/encrypt sessions, cookies, and tokens. */
   secret: string;
-  /** Defaults to the `baseUrl` passed to `new Outer({ baseUrl })` — set this to override it just for auth. */
-  baseURL?: string;
+  /**
+   * Defaults to the `baseUrl` passed to `new Outer({ baseUrl })` — set this to override it just for auth.
+   * Accepts Better Auth's `DynamicBaseURLConfig` (`{ allowedHosts, fallback?, protocol? }`) for deployments
+   * behind a dynamic/preview domain (Vercel previews, StackBlitz, etc.) where the origin isn't known upfront.
+   */
+  baseURL?: BetterAuthOptions["baseURL"];
 };
 
 export type OuterParams = {
