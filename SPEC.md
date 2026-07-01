@@ -74,6 +74,10 @@ Patterns are matched against the full `Host` header including port — bare `"lo
 
 Outer's core does not set any Better Auth defaults (no default plugins, no default email options) — configure everything explicitly.
 
+`better-auth` and `@better-auth/core` are bundled into `@outerjs/server`'s published output rather than left as external runtime dependencies. `@better-auth/core` uses `AsyncLocalStorage`-based module-singleton state to track the current request; if a package manager installs a second, physically separate copy of it (common when a dependency is sourced from a URL/tarball rather than the registry, which defeats normal dedup), the copy that sets request state and the copy that reads it end up being different instances, and every request fails with `No request state found`. Bundling makes the auth request-handling path self-contained regardless of how the consumer's installer hoists things.
+
+Plugins (e.g. `emailOTP` from `better-auth/plugins`) are still imported and constructed by your own app code, from whatever `better-auth` copy your app installs — that's independent of the bundled copy `.auth()` uses internally, and is fine, since plugin definitions are plain objects, not classes requiring `instanceof` checks against a specific module instance.
+
 ---
 
 ## `.schema(s: SchemaResult<T>)`
