@@ -11,8 +11,8 @@
   "dependencies": {
     "@ilha/router": "^0.6.8",
     "@ilha/store": "^0.5.10",
-    "@outerjs/sdk": "https://pkg.pr.new/ilhajs/outer/@outerjs/sdk@19803e1",
-    "@outerjs/server": "https://pkg.pr.new/ilhajs/outer/@outerjs/server@19803e1",
+    "@outerjs/sdk": "https://pkg.pr.new/ilhajs/outer/@outerjs/sdk@main",
+    "@outerjs/server": "https://pkg.pr.new/ilhajs/outer/@outerjs/server@main",
     "areia": "^0.1.33",
     "better-auth": "^1.6.23",
     "ilha": "^0.8.5",
