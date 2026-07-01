@@ -1,0 +1,11 @@
+{
+  "extends": "nitro/tsconfig",
+  "compilerOptions": {
+    "types": ["./.ilha/pages.d.ts"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "ilha",
+    "paths": {
+      "$lib/*": ["./src/lib/*"]
+    },
+  }
+}

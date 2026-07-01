@@ -1,0 +1,56 @@
+{
+  "name": "@outerjs/server",
+  "version": "0.1.0",
+  "description": "The tiny backend you never knew you needed",
+  "keywords": [
+    "authentication",
+    "backend",
+    "better-auth",
+    "kysely",
+    "orpc",
+    "pglite",
+    "postgres"
+  ],
+  "homepage": "https://github.com/ilhajs/outer#readme",
+  "bugs": {
+    "url": "https://github.com/ilhajs/outer/issues"
+  },
+  "license": "MIT",
+  "author": "Ryuz <ryuzer@proton.me>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ilhajs/outer.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "module": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc && tsdown",
+    "test": "bun test --parallel",
+    "test:e2e": "bun test/index.ts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.3",
+    "@orpc/openapi": "^2.0.0-beta.9",
+    "@orpc/server": "^2.0.0-beta.9",
+    "@orpc/zod": "^2.0.0-beta.9",
+    "better-auth": "^1.6.23",
+    "kysely": "^0.29.2",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "h3": "^2.0.1-rc.22"
+  }
+}
