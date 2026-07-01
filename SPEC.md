@@ -108,6 +108,8 @@ Auto-generates five CRUD procedures for a schema table. `name` must match a tabl
 
 Input types are derived from column definitions at build time. `serial` primary key columns, columns with `.default()`, and `ownerColumn` are omitted from create input.
 
+`create`/`update` map common Postgres constraint violations to clean errors instead of a raw 500: unique/foreign-key violations → `409 CONFLICT`, not-null/check violations → `400 BAD_REQUEST`. `update`/`delete` on a row that doesn't exist → `404 NOT_FOUND`. Unrecognized DB errors still surface as a generic `500` with no internal details leaked.
+
 ### Permissions
 
 | Value             | Description                                                                      |
@@ -161,7 +163,6 @@ Seals the router and constructs the HTTP server. Returns a `BuiltOuter` with:
 
 | Method | Path            | Handler                                                                       |
 | ------ | --------------- | ----------------------------------------------------------------------------- |
-| `GET`  | `/`             | Returns `"Outer"`                                                             |
 | `GET`  | `/openapi.json` | OpenAPI 3.x spec (only mounted when `.openapi({ enabled: true })` was called) |
 | `ALL`  | `/api/auth/**`  | Better Auth handler (only mounted when `.auth()` was called)                  |
 | `ALL`  | `/rpc/**`       | oRPC handler (prefix `/rpc`)                                                  |
@@ -170,7 +171,9 @@ Seals the router and constructs the HTTP server. Returns a `BuiltOuter` with:
 
 ## Embedding in a host framework
 
-`BuiltOuter.handle(request: Request): Promise<Response>` is a plain Fetch API handler, so Outer mounts as the server entry for any framework that speaks `fetch` — Nitro, Hono, H3, Next.js API Routes, Cloudflare Workers, etc. Export whatever shape the host expects and delegate to `outer.handle`:
+`BuiltOuter.handle(request: Request): Promise<Response>` is a plain Fetch API handler, so Outer mounts as the server entry for any framework that speaks `fetch` — Nitro, Hono, H3, Next.js API Routes, etc. Export whatever shape the host expects and delegate to `outer.handle`:
+
+The handler itself is host-agnostic, but the bundled PGlite database is not: it writes to local disk (`db.dataDir`), so the host needs a persistent, writable filesystem across requests. This works on a VPS, Coolify, or any long-lived Node process; it does not work on serverless/edge platforms (Vercel Functions, Cloudflare Workers) — see Roadmap.
 
 ```ts
 // e.g. Nitro server entry (see templates/nitro-ilha)
@@ -519,6 +522,7 @@ Use `withEventMeta` to attach an event `id` to each yield. On reconnect, oRPC pa
 
 ## Roadmap
 
-### Next priority: Admin dashboard/UI
+Alpha focuses on persistent-hosting deployments (VPS, Coolify) with the bundled PGlite database. Two things are planned next, in no particular priority order yet:
 
-An embedded admin UI (comparable to PocketBase's dashboard or Supabase Studio) is the highest-priority missing feature. It should expose: table data browser with CRUD, user/session management, and migration status. Planned as a separate `outer-admin` package served at `/admin` when enabled.
+- **Admin dashboard/UI** — comparable to PocketBase's dashboard or Supabase Studio. Should expose: table data browser with CRUD, user/session management, and migration status. Planned as a separate `outer-admin` package served at `/admin` when enabled.
+- **Serverless/edge support** (Vercel Functions, Cloudflare Workers) — requires either a pluggable database layer so a real network-attached Postgres can replace PGlite's local-disk storage, or a managed/durable-storage-backed PGlite setup. Not usable on these platforms yet; `db.dataDir` assumes a persistent local filesystem.

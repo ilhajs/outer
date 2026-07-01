@@ -1,6 +1,6 @@
 # Outer
 
-Outer is an alternative to Supabase, PocketBase, and Firebase where you own 100% of the solution and data. It's a batteries-included TypeScript backend framework built on [PGlite](https://pglite.dev), [Kysely](https://kysely.dev), [oRPC](https://orpc.unnoq.com), and [Better Auth](https://better-auth.com), exposed through a fluent builder chain that produces a single fetch-compatible HTTP handler — deploy it to a VPS, Coolify, Vercel, Cloudflare Workers, or alongside any frontend app.
+Outer is an alternative to Supabase, PocketBase, and Firebase where you own 100% of the solution and data. It's a batteries-included TypeScript backend framework built on [PGlite](https://pglite.dev), [Kysely](https://kysely.dev), [oRPC](https://orpc.unnoq.com), and [Better Auth](https://better-auth.com), exposed through a fluent builder chain that produces a single fetch-compatible HTTP handler — deploy it to a VPS, Coolify, or any host with a persistent filesystem, alongside your frontend app. (Serverless/edge platforms like Vercel and Cloudflare Workers aren't supported yet — see the Roadmap in [SPEC.md](./SPEC.md).)
 
 ## Quick start
 

@@ -3,8 +3,8 @@
 ## Project overview
 
 - Outer is an alternative to Supabase, PocketBase, and Firebase where the user owns 100% of the solution and data.
-- It should be easy to deploy to VPS, Coolify, Vercel, Cloudflare Workers, or similar platforms alongside a frontend app.
-- The entry point is the main Node.js server file that constructs `new Outer(...)`, but agents may also integrate Outer with other backend runtimes such as Hono, H3, Next.js API Routes, or Cloudflare Workers.
+- It should be easy to deploy to VPS, Coolify, or similar persistent-hosting platforms alongside a frontend app. The bundled PGlite database writes to local disk, so it needs a persistent filesystem — serverless/edge platforms (Vercel, Cloudflare Workers) are not yet supported; see SPEC.md's Roadmap.
+- The entry point is the main Node.js server file that constructs `new Outer(...)`, but agents may also integrate Outer with other backend runtimes such as Hono, H3, or Next.js API Routes (any runtime with a persistent filesystem).
 - Only local development behavior is defined here; deployment and production setup are up to the end user.
 
 ## Build and run
@@ -26,9 +26,8 @@
 - Do not modify the core auth-related tables or procedures that come from Better Auth: `user`, `session`, `account`, `verification` and their associated routes.
 - Keep the documented builder order: `.schema()` → `.middleware()` → `.procedure()` → `.build()`.
 - The HTTP server must continue to expose at least:
-  - `GET /` → returns `"Outer"`
-  - `GET /openapi.json` → generated OpenAPI spec
-  - `ALL /api/auth/**` → Better Auth handler
+  - `GET /openapi.json` → generated OpenAPI spec (only when `.openapi()` is enabled)
+  - `ALL /api/auth/**` → Better Auth handler (only when `.auth()` is enabled)
   - `ALL /rpc/**` → oRPC handler, with `/rpc/<dot-separated-name>` routing.
 
 ## Auth and safety

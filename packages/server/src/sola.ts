@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/client";
 import { Kysely } from "kysely";
 
 import { RelationDef, TablesDef } from "./schema";
@@ -492,7 +493,9 @@ function createModel<T>({
       let qb: any = db.selectFrom(tableName).selectAll();
       qb = applyWhere({ qb, where: where as Record<string, any> });
       const row = await qb.executeTakeFirst();
-      if (row == null) throw new Error(`${tableName}: record not found`);
+      if (row == null) {
+        throw new ORPCError("NOT_FOUND", { message: `${tableName}: record not found` });
+      }
       return row as T;
     },
     exists: async (args) => {

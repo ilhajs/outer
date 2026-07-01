@@ -1,5 +1,6 @@
 import { ORPCError } from "@orpc/client";
 import { Builder, AnyProcedure } from "@orpc/server";
+import { NoResultError } from "kysely";
 import { z } from "zod/v4";
 
 import { ColumnDef } from "./schema";
@@ -143,6 +144,34 @@ async function enforce(
   return user;
 }
 
+// ── DB error mapping ────────────────────────────────────────────────────────
+
+/** Postgres SQLSTATE class 23 (integrity constraint violation) codes we recognize. */
+const PG_CONSTRAINT_CODES: Record<string, { code: "CONFLICT" | "BAD_REQUEST"; message: string }> = {
+  "23505": { code: "CONFLICT", message: "A record with this value already exists" },
+  "23503": { code: "CONFLICT", message: "This action conflicts with a related record" },
+  "23502": { code: "BAD_REQUEST", message: "Missing a required field" },
+  "23514": { code: "BAD_REQUEST", message: "Value does not satisfy a constraint" },
+};
+
+/**
+ * Maps low-level DB/Kysely errors to clean `ORPCError`s so clients get proper
+ * status codes (404/409/400) instead of an opaque 500. Anything unrecognized
+ * is rethrown as-is — oRPC already sanitizes uncaught errors to a generic
+ * "Internal Server Error" before they reach the client, so nothing leaks.
+ */
+function mapDbError(error: unknown): never {
+  if (error instanceof NoResultError) {
+    throw new ORPCError("NOT_FOUND", { message: "Record not found", cause: error });
+  }
+  const pgCode = (error as { code?: unknown } | null)?.code;
+  if (typeof pgCode === "string" && pgCode in PG_CONSTRAINT_CODES) {
+    const mapped = PG_CONSTRAINT_CODES[pgCode]!;
+    throw new ORPCError(mapped.code, { message: mapped.message, cause: error });
+  }
+  throw error;
+}
+
 /** Fetches the row when the permission needs it (owner check or custom fn). */
 async function fetchForPermission(
   permission: ResourcePermission | undefined,
@@ -203,11 +232,15 @@ export function buildResourceProcedures(
       const user = await enforce(permissions.create, context);
       const values: Record<string, unknown> = { ...input };
       if (ownerColumn && user) values[ownerColumn] = user.id;
-      return context.db
-        .insertInto(tableName)
-        .values(values)
-        .returningAll()
-        .executeTakeFirstOrThrow();
+      try {
+        return await context.db
+          .insertInto(tableName)
+          .values(values)
+          .returningAll()
+          .executeTakeFirstOrThrow();
+      } catch (error) {
+        mapDbError(error);
+      }
     });
 
   const update = base
@@ -222,12 +255,16 @@ export function buildResourceProcedures(
         input.where[pkName],
       );
       await enforce(permissions.update, context, row, ownerColumn);
-      return context.db
-        .updateTable(tableName)
-        .set(input.data)
-        .where(pkName as any, "=", input.where[pkName])
-        .returningAll()
-        .executeTakeFirstOrThrow();
+      try {
+        return await context.db
+          .updateTable(tableName)
+          .set(input.data)
+          .where(pkName as any, "=", input.where[pkName])
+          .returningAll()
+          .executeTakeFirstOrThrow();
+      } catch (error) {
+        mapDbError(error);
+      }
     });
 
   const del = base
@@ -242,11 +279,15 @@ export function buildResourceProcedures(
         input[pkName],
       );
       await enforce(permissions.delete, context, row, ownerColumn);
-      return context.db
-        .deleteFrom(tableName)
-        .where(pkName as any, "=", input[pkName])
-        .returningAll()
-        .executeTakeFirstOrThrow();
+      try {
+        return await context.db
+          .deleteFrom(tableName)
+          .where(pkName as any, "=", input[pkName])
+          .returningAll()
+          .executeTakeFirstOrThrow();
+      } catch (error) {
+        mapDbError(error);
+      }
     });
 
   return { list, get, create, update, delete: del };
