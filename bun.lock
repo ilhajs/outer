@@ -18,10 +18,9 @@
       "name": "@outerjs/sdk",
       "version": "0.1.0",
       "dependencies": {
-        "@better-auth/core": "^1.6.23",
         "@orpc/client": "2.0.0-beta.11",
         "@orpc/server": "2.0.0-beta.11",
-        "better-auth": "^1.6.23",
+        "better-auth": "1.6.23",
       },
     },
     "packages/server": {
@@ -53,7 +52,7 @@
         "@outerjs/sdk": "https://pkg.pr.new/ilhajs/outer/@outerjs/sdk@main",
         "@outerjs/server": "https://pkg.pr.new/ilhajs/outer/@outerjs/server@main",
         "areia": "^0.1.33",
-        "better-auth": "^1.6.23",
+        "better-auth": "1.6.23",
         "ilha": "^0.8.5",
         "nitro": "^3.0.260610-beta",
         "quando": "^0.1.6",
@@ -550,8 +549,8 @@
 
     "better-call/rou3": ["rou3@0.7.12", "", {}, "sha512-iFE4hLDuloSWcD7mjdCDhx2bKcIsYbtOTpfH5MHHLSKMOUyjqQXTeZVa289uuwEGEKFoE/BAPbhaU4B774nceg=="],
 
-    "nitro-ilha/@outerjs/sdk": ["@outerjs/sdk@https://pkg.pr.new/ilhajs/outer/@outerjs/sdk@main", { "dependencies": { "@better-auth/core": "^1.6.23", "@orpc/client": "^2.0.0-beta.9", "@orpc/server": "^2.0.0-beta.9", "better-auth": "^1.6.23" } }, "sha512-SWmTStjP6LwWYW8l+ad+WZETvtWmKD7GvrlM3gMNFLuVSCj9I6d+CQUzgH2qzcvOk35Ndyk/yIL64oHmmSw5SQ=="],
+    "nitro-ilha/@outerjs/sdk": ["@outerjs/sdk@https://pkg.pr.new/ilhajs/outer/@outerjs/sdk@main", { "dependencies": { "@better-auth/core": "^1.6.23", "@orpc/client": "2.0.0-beta.11", "@orpc/server": "2.0.0-beta.11", "better-auth": "^1.6.23" } }, "sha512-51OoOs0vHR3lUEGYPMZJurOcI2xeoEO3lWnC6WndIu8K4xM/kCy0IaiAI6t3eAVerqwakkywhiRftVhfF+5KJQ=="],
 
-    "nitro-ilha/@outerjs/server": ["@outerjs/server@https://pkg.pr.new/ilhajs/outer/@outerjs/server@main", { "dependencies": { "@electric-sql/pglite": "^0.5.3", "@orpc/client": "^2.0.0-beta.9", "@orpc/openapi": "^2.0.0-beta.9", "@orpc/server": "^2.0.0-beta.9", "@orpc/zod": "^2.0.0-beta.9", "better-auth": "^1.6.23", "kysely": "^0.29.2", "zod": "^4.4.3" }, "peerDependencies": { "h3": "^2.0.1-rc.22" } }, "sha512-PGKcbWdMIwUBCgWgxQe+KovyU/CsyVrb9gckm92N08Mpf7iaA7awnZz3zF+3o8KZyjnhcXyAzgMlF682RxkDBw=="],
+    "nitro-ilha/@outerjs/server": ["@outerjs/server@https://pkg.pr.new/ilhajs/outer/@outerjs/server@main", { "dependencies": { "@electric-sql/pglite": "0.5.3", "@orpc/client": "2.0.0-beta.11", "@orpc/openapi": "2.0.0-beta.11", "@orpc/server": "2.0.0-beta.11", "@orpc/zod": "2.0.0-beta.11", "better-auth": "1.6.23", "kysely": "0.29.2", "zod": "4.4.3" }, "peerDependencies": { "h3": "^2.0.1-rc.22" } }, "sha512-mmQvnvM9dJeb3wl48XkK/3/loxI7ro32jqhumVeuzsTWcLlGcOUi8LZGUKwtPoNVDZa7AxpzoPP7ledcVqrrjA=="],
   }
 }

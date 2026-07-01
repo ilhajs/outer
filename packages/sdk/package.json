@@ -39,9 +39,8 @@
     "test": "bun test --parallel --timeout 20000"
   },
   "dependencies": {
-    "@better-auth/core": "^1.6.23",
     "@orpc/client": "2.0.0-beta.11",
     "@orpc/server": "2.0.0-beta.11",
-    "better-auth": "^1.6.23"
+    "better-auth": "1.6.23"
   }
 }
