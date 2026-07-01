@@ -54,7 +54,10 @@ describe("migrator", () => {
       .table("item", (t) => ({ id: t.serial().primaryKey(), name: t.text(), price: t.integer() }))
       .build();
 
-    const { error, results } = await createMigrator({ db: db2, schemas: [v1, v2] }).migrateToLatest();
+    const { error, results } = await createMigrator({
+      db: db2,
+      schemas: [v1, v2],
+    }).migrateToLatest();
     expect(error).toBeUndefined();
     expect(results).toHaveLength(2);
     expect(await columnExists(db2, "item", "price")).toBe(true);
@@ -102,8 +105,12 @@ describe("migrator", () => {
   });
 
   test("SchemaMigrationProvider returns one migration per schema", async () => {
-    const v1 = schema("1.0.0").table("x", (t) => ({ id: t.text().primaryKey() })).build();
-    const v2 = schema("2.0.0").table("x", (t) => ({ id: t.text().primaryKey(), y: t.text() })).build();
+    const v1 = schema("1.0.0")
+      .table("x", (t) => ({ id: t.text().primaryKey() }))
+      .build();
+    const v2 = schema("2.0.0")
+      .table("x", (t) => ({ id: t.text().primaryKey(), y: t.text() }))
+      .build();
     const migrations = await new SchemaMigrationProvider([v1, v2]).getMigrations();
     expect("1.0.0" in migrations).toBe(true);
     expect("2.0.0" in migrations).toBe(true);

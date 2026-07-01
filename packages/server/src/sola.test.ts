@@ -9,27 +9,34 @@ import { createSola } from "./sola";
 
 const dbSchema = schema("1.0.0")
   .table("author", (t) => ({
-    id:    t.serial().primaryKey(),
-    name:  t.text(),
+    id: t.serial().primaryKey(),
+    name: t.text(),
     email: t.text().unique(),
   }))
   .table("post", (t) => ({
-    id:       t.serial().primaryKey(),
-    title:    t.text(),
-    body:     t.text().nullable(),
+    id: t.serial().primaryKey(),
+    title: t.text(),
+    body: t.text().nullable(),
     authorId: t.integer().references("author", "id"),
   }))
   .table("tag", (t) => ({
-    id:   t.serial().primaryKey(),
+    id: t.serial().primaryKey(),
     name: t.text(),
   }))
   .table("post_tag", (t) => ({
     postId: t.integer().references("post", "id"),
-    tagId:  t.integer().references("tag", "id"),
+    tagId: t.integer().references("tag", "id"),
   }))
-  .relation("author", (rel) => rel.hasMany("post",    { from: "id", to: "authorId" }))
-  .relation("post",   (rel) => rel.belongsTo("author", { from: "authorId", to: "id" }))
-  .relation("post",   (rel) => rel.manyToMany("tag", "post_tag", { from: "id", to: "id", pivotFrom: "postId", pivotTo: "tagId" }))
+  .relation("author", (rel) => rel.hasMany("post", { from: "id", to: "authorId" }))
+  .relation("post", (rel) => rel.belongsTo("author", { from: "authorId", to: "id" }))
+  .relation("post", (rel) =>
+    rel.manyToMany("tag", "post_tag", {
+      from: "id",
+      to: "id",
+      pivotFrom: "postId",
+      pivotTo: "tagId",
+    }),
+  )
   .build();
 
 type DB = typeof dbSchema._db;
@@ -50,10 +57,13 @@ describe("sola — findMany / findFirst / findUnique", () => {
 
   beforeAll(async () => {
     ({ db, query } = await makeFixture());
-    await db.insertInto("author").values([
-      { name: "Alice", email: "alice@x.com" },
-      { name: "Bob",   email: "bob@x.com" },
-    ] as any).execute();
+    await db
+      .insertInto("author")
+      .values([
+        { name: "Alice", email: "alice@x.com" },
+        { name: "Bob", email: "bob@x.com" },
+      ] as any)
+      .execute();
   });
 
   test("findMany returns all rows", async () => {
@@ -93,10 +103,13 @@ describe("sola — count / exists", () => {
 
   beforeAll(async () => {
     ({ db, query } = await makeFixture());
-    await db.insertInto("author").values([
-      { name: "Alice", email: "alice@x.com" },
-      { name: "Bob",   email: "bob@x.com" },
-    ] as any).execute();
+    await db
+      .insertInto("author")
+      .values([
+        { name: "Alice", email: "alice@x.com" },
+        { name: "Bob", email: "bob@x.com" },
+      ] as any)
+      .execute();
   });
 
   test("count with no filter", async () => {
@@ -124,11 +137,14 @@ describe("sola — where operators", () => {
 
   beforeAll(async () => {
     ({ db, query } = await makeFixture());
-    await db.insertInto("author").values([
-      { name: "Alice", email: "alice@acme.com" },
-      { name: "Bob",   email: "bob@other.com" },
-      { name: "Carol", email: "carol@acme.com" },
-    ] as any).execute();
+    await db
+      .insertInto("author")
+      .values([
+        { name: "Alice", email: "alice@acme.com" },
+        { name: "Bob", email: "bob@other.com" },
+        { name: "Carol", email: "carol@acme.com" },
+      ] as any)
+      .execute();
   });
 
   const find = (where: any) => query.author.findMany({ where });
@@ -176,7 +192,9 @@ describe("sola — where operators", () => {
   });
 
   test("AND explicit array", async () => {
-    expect(await find({ AND: [{ name: "Alice" }, { email: { contains: "acme" } }] })).toHaveLength(1);
+    expect(await find({ AND: [{ name: "Alice" }, { email: { contains: "acme" } }] })).toHaveLength(
+      1,
+    );
   });
 
   test("NOT — fixed: was calling nonexistent qb.not()", async () => {
@@ -186,20 +204,33 @@ describe("sola — where operators", () => {
   });
 
   test("OR with nested field filter operator", async () => {
-    const rows = await find({ OR: [
-      { email: { contains: "acme.com" } },
-      { name: { equals: "Bob" } },
-    ]});
+    const rows = await find({
+      OR: [{ email: { contains: "acme.com" } }, { name: { equals: "Bob" } }],
+    });
     expect(rows).toHaveLength(3);
   });
 
   test("isNull / isNull:false on nullable column", async () => {
-    const [a] = await db.insertInto("author").values({ name: "IsNullTest", email: "isnull@t.com" } as any).returningAll().execute();
+    const [a] = await db
+      .insertInto("author")
+      .values({ name: "IsNullTest", email: "isnull@t.com" } as any)
+      .returningAll()
+      .execute();
     const authorId = (a as any).id as number;
-    await db.insertInto("post").values({ title: "P1", authorId, body: null } as any).execute();
-    await db.insertInto("post").values({ title: "P2", authorId, body: "text" } as any).execute();
-    expect(await query.post.findMany({ where: { authorId, body: { isNull: true } } })).toHaveLength(1);
-    expect(await query.post.findMany({ where: { authorId, body: { isNull: false } } })).toHaveLength(1);
+    await db
+      .insertInto("post")
+      .values({ title: "P1", authorId, body: null } as any)
+      .execute();
+    await db
+      .insertInto("post")
+      .values({ title: "P2", authorId, body: "text" } as any)
+      .execute();
+    expect(await query.post.findMany({ where: { authorId, body: { isNull: true } } })).toHaveLength(
+      1,
+    );
+    expect(
+      await query.post.findMany({ where: { authorId, body: { isNull: false } } }),
+    ).toHaveLength(1);
   });
 });
 
@@ -212,7 +243,10 @@ describe("sola — paginate", () => {
     const fix = await makeFixture();
     query = fix.query;
     for (let i = 1; i <= 10; i++) {
-      await fix.db.insertInto("author").values({ name: `Author ${i}`, email: `a${i}@x.com` } as any).execute();
+      await fix.db
+        .insertInto("author")
+        .values({ name: `Author ${i}`, email: `a${i}@x.com` } as any)
+        .execute();
     }
   });
 
@@ -240,7 +274,11 @@ describe("sola — paginate", () => {
   test("cursor: forward pages have no overlap", async () => {
     const p1 = await query.author.paginate({ orderBy: [{ id: "asc" }], take: 4 });
     expect(p1.pagination.endCursor).toBeTruthy();
-    const p2 = await query.author.paginate({ orderBy: [{ id: "asc" }], take: 4, after: p1.pagination.endCursor! });
+    const p2 = await query.author.paginate({
+      orderBy: [{ id: "asc" }],
+      take: 4,
+      after: p1.pagination.endCursor!,
+    });
     const ids1 = new Set(p1.data.map((r) => (r as any).id));
     for (const r of p2.data) expect(ids1.has((r as any).id)).toBe(false);
   });
@@ -253,17 +291,31 @@ describe("sola — paginate", () => {
 
   test("cursor: multi-column keyset covers all rows without duplicates", async () => {
     const p1 = await query.author.paginate({ orderBy: [{ name: "desc" }, { id: "asc" }], take: 5 });
-    const p2 = await query.author.paginate({ orderBy: [{ name: "desc" }, { id: "asc" }], take: 5, after: p1.pagination.endCursor! });
+    const p2 = await query.author.paginate({
+      orderBy: [{ name: "desc" }, { id: "asc" }],
+      take: 5,
+      after: p1.pagination.endCursor!,
+    });
     const all = [...p1.data, ...p2.data];
     expect(all).toHaveLength(10);
     expect(new Set(all.map((r) => (r as any).id)).size).toBe(10);
   });
 
   test("cursor: backward (before) returns same rows as forward page", async () => {
-    const fwd  = await query.author.paginate({ orderBy: [{ id: "asc" }], take: 5 });
-    const p2   = await query.author.paginate({ orderBy: [{ id: "asc" }], take: 5, after: fwd.pagination.endCursor! });
-    const back = await query.author.paginate({ orderBy: [{ id: "asc" }], take: 5, before: p2.pagination.startCursor! });
-    expect(fwd.data.map((r) => (r as any).id).sort()).toEqual(back.data.map((r) => (r as any).id).sort());
+    const fwd = await query.author.paginate({ orderBy: [{ id: "asc" }], take: 5 });
+    const p2 = await query.author.paginate({
+      orderBy: [{ id: "asc" }],
+      take: 5,
+      after: fwd.pagination.endCursor!,
+    });
+    const back = await query.author.paginate({
+      orderBy: [{ id: "asc" }],
+      take: 5,
+      before: p2.pagination.startCursor!,
+    });
+    expect(fwd.data.map((r) => (r as any).id).sort()).toEqual(
+      back.data.map((r) => (r as any).id).sort(),
+    );
   });
 });
 
@@ -277,17 +329,39 @@ describe("sola — include & relations", () => {
 
   beforeAll(async () => {
     ({ db, query } = await makeFixture());
-    const [a]  = await db.insertInto("author").values({ name: "Alice", email: "alice@x.com" } as any).returningAll().execute();
-    authorId   = (a as any).id as number;
-    const [p1] = await db.insertInto("post").values({ title: "Post 1", authorId } as any).returningAll().execute();
-    postId     = (p1 as any).id as number;
-    await db.insertInto("post").values({ title: "Post 2", authorId } as any).execute();
-    const [t1] = await db.insertInto("tag").values({ name: "ts" } as any).returningAll().execute();
-    const [t2] = await db.insertInto("tag").values({ name: "js" } as any).returningAll().execute();
-    await db.insertInto("post_tag").values([
-      { postId, tagId: (t1 as any).id as number },
-      { postId, tagId: (t2 as any).id as number },
-    ] as any).execute();
+    const [a] = await db
+      .insertInto("author")
+      .values({ name: "Alice", email: "alice@x.com" } as any)
+      .returningAll()
+      .execute();
+    authorId = (a as any).id as number;
+    const [p1] = await db
+      .insertInto("post")
+      .values({ title: "Post 1", authorId } as any)
+      .returningAll()
+      .execute();
+    postId = (p1 as any).id as number;
+    await db
+      .insertInto("post")
+      .values({ title: "Post 2", authorId } as any)
+      .execute();
+    const [t1] = await db
+      .insertInto("tag")
+      .values({ name: "ts" } as any)
+      .returningAll()
+      .execute();
+    const [t2] = await db
+      .insertInto("tag")
+      .values({ name: "js" } as any)
+      .returningAll()
+      .execute();
+    await db
+      .insertInto("post_tag")
+      .values([
+        { postId, tagId: (t1 as any).id as number },
+        { postId, tagId: (t2 as any).id as number },
+      ] as any)
+      .execute();
   });
 
   test("hasMany: author includes posts", async () => {

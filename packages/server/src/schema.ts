@@ -35,11 +35,21 @@ function makeCol<T extends SQLType>(type: T): ColumnDef<T, false> {
     _unique: false,
     _default: null,
     _references: null,
-    nullable() { return { ...this, _nullable: true as const } as unknown as ColumnDef<T, true>; },
-    primaryKey() { return { ...this, _primaryKey: true }; },
-    unique() { return { ...this, _unique: true }; },
-    default(expr: string) { return { ...this, _default: expr }; },
-    references(table: string, column: string) { return { ...this, _references: { table, column } }; },
+    nullable() {
+      return { ...this, _nullable: true as const } as unknown as ColumnDef<T, true>;
+    },
+    primaryKey() {
+      return { ...this, _primaryKey: true };
+    },
+    unique() {
+      return { ...this, _unique: true };
+    },
+    default(expr: string) {
+      return { ...this, _default: expr };
+    },
+    references(table: string, column: string) {
+      return { ...this, _references: { table, column } };
+    },
   };
   return def;
 }
@@ -87,15 +97,46 @@ type RelationChain = {
   hasMany(to: string, cols: { from: string; to: string }): RelationDef;
   hasOne(to: string, cols: { from: string; to: string }): RelationDef;
   belongsTo(to: string, cols: { from: string; to: string }): RelationDef;
-  manyToMany(to: string, via: string, cols: { from: string; to: string; pivotFrom: string; pivotTo: string }): RelationDef;
+  manyToMany(
+    to: string,
+    via: string,
+    cols: { from: string; to: string; pivotFrom: string; pivotTo: string },
+  ): RelationDef;
 };
 
 function makeRelChain(fromTable: string): RelationChain {
   return {
-    hasMany: (to, cols) => ({ kind: "hasMany", fromTable, toTable: to, fromCol: cols.from, toCol: cols.to }),
-    hasOne: (to, cols) => ({ kind: "hasOne", fromTable, toTable: to, fromCol: cols.from, toCol: cols.to }),
-    belongsTo: (to, cols) => ({ kind: "belongsTo", fromTable, toTable: to, fromCol: cols.from, toCol: cols.to }),
-    manyToMany: (to, via, cols) => ({ kind: "manyToMany", fromTable, toTable: to, fromCol: cols.from, toCol: cols.to, pivotTable: via, pivotFromCol: cols.pivotFrom, pivotToCol: cols.pivotTo }),
+    hasMany: (to, cols) => ({
+      kind: "hasMany",
+      fromTable,
+      toTable: to,
+      fromCol: cols.from,
+      toCol: cols.to,
+    }),
+    hasOne: (to, cols) => ({
+      kind: "hasOne",
+      fromTable,
+      toTable: to,
+      fromCol: cols.from,
+      toCol: cols.to,
+    }),
+    belongsTo: (to, cols) => ({
+      kind: "belongsTo",
+      fromTable,
+      toTable: to,
+      fromCol: cols.from,
+      toCol: cols.to,
+    }),
+    manyToMany: (to, via, cols) => ({
+      kind: "manyToMany",
+      fromTable,
+      toTable: to,
+      fromCol: cols.from,
+      toCol: cols.to,
+      pivotTable: via,
+      pivotFromCol: cols.pivotFrom,
+      pivotToCol: cols.pivotTo,
+    }),
   };
 }
 
@@ -104,9 +145,19 @@ function makeRelChain(fromTable: string): RelationChain {
 export type TablesDef = Record<string, Record<string, ColumnDef>>;
 
 // serial columns are DB-generated and optional in both insert and select contexts
-type InferRow<T extends Record<string, ColumnDef>> =
-  { [K in keyof T as T[K]["_type"] extends "serial" ? never : T[K]["_nullable"] extends false ? K : never]: SQLTypeMap[T[K]["_type"]] } &
-  { [K in keyof T as T[K]["_type"] extends "serial" ? K : T[K]["_nullable"] extends true ? K : never]?: SQLTypeMap[T[K]["_type"]] | null };
+type InferRow<T extends Record<string, ColumnDef>> = {
+  [K in keyof T as T[K]["_type"] extends "serial"
+    ? never
+    : T[K]["_nullable"] extends false
+      ? K
+      : never]: SQLTypeMap[T[K]["_type"]];
+} & {
+  [K in keyof T as T[K]["_type"] extends "serial"
+    ? K
+    : T[K]["_nullable"] extends true
+      ? K
+      : never]?: SQLTypeMap[T[K]["_type"]] | null;
+};
 
 export type InferDB<T extends TablesDef> = {
   [Table in keyof T]: InferRow<T[Table]>;

@@ -3,8 +3,8 @@ import { Outer, schema } from "./index";
 
 const s = schema("1.0.0")
   .table("post", (t) => ({
-    id:     t.serial().primaryKey(),
-    title:  t.text(),
+    id: t.serial().primaryKey(),
+    title: t.text(),
     userId: t.text().nullable(),
     status: t.text().default("'draft'"),
   }))
@@ -19,12 +19,14 @@ function makeApp(opts?: Parameters<ReturnType<typeof Outer.prototype.schema>["re
 }
 
 async function rpc(app: Awaited<ReturnType<typeof makeApp>>, action: string, input?: unknown) {
-  const res = await app.handle(new Request(`http://localhost/rpc/post/${action}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ json: input ?? {} }),
-  }));
-  const body = await res.json() as any;
+  const res = await app.handle(
+    new Request(`http://localhost/rpc/post/${action}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ json: input ?? {} }),
+    }),
+  );
+  const body = (await res.json()) as any;
   return { status: res.status, output: body.json };
 }
 
@@ -66,7 +68,10 @@ describe("resource — CRUD", () => {
 
   test("update changes the row", async () => {
     const { output: created } = await rpc(app, "create", { title: "Old title" });
-    const { status, output } = await rpc(app, "update", { where: { id: created.id }, data: { title: "New title" } });
+    const { status, output } = await rpc(app, "update", {
+      where: { id: created.id },
+      data: { title: "New title" },
+    });
     expect(status).toBe(200);
     expect(output.title).toBe("New title");
   });
@@ -94,8 +99,8 @@ describe("resource — permissions", () => {
   beforeAll(async () => {
     app = makeApp({
       permissions: {
-        list:   "public",
-        get:    "public",
+        list: "public",
+        get: "public",
         create: "authenticated",
         update: "authenticated",
         delete: "authenticated",
@@ -131,7 +136,7 @@ describe("resource — custom permission function", () => {
     app = makeApp({
       permissions: {
         list: () => false,
-        get:  () => true,
+        get: () => true,
       },
     });
     await app.migrator.migrateToLatest();

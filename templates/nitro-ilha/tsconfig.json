@@ -6,6 +6,6 @@
     "jsxImportSource": "ilha",
     "paths": {
       "$lib/*": ["./src/lib/*"]
-    },
+    }
   }
 }

@@ -25,6 +25,29 @@ export type OuterRpcContext<TDB = any> = {
   auth?: OuterAuth;
 };
 
+/** Extracts the oRPC router type from an `Outer` or `BuiltOuter` instance. */
+export type InferRouter<T> = T extends { router: infer R } ? R : never;
+
+/** Turns dot-notation `"user.me"` into the nested router shape `{ user: { me: TProc } }`. */
+type NestRoute<TPath extends string, TProc> = TPath extends `${infer Head}.${infer Rest}`
+  ? { [K in Head]: NestRoute<Rest, TProc> }
+  : { [K in TPath]: TProc };
+
+/** Deep-merges two router shapes, matching the runtime `deepMerge` behavior. */
+type MergeRouters<A, B> = {
+  [K in keyof A | keyof B]: K extends keyof B
+    ? K extends keyof A
+      ? A[K] extends AnyProcedure
+        ? B[K]
+        : B[K] extends AnyProcedure
+          ? B[K]
+          : MergeRouters<A[K], B[K]>
+      : B[K]
+    : K extends keyof A
+      ? A[K]
+      : never;
+};
+
 export type AuthConfig = Omit<BetterAuthOptions, "database" | "baseURL"> & {
   /** Secret used by Better Auth to sign/encrypt sessions, cookies, and tokens. */
   secret: string;
@@ -61,8 +84,12 @@ function deepMerge({
   return result;
 }
 
-export class Outer<TContext extends OuterRpcContext<TDB> = OuterRpcContext, TDB = any> {
-  private pendingRouter: Router<OuterRpcContext<TDB>>;
+export class Outer<
+  TContext extends OuterRpcContext<TDB> = OuterRpcContext,
+  TDB = any,
+  TRouter extends Record<string, any> = Record<never, never>,
+> {
+  private pendingRouter: TRouter;
   private readonly resources: OuterResources;
   private readonly pendingBase: Builder<TContext & object, Record<never, never>>;
   private readonly schemas: SchemaResult<any>[];
@@ -73,14 +100,14 @@ export class Outer<TContext extends OuterRpcContext<TDB> = OuterRpcContext, TDB 
     params: OuterParams,
     _resources: OuterResources,
     _base: Builder<TContext & object, Record<never, never>>,
-    _router: Router<OuterRpcContext<TDB>>,
+    _router: TRouter,
     _schemas: SchemaResult<any>[],
   );
   constructor(
     params: OuterParams = {},
     _resources?: OuterResources,
     _base?: Builder<TContext & object, Record<never, never>>,
-    _router?: Router<OuterRpcContext<TDB>>,
+    _router?: TRouter,
     _schemas?: SchemaResult<any>[],
   ) {
     this.name = params.name;
@@ -88,7 +115,7 @@ export class Outer<TContext extends OuterRpcContext<TDB> = OuterRpcContext, TDB 
       // Clone path: copy resources so mutations (e.g. .storage()) don't bleed across instances
       this.resources = { ..._resources };
       this.pendingBase = _base;
-      this.pendingRouter = _router ?? {};
+      this.pendingRouter = _router ?? ({} as TRouter);
       this.schemas = _schemas ?? [];
     } else {
       const dataDir = params.db?.dataDir ?? path.join(process.cwd(), ".outer", "pglite");
@@ -102,67 +129,79 @@ export class Outer<TContext extends OuterRpcContext<TDB> = OuterRpcContext, TDB 
         TContext & object,
         Record<never, never>
       >;
-      this.pendingRouter = {};
+      this.pendingRouter = {} as TRouter;
       this.schemas = [];
     }
   }
 
   /** Enables Better Auth and mounts `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain. Narrows `context.auth` to non-null. */
-  auth(config: AuthConfig): Outer<TContext & { auth: OuterAuth }, TDB> {
+  auth(config: AuthConfig): Outer<TContext & { auth: OuterAuth }, TDB, TRouter> {
     this.resources.auth = betterAuth({
       ...config,
       baseURL: this.resources.baseUrl,
       database: { type: "postgres" as const, dialect: this.resources.dialect },
     });
-    return new Outer<TContext & { auth: OuterAuth }, TDB>(
+    return new Outer<TContext & { auth: OuterAuth }, TDB, TRouter>(
       { ...(this.name && { name: this.name }) },
       this.resources,
       this.pendingBase as unknown as Builder<
         (TContext & { auth: OuterAuth }) & object,
         Record<never, never>
       >,
-      this.pendingRouter as unknown as Router<OuterRpcContext<TDB>>,
+      this.pendingRouter,
       this.schemas,
     );
   }
 
-  schema<T extends TablesDef>(s: SchemaResult<T>): Outer<OuterRpcContext<InferDB<T>>, InferDB<T>> {
-    return new Outer<OuterRpcContext<InferDB<T>>, InferDB<T>>(
+  schema<T extends TablesDef>(
+    s: SchemaResult<T>,
+  ): Outer<OuterRpcContext<InferDB<T>>, InferDB<T>, TRouter> {
+    return new Outer<OuterRpcContext<InferDB<T>>, InferDB<T>, TRouter>(
       { ...(this.name && { name: this.name }) },
       this.resources,
       os.$context<OuterRpcContext<InferDB<T>>>() as unknown as Builder<
         OuterRpcContext<InferDB<T>> & object,
         Record<never, never>
       >,
-      this.pendingRouter as unknown as Router<OuterRpcContext<InferDB<T>>>,
+      this.pendingRouter,
       [...this.schemas, s],
     );
   }
 
   middleware<TOutContext extends Record<string, unknown>>(
     mw: Middleware<TContext & object, TOutContext, unknown, unknown, Record<never, never>>,
-  ): Outer<TContext & TOutContext, TDB> {
-    return new Outer<TContext & TOutContext, TDB>(
+  ): Outer<TContext & TOutContext, TDB, TRouter> {
+    return new Outer<TContext & TOutContext, TDB, TRouter>(
       { ...(this.name && { name: this.name }) },
       this.resources,
       this.pendingBase.use(mw as any) as unknown as Builder<
         TContext & TOutContext & object,
         Record<never, never>
       >,
-      this.pendingRouter as unknown as Router<OuterRpcContext<TDB>>,
+      this.pendingRouter,
       this.schemas,
     );
   }
 
-  procedure(
-    name: string,
-    cb: (base: Builder<TContext & object, Record<never, never>>) => AnyProcedure,
-  ): this {
+  procedure<TName extends string, TProc extends AnyProcedure>(
+    name: TName,
+    cb: (base: Builder<TContext & object, Record<never, never>>) => TProc,
+  ): Outer<TContext, TDB, MergeRouters<TRouter, NestRoute<TName, TProc>>> {
     this.addToRouter(name, cb(this.pendingBase));
-    return this;
+    return this as unknown as Outer<TContext, TDB, MergeRouters<TRouter, NestRoute<TName, TProc>>>;
   }
 
-  resource(name: keyof TDB & string, options?: ResourceOptions): this {
+  resource<TName extends keyof TDB & string>(
+    name: TName,
+    options?: ResourceOptions,
+  ): Outer<
+    TContext,
+    TDB,
+    MergeRouters<
+      TRouter,
+      NestRoute<TName, Record<"list" | "get" | "create" | "update" | "delete", AnyProcedure>>
+    >
+  > {
     const cols = this.schemas.at(-1)?.tables[name] as Record<string, ColumnDef> | undefined;
     if (!cols) throw new Error(`Table "${name}" not found in schema`);
     for (const [action, proc] of Object.entries(
@@ -170,18 +209,27 @@ export class Outer<TContext extends OuterRpcContext<TDB> = OuterRpcContext, TDB 
     )) {
       this.addToRouter(`${name}.${action}`, proc);
     }
-    return this;
+    return this as unknown as Outer<
+      TContext,
+      TDB,
+      MergeRouters<
+        TRouter,
+        NestRoute<TName, Record<"list" | "get" | "create" | "update" | "delete", AnyProcedure>>
+      >
+    >;
   }
 
-  /** The internal oRPC router — use `typeof instance.router` for type-safe client generation. */
-  get router(): Router<OuterRpcContext<TDB>> {
+  /** The internal oRPC router — also available on `BuiltOuter` after `.build()`. Use `InferRouter<typeof instance>` for type-safe client generation. */
+  get router(): TRouter {
     return this.pendingRouter;
   }
 
-  build(): BuiltOuter {
+  build(): BuiltOuter<TRouter> {
     const { db, auth } = this.resources;
 
-    const router: Router<OuterRpcContext<TDB>> = this.pendingRouter;
+    const router: Router<OuterRpcContext<TDB>> = this.pendingRouter as unknown as Router<
+      OuterRpcContext<TDB>
+    >;
 
     const latestSchema = this.schemas.at(-1);
     const typedDb = Object.assign(db as Kysely<TDB>, {
@@ -200,18 +248,17 @@ export class Outer<TContext extends OuterRpcContext<TDB> = OuterRpcContext, TDB 
       ],
     });
 
-    let server = new H3()
-      .get("/openapi.json", async () => {
-        const generator = new OpenAPIGenerator({ converters: [new ZodToJsonSchemaConverter()] });
-        return generator.generate(router, {
-          base: {
-            info: {
-              title: this.name ?? "Outer API",
-              version: latestSchema?.version ?? "0.0.0",
-            },
+    let server = new H3().get("/openapi.json", async () => {
+      const generator = new OpenAPIGenerator({ converters: [new ZodToJsonSchemaConverter()] });
+      return generator.generate(router, {
+        base: {
+          info: {
+            title: this.name ?? "Outer API",
+            version: latestSchema?.version ?? "0.0.0",
           },
-        });
+        },
       });
+    });
 
     if (auth) {
       server = server.all("/api/auth/**", (event) => auth.handler(event.req));
@@ -225,30 +272,29 @@ export class Outer<TContext extends OuterRpcContext<TDB> = OuterRpcContext, TDB 
       return response;
     });
 
-    return new BuiltOuter(server, db, this.schemas);
+    return new BuiltOuter(server, db, this.schemas, this.pendingRouter);
   }
 
   private addToRouter(dotName: string, proc: AnyProcedure): void {
     const nested = dotName
       .split(".")
-      .reduceRight<Router<OuterRpcContext<TDB>> | AnyProcedure>(
-        (acc, key) => ({ [key]: acc }),
-        proc,
-      );
+      .reduceRight<Record<string, any> | AnyProcedure>((acc, key) => ({ [key]: acc }), proc);
     this.pendingRouter = deepMerge({
-      a: this.pendingRouter,
-      b: nested as Router<OuterRpcContext<TDB>>,
-    });
+      a: this.pendingRouter as Record<string, any>,
+      b: nested as Record<string, any>,
+    }) as TRouter;
   }
 }
 
-export class BuiltOuter {
+export class BuiltOuter<TRouter extends Record<string, any> = Router<any>> {
   readonly migrator: ReturnType<typeof createMigrator>;
+  readonly router: TRouter;
   private readonly server: H3;
 
-  constructor(server: H3, db: Kysely<any>, schemas: SchemaResult<any>[]) {
+  constructor(server: H3, db: Kysely<any>, schemas: SchemaResult<any>[], router: TRouter) {
     this.server = server;
     this.migrator = createMigrator({ db, schemas });
+    this.router = router;
   }
 
   async handle(request: Request): Promise<Response> {

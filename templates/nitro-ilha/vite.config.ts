@@ -12,7 +12,7 @@ export default defineConfig({
   nitro: {
     serverDir: "./src",
     runtimeConfig: {
-      authSecret: ""
+      authSecret: "",
     },
     experimental: {
       tasks: true,
@@ -20,7 +20,7 @@ export default defineConfig({
     storage: {
       fs: {
         driver: "fs-lite",
-        base: "./.outer/data"
+        base: "./.outer/data",
       },
     },
   },

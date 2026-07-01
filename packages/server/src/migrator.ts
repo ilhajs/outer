@@ -3,33 +3,40 @@ import { Migrator, MigrationProvider, Migration } from "kysely/migration";
 import { SchemaResult, ColumnDef, TablesDef } from "./schema";
 
 const SQL_TYPE: Record<string, any> = {
-  serial:    "serial",
-  text:      "text",
-  varchar:   "varchar",
-  integer:   "integer",
-  boolean:   "boolean",
+  serial: "serial",
+  text: "text",
+  varchar: "varchar",
+  integer: "integer",
+  boolean: "boolean",
   timestamp: "timestamptz",
-  jsonb:     "jsonb",
-  uuid:      "uuid",
+  jsonb: "jsonb",
+  uuid: "uuid",
 };
 
 function applyCol({ col, builder }: { col: ColumnDef; builder: any }): any {
-  if (col._primaryKey)       builder = builder.primaryKey();
-  if (!col._nullable)        builder = builder.notNull();
-  if (col._unique)           builder = builder.unique();
+  if (col._primaryKey) builder = builder.primaryKey();
+  if (!col._nullable) builder = builder.notNull();
+  if (col._unique) builder = builder.unique();
   if (col._default !== null) builder = builder.defaultTo(sql.raw(col._default));
-  if (col._references)       builder = builder.references(`${col._references.table}.${col._references.column}`);
+  if (col._references)
+    builder = builder.references(`${col._references.table}.${col._references.column}`);
   return builder;
 }
 
-async function createTable({ db, tableName, cols }: {
+async function createTable({
+  db,
+  tableName,
+  cols,
+}: {
   db: Kysely<any>;
   tableName: string;
   cols: Record<string, ColumnDef>;
 }): Promise<void> {
   let builder = db.schema.createTable(tableName);
   for (const [colName, col] of Object.entries(cols)) {
-    builder = builder.addColumn(colName, SQL_TYPE[col._type]!, (b: any) => applyCol({ col, builder: b }));
+    builder = builder.addColumn(colName, SQL_TYPE[col._type]!, (b: any) =>
+      applyCol({ col, builder: b }),
+    );
   }
   await builder.execute();
 }
@@ -38,7 +45,10 @@ async function dropTable({ db, tableName }: { db: Kysely<any>; tableName: string
   await db.schema.dropTable(tableName).ifExists().cascade().execute();
 }
 
-function buildMigration({ current, previous }: {
+function buildMigration({
+  current,
+  previous,
+}: {
   current: SchemaResult<any>;
   previous: SchemaResult<any> | null;
 }): Migration {
@@ -106,13 +116,22 @@ export class SchemaMigrationProvider implements MigrationProvider {
     const sorted = [...this.schemas].sort((a, b) => a.version.localeCompare(b.version));
     const migrations: Record<string, Migration> = {};
     for (let i = 0; i < sorted.length; i++) {
-      migrations[sorted[i]!.version] = buildMigration({ current: sorted[i]!, previous: sorted[i - 1] ?? null });
+      migrations[sorted[i]!.version] = buildMigration({
+        current: sorted[i]!,
+        previous: sorted[i - 1] ?? null,
+      });
     }
     return migrations;
   }
 }
 
-export function createMigrator({ db, schemas }: { db: Kysely<any>; schemas: SchemaResult<any>[] }): Migrator {
+export function createMigrator({
+  db,
+  schemas,
+}: {
+  db: Kysely<any>;
+  schemas: SchemaResult<any>[];
+}): Migrator {
   return new Migrator({
     db,
     provider: new SchemaMigrationProvider(schemas),

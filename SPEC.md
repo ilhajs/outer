@@ -25,11 +25,11 @@ Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`
 
 ## `new Outer(params?)`
 
-| Param                        | Type                              | Default                      | Description                                              |
-| ---------------------------- | --------------------------------- | ---------------------------- | -------------------------------------------------------- |
-| `name`                       | `string`                          | `"Outer API"`                | API title in OpenAPI spec                                |
-| `baseUrl`                    | `string`                          | —                            | Passed to Better Auth as `baseURL` when `.auth()` is called |
-| `db.dataDir`                 | `string`                          | `<cwd>/.outer/pglite`        | PGlite data directory (created if missing)               |
+| Param        | Type     | Default               | Description                                                 |
+| ------------ | -------- | --------------------- | ----------------------------------------------------------- |
+| `name`       | `string` | `"Outer API"`         | API title in OpenAPI spec                                   |
+| `baseUrl`    | `string` | —                     | Passed to Better Auth as `baseURL` when `.auth()` is called |
+| `db.dataDir` | `string` | `<cwd>/.outer/pglite` | PGlite data directory (created if missing)                  |
 
 ---
 
@@ -83,24 +83,24 @@ Auto-generates five CRUD procedures for a schema table. `name` must match a tabl
 // Registers: post.list, post.get, post.create, post.update, post.delete
 ```
 
-| Procedure        | Input                              | Output         | Description                         |
-| ---------------- | ---------------------------------- | -------------- | ----------------------------------- |
-| `{name}.list`    | —                                  | `Row[]`        | `SELECT *`                          |
-| `{name}.get`     | `{ <pk>: ... }`                    | `Row \| null`  | Fetch by primary key                |
-| `{name}.create`  | Row minus serial PK, defaults, and `ownerColumn` | `Row` | `INSERT ... RETURNING *`  |
-| `{name}.update`  | `{ where: { <pk> }, data: Partial<createInput> }` | `Row` | `UPDATE ... RETURNING *`  |
-| `{name}.delete`  | `{ <pk>: ... }`                    | `Row`          | `DELETE ... RETURNING *`            |
+| Procedure       | Input                                             | Output        | Description              |
+| --------------- | ------------------------------------------------- | ------------- | ------------------------ |
+| `{name}.list`   | —                                                 | `Row[]`       | `SELECT *`               |
+| `{name}.get`    | `{ <pk>: ... }`                                   | `Row \| null` | Fetch by primary key     |
+| `{name}.create` | Row minus serial PK, defaults, and `ownerColumn`  | `Row`         | `INSERT ... RETURNING *` |
+| `{name}.update` | `{ where: { <pk> }, data: Partial<createInput> }` | `Row`         | `UPDATE ... RETURNING *` |
+| `{name}.delete` | `{ <pk>: ... }`                                   | `Row`         | `DELETE ... RETURNING *` |
 
 Input types are derived from column definitions at build time. `serial` primary key columns, columns with `.default()`, and `ownerColumn` are omitted from create input.
 
 ### Permissions
 
-| Value           | Description                                                                          |
-| --------------- | ------------------------------------------------------------------------------------ |
-| `"public"`      | No restriction (default)                                                             |
-| `"authenticated"` | User must be signed in — calls `context.auth.api.getSession()` internally          |
-| `"admin"`       | User must have `role === "admin"` (requires Better Auth admin plugin)                |
-| `"owner"`       | User must own the row — requires `ownerColumn`; not valid for `list` or `create`    |
+| Value             | Description                                                                      |
+| ----------------- | -------------------------------------------------------------------------------- |
+| `"public"`        | No restriction (default)                                                         |
+| `"authenticated"` | User must be signed in — calls `context.auth.api.getSession()` internally        |
+| `"admin"`         | User must have `role === "admin"` (requires Better Auth admin plugin)            |
+| `"owner"`         | User must own the row — requires `ownerColumn`; not valid for `list` or `create` |
 
 When `create` is `"authenticated"` and `ownerColumn` is set, the current user's ID is automatically injected into the insert — no need to pass it in the request.
 
@@ -144,12 +144,12 @@ Seals the router and constructs the HTTP server. Returns a `BuiltOuter` with:
 
 ## HTTP routes
 
-| Method | Path            | Handler                                        |
-| ------ | --------------- | ---------------------------------------------- |
-| `GET`  | `/`             | Returns `"Outer"`                              |
-| `GET`  | `/openapi.json` | OpenAPI 3.x spec (title + version from schema) |
+| Method | Path            | Handler                                                      |
+| ------ | --------------- | ------------------------------------------------------------ |
+| `GET`  | `/`             | Returns `"Outer"`                                            |
+| `GET`  | `/openapi.json` | OpenAPI 3.x spec (title + version from schema)               |
 | `ALL`  | `/api/auth/**`  | Better Auth handler (only mounted when `.auth()` was called) |
-| `ALL`  | `/rpc/**`       | oRPC handler (prefix `/rpc`)                   |
+| `ALL`  | `/rpc/**`       | oRPC handler (prefix `/rpc`)                                 |
 
 ---
 
@@ -400,20 +400,29 @@ type OuterRpcContext<TDB> = {
 
 ## `outer.router` (type extraction)
 
-The `Outer` instance exposes a `router` getter that returns the internal oRPC router. Use `typeof outer.router` for type-safe client generation:
+Both the `Outer` instance and `BuiltOuter` (the return value of `.build()`) expose a `router` property with the internal oRPC router type. Use the exported `InferRouter<T>` helper to extract it from either:
+
+```ts
+// src/index.ts
+export const outer = new Outer(...)
+  .schema(v1_0)
+  .procedure("user.me", (base) => base.handler(...))
+  .build();
+```
 
 ```ts
 // outer.types.ts
 import type { RouterClient } from "@orpc/server";
+import type { InferRouter } from "@outerjs/server";
 import type { outer } from "./src/index.js";
 
-export type AppRouter = typeof outer.router;
-export type AppClient = RouterClient<AppRouter>;
+export type Router = InferRouter<typeof outer>;
+export type AppClient = RouterClient<Router>;
 ```
 
-The entry file must export the `outer` instance as a named export (e.g. `export const outer = new Outer(...).build()`). Calling `.build()` returns a `BuiltOuter`; for type extraction call `.router` before `.build()`, or export the pre-build instance.
-
 Outer's core has no CLI — write the file above by hand, or generate it with your own script if you want automation.
+
+`.procedure()` fully infers each procedure's `.input()`/`.output()` types into the router, so `client.foo(...)`, `client.user.me(...)`, etc. are properly typed on `RouterClient<Router>`. `.resource()` currently registers its five CRUD procedures (`list`/`get`/`create`/`update`/`delete`) as loosely-typed `AnyProcedure` in the router type — their runtime behavior and validation are fully typed internally (via Zod schemas derived from the table's columns), but that derivation isn't yet mirrored at the type level, so client calls into resource-generated procedures aren't strongly typed. Use `.procedure()` directly if you need full type safety on a given endpoint.
 
 ---
 

@@ -1,15 +1,13 @@
 {
-  "name": "@outerjs/server",
+  "name": "@outerjs/sdk",
   "version": "0.1.0",
-  "description": "The tiny backend you never knew you needed",
+  "description": "Type-safe client for Outer servers — merges an oRPC client with an opt-in Better Auth client",
   "keywords": [
     "authentication",
-    "backend",
     "better-auth",
-    "kysely",
+    "client",
     "orpc",
-    "pglite",
-    "postgres"
+    "sdk"
   ],
   "homepage": "https://github.com/ilhajs/outer#readme",
   "bugs": {
@@ -29,32 +27,20 @@
   "module": "src/index.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.mts",
-      "import": "./dist/index.mjs"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
   },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "tsc && tsdown",
-    "test": "bun test --parallel",
-    "test:e2e": "bun test/index.ts"
+    "build": "tsc && tsdown"
   },
   "dependencies": {
-    "@electric-sql/pglite": "^0.5.3",
+    "@better-auth/core": "^1.6.23",
     "@orpc/client": "^2.0.0-beta.9",
-    "@orpc/openapi": "^2.0.0-beta.9",
     "@orpc/server": "^2.0.0-beta.9",
-    "@orpc/zod": "^2.0.0-beta.9",
-    "better-auth": "^1.6.23",
-    "kysely": "^0.29.2",
-    "zod": "^4.4.3"
-  },
-  "devDependencies": {
-    "srvx": "^0.11.18"
-  },
-  "peerDependencies": {
-    "h3": "^2.0.1-rc.22"
+    "better-auth": "^1.6.23"
   }
 }

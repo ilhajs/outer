@@ -1,4 +1,4 @@
-import { Outer } from "@outerjs/server";
+import { Outer, type InferRouter } from "@outerjs/server";
 import { useStorage } from "nitro/storage";
 import { runTask } from "nitro/task";
 import { emailOTP } from "better-auth/plugins";
@@ -30,8 +30,8 @@ const outer = new Outer({ name: "Outer", baseUrl: import.meta.env.VITE_APP_URL }
   })
   .procedure("foo", (base) =>
     base.handler(async ({ context }) => {
-      await context.kv.setItem("foo", "bar")
-      const foo = await context.kv.getItem("foo")
+      await context.kv.setItem("foo", "bar");
+      const foo = await context.kv.getItem("foo");
       return { foo };
     }),
   )
@@ -40,3 +40,5 @@ const outer = new Outer({ name: "Outer", baseUrl: import.meta.env.VITE_APP_URL }
 await outer.migrator.migrateToLatest();
 
 export default { fetch: (req: Request) => outer.handle(req) };
+
+export type Router = InferRouter<typeof outer>;

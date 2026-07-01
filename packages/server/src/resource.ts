@@ -45,14 +45,14 @@ export type ResourceOptions = {
 // ── Zod schema derivation ──────────────────────────────────────────────────
 
 const SQL_TYPE_TO_ZOD: Record<string, z.ZodType> = {
-  serial:    z.number().int(),
-  text:      z.string(),
-  varchar:   z.string(),
-  integer:   z.number().int(),
-  boolean:   z.boolean(),
+  serial: z.number().int(),
+  text: z.string(),
+  varchar: z.string(),
+  integer: z.number().int(),
+  boolean: z.boolean(),
   timestamp: z.iso.datetime({ offset: true }),
-  jsonb:     z.unknown(),
-  uuid:      z.uuid(),
+  jsonb: z.unknown(),
+  uuid: z.uuid(),
 };
 
 function colToZod(col: ColumnDef): z.ZodType {
@@ -60,7 +60,13 @@ function colToZod(col: ColumnDef): z.ZodType {
   return col._nullable ? z.union([base, z.null()]).optional() : base;
 }
 
-function buildSchemas({ cols, ownerColumn }: { cols: Record<string, ColumnDef>; ownerColumn?: string }) {
+function buildSchemas({
+  cols,
+  ownerColumn,
+}: {
+  cols: Record<string, ColumnDef>;
+  ownerColumn?: string;
+}) {
   const entries = Object.entries(cols);
 
   const rowShape: Record<string, z.ZodType> = {};
@@ -159,24 +165,34 @@ export function buildResourceProcedures(
   options: ResourceOptions = {},
 ): Record<string, AnyProcedure> {
   const { permissions = {}, ownerColumn } = options;
-  const { rowSchema, createSchema, updateSchema, whereSchema, pkName } =
-    buildSchemas({ cols, ...(ownerColumn !== undefined && { ownerColumn }) });
+  const { rowSchema, createSchema, updateSchema, whereSchema, pkName } = buildSchemas({
+    cols,
+    ...(ownerColumn !== undefined && { ownerColumn }),
+  });
 
-  const list = base
-    .output(z.array(rowSchema))
-    .handler(async ({ context }: any) => {
-      await enforce(permissions.list, context);
-      return context.db.query[tableName].findMany();
-    });
+  const list = base.output(z.array(rowSchema)).handler(async ({ context }: any) => {
+    await enforce(permissions.list, context);
+    return context.db.query[tableName].findMany();
+  });
 
   const get = base
     .input(whereSchema)
     .output(rowSchema.nullable())
     .handler(async ({ context, input }: any) => {
-      const row = await fetchForPermission(permissions.get, context.db, tableName, pkName, input[pkName]);
+      const row = await fetchForPermission(
+        permissions.get,
+        context.db,
+        tableName,
+        pkName,
+        input[pkName],
+      );
       await enforce(permissions.get, context, row, ownerColumn);
       // If not pre-fetched, fetch now (permission was public/authenticated/admin)
-      return row ?? await context.db.query[tableName].findFirst({ where: { [pkName]: input[pkName] } }) ?? null;
+      return (
+        row ??
+        (await context.db.query[tableName].findFirst({ where: { [pkName]: input[pkName] } })) ??
+        null
+      );
     });
 
   const create = base
@@ -186,14 +202,24 @@ export function buildResourceProcedures(
       const user = await enforce(permissions.create, context);
       const values: Record<string, unknown> = { ...input };
       if (ownerColumn && user) values[ownerColumn] = user.id;
-      return context.db.insertInto(tableName).values(values).returningAll().executeTakeFirstOrThrow();
+      return context.db
+        .insertInto(tableName)
+        .values(values)
+        .returningAll()
+        .executeTakeFirstOrThrow();
     });
 
   const update = base
     .input(z.object({ where: whereSchema, data: updateSchema }))
     .output(rowSchema)
     .handler(async ({ context, input }: any) => {
-      const row = await fetchForPermission(permissions.update, context.db, tableName, pkName, input.where[pkName]);
+      const row = await fetchForPermission(
+        permissions.update,
+        context.db,
+        tableName,
+        pkName,
+        input.where[pkName],
+      );
       await enforce(permissions.update, context, row, ownerColumn);
       return context.db
         .updateTable(tableName)
@@ -207,7 +233,13 @@ export function buildResourceProcedures(
     .input(whereSchema)
     .output(rowSchema)
     .handler(async ({ context, input }: any) => {
-      const row = await fetchForPermission(permissions.delete, context.db, tableName, pkName, input[pkName]);
+      const row = await fetchForPermission(
+        permissions.delete,
+        context.db,
+        tableName,
+        pkName,
+        input[pkName],
+      );
       await enforce(permissions.delete, context, row, ownerColumn);
       return context.db
         .deleteFrom(tableName)

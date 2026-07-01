@@ -15,7 +15,7 @@ import { Outer, schema } from "@outerjs/server";
 
 const v1_0 = schema("1.0.0")
   .table("post", (t) => ({
-    id:    t.serial().primaryKey(),
+    id: t.serial().primaryKey(),
     title: t.text(),
   }))
   .build();

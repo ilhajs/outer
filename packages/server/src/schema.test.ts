@@ -29,11 +29,11 @@ describe("schema builder", () => {
   test("column modifiers are recorded", () => {
     const s = schema("1.0.0")
       .table("item", (t) => ({
-        id:    t.serial().primaryKey(),
-        slug:  t.text().unique(),
+        id: t.serial().primaryKey(),
+        slug: t.text().unique(),
         label: t.text().nullable(),
         score: t.integer().default("0"),
-        ref:   t.text().references("other", "id"),
+        ref: t.text().references("other", "id"),
       }))
       .build();
 
@@ -73,14 +73,21 @@ describe("schema builder", () => {
 
   test("relations are recorded with correct kind and columns", () => {
     const s = schema("1.0.0")
-      .table("user",     (t) => ({ id: t.text().primaryKey() }))
-      .table("post",     (t) => ({ id: t.text().primaryKey(), authorId: t.text() }))
-      .table("tag",      (t) => ({ id: t.text().primaryKey() }))
+      .table("user", (t) => ({ id: t.text().primaryKey() }))
+      .table("post", (t) => ({ id: t.text().primaryKey(), authorId: t.text() }))
+      .table("tag", (t) => ({ id: t.text().primaryKey() }))
       .table("post_tag", (t) => ({ postId: t.text(), tagId: t.text() }))
-      .relation("user", (rel) => rel.hasMany("post",    { from: "id", to: "authorId" }))
-      .relation("post", (rel) => rel.belongsTo("user",  { from: "authorId", to: "id" }))
-      .relation("post", (rel) => rel.manyToMany("tag", "post_tag", { from: "id", to: "id", pivotFrom: "postId", pivotTo: "tagId" }))
-      .relation("user", (rel) => rel.hasOne("post",     { from: "id", to: "authorId" }))
+      .relation("user", (rel) => rel.hasMany("post", { from: "id", to: "authorId" }))
+      .relation("post", (rel) => rel.belongsTo("user", { from: "authorId", to: "id" }))
+      .relation("post", (rel) =>
+        rel.manyToMany("tag", "post_tag", {
+          from: "id",
+          to: "id",
+          pivotFrom: "postId",
+          pivotTo: "tagId",
+        }),
+      )
+      .relation("user", (rel) => rel.hasOne("post", { from: "id", to: "authorId" }))
       .build();
 
     expect(s.relations).toHaveLength(4);
