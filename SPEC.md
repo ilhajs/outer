@@ -60,11 +60,17 @@ Enables Better Auth and mounts `/api/auth/**`. Must be called before `.build()`.
 .auth({
   secret: process.env.AUTH_SECRET!,
   baseURL: {
-    allowedHosts: ["*.webcontainer.io", "localhost"],
-    fallback: "http://localhost:3000",
+    // "*" allows every host — fine for scaffolding/previews, but means
+    // anyone can point this server at itself with a spoofed Host header.
+    // Once you have a real domain, restrict this to only the hosts you
+    // actually serve, e.g. ["yourapp.com", "*.yourapp.com"].
+    allowedHosts: ["*"],
+    fallback: "http://localhost:3000", // must resolve to a real value — an unset env var here silently disables the fallback
   },
 })
 ```
+
+Patterns are matched against the full `Host` header including port — bare `"localhost"` will NOT match `"localhost:3000"`; use `"localhost:*"` if you need to restrict rather than allow all hosts.
 
 Outer's core does not set any Better Auth defaults (no default plugins, no default email options) — configure everything explicitly.
 
