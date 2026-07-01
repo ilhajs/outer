@@ -42,14 +42,14 @@
     "test:e2e": "bun test/index.ts"
   },
   "dependencies": {
-    "@electric-sql/pglite": "^0.5.3",
-    "@orpc/client": "^2.0.0-beta.9",
-    "@orpc/openapi": "^2.0.0-beta.9",
-    "@orpc/server": "^2.0.0-beta.9",
-    "@orpc/zod": "^2.0.0-beta.9",
-    "better-auth": "^1.6.23",
-    "kysely": "^0.29.2",
-    "zod": "^4.4.3"
+    "@electric-sql/pglite": "0.5.3",
+    "@orpc/client": "2.0.0-beta.11",
+    "@orpc/openapi": "2.0.0-beta.11",
+    "@orpc/server": "2.0.0-beta.11",
+    "@orpc/zod": "2.0.0-beta.11",
+    "better-auth": "1.6.23",
+    "kysely": "0.29.2",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "srvx": "^0.11.18"
