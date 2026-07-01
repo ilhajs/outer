@@ -43,3 +43,48 @@ describe("openapi", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("auth baseURL", () => {
+  async function getAuthBaseURL(app: { handle: (req: Request) => Promise<Response> }) {
+    const res = await app.handle(
+      new Request("http://localhost/rpc/baseurl", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ json: {} }),
+      }),
+    );
+    return ((await res.json()) as any).json.baseURL;
+  }
+
+  test("defaults to the baseUrl passed to new Outer()", async () => {
+    const app = new Outer({
+      name: "Test",
+      baseUrl: "http://ctor-default.test",
+      db: { dataDir: "memory://" },
+    })
+      .schema(s)
+      .auth({ secret: "test-secret" })
+      .procedure("baseurl", (base) =>
+        base.handler(async ({ context }) => ({ baseURL: (context.auth as any).options.baseURL })),
+      )
+      .build();
+
+    expect(await getAuthBaseURL(app)).toBe("http://ctor-default.test");
+  });
+
+  test("can be overridden per-call via .auth({ baseURL })", async () => {
+    const app = new Outer({
+      name: "Test",
+      baseUrl: "http://ctor-default.test",
+      db: { dataDir: "memory://" },
+    })
+      .schema(s)
+      .auth({ secret: "test-secret", baseURL: "http://override.test" })
+      .procedure("baseurl", (base) =>
+        base.handler(async ({ context }) => ({ baseURL: (context.auth as any).options.baseURL })),
+      )
+      .build();
+
+    expect(await getAuthBaseURL(app)).toBe("http://override.test");
+  });
+});

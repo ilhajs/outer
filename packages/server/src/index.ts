@@ -50,9 +50,11 @@ type MergeRouters<A, B> = {
       : never;
 };
 
-export type AuthConfig = Omit<BetterAuthOptions, "database" | "baseURL"> & {
+export type AuthConfig = Omit<BetterAuthOptions, "database"> & {
   /** Secret used by Better Auth to sign/encrypt sessions, cookies, and tokens. */
   secret: string;
+  /** Defaults to the `baseUrl` passed to `new Outer({ baseUrl })` — set this to override it just for auth. */
+  baseURL?: string;
 };
 
 export type OuterParams = {
@@ -157,8 +159,8 @@ export class Outer<
   /** Enables Better Auth and mounts `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain. Narrows `context.auth` to non-null. */
   auth(config: AuthConfig): Outer<TContext & { auth: OuterAuth }, TDB, TRouter> {
     this.resources.auth = betterAuth({
-      ...config,
       baseURL: this.resources.baseUrl,
+      ...config,
       database: { type: "postgres" as const, dialect: this.resources.dialect },
     });
     return new Outer<TContext & { auth: OuterAuth }, TDB, TRouter>(

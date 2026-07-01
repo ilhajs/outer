@@ -25,11 +25,11 @@ Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`
 
 ## `new Outer(params?)`
 
-| Param        | Type     | Default               | Description                                                 |
-| ------------ | -------- | --------------------- | ----------------------------------------------------------- |
-| `name`       | `string` | `"Outer API"`         | API title in OpenAPI spec                                   |
-| `baseUrl`    | `string` | —                     | Passed to Better Auth as `baseURL` when `.auth()` is called |
-| `db.dataDir` | `string` | `<cwd>/.outer/pglite` | PGlite data directory (created if missing)                  |
+| Param        | Type     | Default               | Description                                                                                                   |
+| ------------ | -------- | --------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `name`       | `string` | `"Outer API"`         | API title in OpenAPI spec                                                                                     |
+| `baseUrl`    | `string` | —                     | Default `baseURL` passed to Better Auth when `.auth()` is called (override per-call via `.auth({ baseURL })`) |
+| `db.dataDir` | `string` | `<cwd>/.outer/pglite` | PGlite data directory (created if missing)                                                                    |
 
 ---
 
@@ -52,7 +52,7 @@ Toggles `GET /openapi.json`. Not mounted unless this is called — calling it wi
 
 Enables Better Auth and mounts `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain. Returns a new `Outer` whose `context.auth` type is narrowed to required (non-optional) for everything chained after this call (like `.middleware()`'s `next({ context })`). When `.auth()` is not called, `context.auth` is `undefined` and `/api/auth/**` is not mounted — resource permissions other than `"public"` will throw a configuration error.
 
-`config` is `Omit<BetterAuthOptions, "database" | "baseURL"> & { secret: string }` — every Better Auth option (`plugins`, `emailAndPassword`, `trustedOrigins`, etc.) is accepted directly, with `secret` made required. `database` and `baseURL` are owned by Outer (`database` is wired to the internal PGlite dialect; `baseURL` comes from `new Outer({ baseUrl })`) and cannot be overridden here.
+`config` is `Omit<BetterAuthOptions, "database"> & { secret: string; baseURL?: string }` — every Better Auth option (`plugins`, `emailAndPassword`, `trustedOrigins`, etc.) is accepted directly, with `secret` made required. `database` is owned by Outer (wired to the internal PGlite dialect) and cannot be overridden here. `baseURL` defaults to the `baseUrl` passed to `new Outer({ baseUrl })`, but can be overridden per-call via `.auth({ baseURL })` if you need a different value just for auth.
 
 Outer's core does not set any Better Auth defaults (no default plugins, no default email options) — configure everything explicitly.
 
