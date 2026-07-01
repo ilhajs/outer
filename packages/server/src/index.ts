@@ -64,6 +64,12 @@ type OuterResources = {
   db: Kysely<any>;
   baseUrl: string | undefined;
   auth: OuterAuth | undefined;
+  openapiEnabled: boolean;
+};
+
+export type OpenApiConfig = {
+  /** Whether to mount `GET /openapi.json`. Defaults to `true` when `.openapi()` is called — pass `import.meta.env.DEV` or similar to gate it on dev/staging only. */
+  enabled?: boolean;
 };
 
 function deepMerge({
@@ -124,7 +130,13 @@ export class Outer<
       }
       const dialect = new PGliteDialect({ pglite: new PGlite({ dataDir }) });
       const db = new Kysely<any>({ dialect });
-      this.resources = { dialect, db, baseUrl: params.baseUrl, auth: undefined };
+      this.resources = {
+        dialect,
+        db,
+        baseUrl: params.baseUrl,
+        auth: undefined,
+        openapiEnabled: false,
+      };
       this.pendingBase = os.$context<OuterRpcContext>() as unknown as Builder<
         TContext & object,
         Record<never, never>
@@ -132,6 +144,12 @@ export class Outer<
       this.pendingRouter = {} as TRouter;
       this.schemas = [];
     }
+  }
+
+  /** Toggles `GET /openapi.json`. Not mounted unless this is called; calling it with no args enables it. Must be called before `.build()`. Can appear anywhere in the chain. */
+  openapi(config?: OpenApiConfig): this {
+    this.resources.openapiEnabled = config?.enabled ?? true;
+    return this;
   }
 
   /** Enables Better Auth and mounts `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain. Narrows `context.auth` to non-null. */
@@ -248,17 +266,21 @@ export class Outer<
       ],
     });
 
-    let server = new H3().get("/openapi.json", async () => {
-      const generator = new OpenAPIGenerator({ converters: [new ZodToJsonSchemaConverter()] });
-      return generator.generate(router, {
-        base: {
-          info: {
-            title: this.name ?? "Outer API",
-            version: latestSchema?.version ?? "0.0.0",
+    let server = new H3();
+
+    if (this.resources.openapiEnabled) {
+      server = server.get("/openapi.json", async () => {
+        const generator = new OpenAPIGenerator({ converters: [new ZodToJsonSchemaConverter()] });
+        return generator.generate(router, {
+          base: {
+            info: {
+              title: this.name ?? "Outer API",
+              version: latestSchema?.version ?? "0.0.0",
+            },
           },
-        },
+        });
       });
-    });
+    }
 
     if (auth) {
       server = server.all("/api/auth/**", (event) => auth.handler(event.req));

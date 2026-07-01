@@ -36,7 +36,7 @@ This gets you, with zero extra setup:
 - A local Postgres (PGlite) database, schema-driven migrations, and a typed `context.db` (Kysely + a read-focused ORM layer)
 - Auth (sign-up/sign-in/sessions) via Better Auth, mounted at `/api/auth/**`
 - Auto-generated CRUD procedures per table via `.resource()`, with per-action permissions (`public` / `authenticated` / `admin` / `owner` / custom function)
-- Type-safe RPC procedures via oRPC, served at `/rpc/**`, plus a generated OpenAPI spec at `/openapi.json`
+- Type-safe RPC procedures via oRPC, served at `/rpc/**`, plus an opt-in OpenAPI spec at `/openapi.json` (`.openapi({ enabled: true })`)
 - Realtime streaming (SSE) via oRPC event iterators — no extra infrastructure
 
 Pair it with `@outerjs/sdk` on the client for a type-safe RPC + auth client in one call:
@@ -46,7 +46,9 @@ import { createClient } from "@outerjs/sdk";
 import type { InferRouter } from "@outerjs/server";
 import type { outer } from "./server";
 
-export const client = createClient<InferRouter<typeof outer>>({
+type Router = InferRouter<typeof outer>;
+
+export const client = createClient<Router>({
   baseUrl: "http://localhost:3000",
 })
   .auth()

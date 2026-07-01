@@ -20,6 +20,7 @@ const outer = new Outer({ name: "Outer", baseUrl: import.meta.env.VITE_APP_URL }
       }),
     ],
   })
+  .openapi()
   .middleware(async ({ context, next }) => {
     const kv = useStorage();
     const fs = useStorage("fs");
