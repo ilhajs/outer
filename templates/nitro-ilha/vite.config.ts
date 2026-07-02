@@ -15,6 +15,12 @@ export default defineConfig({
     runtimeConfig: {
       authSecret: "",
     },
+    // PGlite loads its .wasm/.data files at runtime via
+    // `new URL("./pglite.data", import.meta.url)` — Nitro's default build
+    // tracer only follows static imports, so it misses these and production
+    // builds fail with ENOENT. "pkg*" forces a full trace that copies every
+    // file in the package instead of only statically-discovered ones.
+    traceDeps: ["@electric-sql/pglite*"],
     experimental: {
       tasks: true,
     },
