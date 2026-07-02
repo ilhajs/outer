@@ -7,7 +7,7 @@ import { os, onError, Router, Builder, AnyProcedure, Middleware } from "@orpc/se
 import { RPCHandler } from "@orpc/server/fetch";
 import { ZodToJsonSchemaConverter } from "@orpc/zod";
 import { betterAuth, Auth, BetterAuthOptions } from "better-auth";
-import { H3 } from "h3";
+import { H3, H3Event, HTTPMethod } from "h3";
 import { Kysely, PGliteDialect } from "kysely";
 
 import { createMigrator } from "./migrator";
@@ -67,12 +67,19 @@ export type OuterParams = {
   db?: { dataDir?: string };
 };
 
+type OuterRoute<TContext> = {
+  method: HTTPMethod | Lowercase<HTTPMethod> | "";
+  path: string;
+  handler: (event: H3Event, context: TContext) => unknown;
+};
+
 type OuterResources = {
   dialect: PGliteDialect;
   db: Kysely<any>;
   baseUrl: string | undefined;
   auth: OuterAuth | undefined;
   openapiEnabled: boolean;
+  routes: OuterRoute<any>[];
 };
 
 export type OpenApiConfig = {
@@ -144,6 +151,7 @@ export class Outer<
         baseUrl: params.baseUrl,
         auth: undefined,
         openapiEnabled: false,
+        routes: [],
       };
       this.pendingBase = os.$context<OuterRpcContext>() as unknown as Builder<
         TContext & object,
@@ -215,6 +223,16 @@ export class Outer<
   ): Outer<TContext, TDB, MergeRouters<TRouter, NestRoute<TName, TProc>>> {
     this.addToRouter(name, cb(this.pendingBase));
     return this as unknown as Outer<TContext, TDB, MergeRouters<TRouter, NestRoute<TName, TProc>>>;
+  }
+
+  /** Mounts a raw H3 route (e.g. for webhooks or custom REST endpoints) alongside `.procedure()`-defined RPC routes. Registered before `/rpc/**`, so it takes precedence on overlapping paths. */
+  route(
+    method: HTTPMethod | Lowercase<HTTPMethod> | "",
+    path: string,
+    handler: (event: H3Event, context: TContext) => unknown,
+  ): this {
+    this.resources.routes.push({ method, path, handler });
+    return this;
   }
 
   resource<TName extends keyof TDB & string>(
@@ -292,6 +310,12 @@ export class Outer<
 
     if (auth) {
       server = server.all("/api/auth/**", (event) => auth.handler(event.req));
+    }
+
+    for (const { method, path, handler } of this.resources.routes) {
+      server = server.on(method, path, (event) =>
+        handler(event, { headers: event.req.headers, db: typedDb, ...(auth && { auth }) } as any),
+      );
     }
 
     server = server.all("/rpc/**", async (event) => {

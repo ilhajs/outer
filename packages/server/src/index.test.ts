@@ -88,3 +88,35 @@ describe("auth baseURL", () => {
     expect(await getAuthBaseURL(app)).toBe("http://override.test");
   });
 });
+
+describe("route", () => {
+  test("mounts a raw H3 route with access to context", async () => {
+    const app = makeOuter()
+      .route("get", "/hello", (_event, context) => {
+        return new Response(JSON.stringify({ hasDb: !!context.db }), {
+          headers: { "content-type": "application/json" },
+        });
+      })
+      .build();
+
+    const res = await app.handle(new Request("http://localhost/hello"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ hasDb: true });
+  });
+
+  test("takes precedence over /rpc/** on overlapping paths", async () => {
+    const app = makeOuter()
+      .route("post", "/rpc/custom", () => new Response("custom"))
+      .procedure("custom", (base) => base.handler(async () => "rpc"))
+      .build();
+
+    const res = await app.handle(
+      new Request("http://localhost/rpc/custom", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ json: {} }),
+      }),
+    );
+    expect(await res.text()).toBe("custom");
+  });
+});

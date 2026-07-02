@@ -168,6 +168,20 @@ Registers an oRPC procedure. `name` supports dot-notation — `"user.me"` nests 
 
 ---
 
+## `.route(method, path, handler)`
+
+Mounts a raw H3 route alongside `.procedure()`-defined RPC routes — for webhooks, custom REST endpoints, or anything that doesn't fit the oRPC shape. `handler` receives the H3 `event` and the same `context` (`headers`, `db`, `auth`) available in procedure handlers. Registered before `/rpc/**`, so it takes precedence on overlapping paths.
+
+```ts
+.route("post", "/webhooks/stripe", async (event, { db }) => {
+  const body = await event.req.json();
+  // ...
+  return new Response("ok");
+})
+```
+
+---
+
 ## `.build(): BuiltOuter`
 
 Seals the router and constructs the HTTP server. Returns a `BuiltOuter` with:
