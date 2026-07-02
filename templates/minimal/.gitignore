@@ -1,0 +1,8 @@
+node_modules
+dist
+
+# Outer's PGlite data dir
+.outer
+
+.DS_Store
+*.local

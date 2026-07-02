@@ -67,6 +67,7 @@ This is a Bun workspace monorepo:
 | `packages/server`      | The `@outerjs/server` package — Outer's core                               |
 | `packages/sdk`         | The `@outerjs/sdk` package — type-safe client (oRPC + Better Auth)         |
 | `templates/nitro-ilha` | Example app: Outer mounted as a Nitro server entry inside an ilha frontend |
+| `templates/minimal`    | Minimal example: bare Outer server behind srvx, built with tsdown          |
 
 ## Development
 
