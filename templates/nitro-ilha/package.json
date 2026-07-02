@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build && node -e \"const fs=require('fs'),path=require('path');const dir=path.dirname(require.resolve('@electric-sql/pglite'));for(const f of ['pglite.data','pglite.wasm','initdb.wasm'])fs.copyFileSync(path.join(dir,f),'.output/server/_libs/'+f)\"",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@electric-sql/pglite": "0.5.3",
     "@ilha/router": "^0.6.8",
     "@ilha/store": "^0.5.10",
     "@outerjs/sdk": "https://pkg.pr.new/ilhajs/outer/@outerjs/sdk@main",
