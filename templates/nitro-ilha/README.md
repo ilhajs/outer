@@ -1,10 +1,10 @@
-# Ilha + Outer
+# Outer + Nitro + Ilha
 
 A full-stack starter: [Outer](https://github.com/ilhajs/outer) (schema, auth, RPC procedures) mounted as a [Nitro](https://nitro.build) server entry, with an [Ilha](https://ilha.build) + [Vite](https://vite.dev) frontend. Pages live in `src/pages/` and mount on the client via `@ilha/router`; the backend lives in `src/server.ts`.
 
 ## Requirements
 
-- [Bun](https://bun.sh) or Node.js 20+
+- Node.js 20+
 
 ## Getting started
 
@@ -15,8 +15,8 @@ cp .env.example .env
 Generate a real value for `NITRO_AUTH_SECRET` in `.env` (e.g. `openssl rand -base64 32`) — Better Auth refuses to start with the empty placeholder from `.env.example`. This step is required for both `dev` and `preview`/production; without it you'll see `You are using the default secret` at startup.
 
 ```bash
-bun install
-bun run dev
+npm install
+npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
@@ -25,9 +25,9 @@ Open [http://localhost:3000](http://localhost:3000).
 
 | Command           | Description                       |
 | ----------------- | --------------------------------- |
-| `bun run dev`     | Start the Vite + Nitro dev server |
-| `bun run build`   | Type-check and build for prod     |
-| `bun run preview` | Preview the production build      |
+| `npm run dev`     | Start the Vite + Nitro dev server |
+| `npm run build`   | Type-check and build for prod     |
+| `npm run preview` | Preview the production build      |
 
 ## Project layout
 

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && node -e \"const fs=require('fs'),path=require('path');const dir=path.dirname(require.resolve('@electric-sql/pglite'));for(const f of ['pglite.data','pglite.wasm','initdb.wasm'])fs.copyFileSync(path.join(dir,f),'.output/server/_libs/'+f)\"",
+    "build": "tsc && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

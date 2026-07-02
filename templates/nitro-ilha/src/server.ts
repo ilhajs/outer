@@ -38,7 +38,17 @@ const outer = new Outer({ name: "Outer", baseUrl: import.meta.env.VITE_APP_URL }
   )
   .build();
 
-await outer.migrator.migrateToLatest();
+const { error, results } = await outer.migrator.migrateToLatest();
+
+if (error) {
+  console.error(error);
+} else {
+  if (results?.length) {
+    console.info(`[Outer] ${results.length} migrations applied`);
+  } else {
+    console.info("[Outer] No migrations to apply");
+  }
+}
 
 export default { fetch: (req: Request) => outer.handle(req) };
 
