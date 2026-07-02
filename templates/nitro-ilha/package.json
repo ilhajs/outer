@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@better-auth/core": "1.6.23",
     "@electric-sql/pglite": "0.5.3",
     "@ilha/router": "^0.6.8",
     "@ilha/store": "^0.5.10",
