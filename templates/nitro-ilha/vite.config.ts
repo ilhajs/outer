@@ -8,6 +8,7 @@ export default defineConfig({
   plugins: [pages(), tailwindcss(), nitro()],
   resolve: {
     tsconfigPaths: true,
+    dedupe: ["better-auth"],
   },
   nitro: {
     serverDir: "./src",
