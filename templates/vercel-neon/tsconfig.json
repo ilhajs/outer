@@ -5,7 +5,9 @@
     "moduleResolution": "bundler",
     "target": "es2022",
     "lib": ["es2022", "dom"],
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["src", "api"]
+  "include": ["api", "scripts"]
 }

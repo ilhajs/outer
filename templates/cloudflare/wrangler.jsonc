@@ -7,10 +7,5 @@
   "durable_objects": {
     "bindings": [{ "name": "OUTER_DO", "class_name": "OuterDO" }],
   },
-  "migrations": [
-    // "new_sqlite_classes" (not "new_classes") is required for DO SQLite
-    // storage (ctx.storage.sql) — the older KV-backed DO storage class
-    // won't expose it.
-    { "tag": "v1", "new_sqlite_classes": ["OuterDO"] },
-  ],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["OuterDO"] }],
 }

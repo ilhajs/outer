@@ -33,8 +33,7 @@ if (error) {
 
 export type Router = InferRouter<typeof outer>;
 
-// Swap this for `Bun.serve({ fetch: (req) => outer.handle(req) })` or any
-// other fetch-compatible runtime — `outer.handle` is a plain Fetch API handler.
+// swap for Bun.serve/Deno.serve/etc — outer.handle is a plain Fetch handler
 serve({
   fetch: (req) => outer.handle(req),
   port: Number(process.env["PORT"] ?? 3000),
