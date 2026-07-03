@@ -1,7 +1,7 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  entry: ["src/index.ts"],
+  entry: ["src/index.ts", "src/pglite.ts"],
   platform: "node",
   dts: true,
   // Don't ship minified library code — avoids double-minification edge cases

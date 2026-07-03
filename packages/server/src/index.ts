@@ -1,14 +1,10 @@
-import { mkdirSync } from "node:fs";
-import path from "node:path";
-
-import { PGlite } from "@electric-sql/pglite";
 import { OpenAPIGenerator } from "@orpc/openapi";
 import { os, onError, Router, Builder, AnyProcedure, Middleware } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import { ZodToJsonSchemaConverter } from "@orpc/zod";
 import { betterAuth, Auth, BetterAuthOptions } from "better-auth";
 import { H3, H3Event, HTTPMethod } from "h3";
-import { Dialect, Kysely, PGliteDialect } from "kysely";
+import { Dialect, Kysely } from "kysely";
 
 import { createMigrator, DialectKind } from "./migrator";
 import { buildResourceProcedures, ResourceOptions } from "./resource";
@@ -65,14 +61,14 @@ export type OuterParams = {
   name?: string;
   baseUrl?: string;
   /**
-   * Defaults to an embedded PGlite instance (real Postgres, zero external
-   * infra) writing to `dataDir`. To bring your own Kysely `Dialect` — e.g. a
-   * network Postgres, or a `"sqlite"`-family dialect for Cloudflare D1 /
-   * Durable Objects — pass `{ dialect, kind }` instead. `kind` drives DDL
-   * generation, Better Auth's schema, and DB error mapping; it must match the
-   * dialect you provide.
+   * A Kysely `Dialect` plus the dialect family it belongs to — `kind` drives
+   * DDL generation, Better Auth's schema, and DB error mapping, so it must
+   * match the dialect you provide. For the zero-infra embedded Postgres
+   * default, use `pgliteDb()` from `@outerjs/server/pglite`:
+   * `new Outer({ db: pgliteDb() })`. For anything else (network Postgres,
+   * Cloudflare D1/Durable Objects, etc.) construct the `Dialect` yourself.
    */
-  db?: { dataDir?: string } | { dialect: Dialect; kind: DialectKind };
+  db: { dialect: Dialect; kind: DialectKind };
 };
 
 type OuterRoute<TContext> = {
@@ -125,16 +121,16 @@ export class Outer<
   private readonly schemas: SchemaResult<any>[];
   private readonly name: string | undefined;
 
-  constructor(params?: OuterParams);
+  constructor(params: OuterParams);
   constructor(
-    params: OuterParams,
+    params: { name?: string },
     _resources: OuterResources,
     _base: Builder<TContext & object, Record<never, never>>,
     _router: TRouter,
     _schemas: SchemaResult<any>[],
   );
   constructor(
-    params: OuterParams = {},
+    params: OuterParams | { name?: string },
     _resources?: OuterResources,
     _base?: Builder<TContext & object, Record<never, never>>,
     _router?: TRouter,
@@ -148,25 +144,14 @@ export class Outer<
       this.pendingRouter = _router ?? ({} as TRouter);
       this.schemas = _schemas ?? [];
     } else {
-      let dialect: Dialect;
-      let dialectKind: DialectKind;
-      if (params.db && "dialect" in params.db) {
-        dialect = params.db.dialect;
-        dialectKind = params.db.kind;
-      } else {
-        const dataDir = params.db?.dataDir ?? path.join(process.cwd(), ".outer", "pglite");
-        if (!dataDir.startsWith("memory://")) {
-          mkdirSync(dataDir, { recursive: true });
-        }
-        dialect = new PGliteDialect({ pglite: new PGlite({ dataDir }) });
-        dialectKind = "postgres";
-      }
+      const { db: dbConfig, baseUrl } = params as OuterParams;
+      const { dialect, kind: dialectKind } = dbConfig;
       const db = new Kysely<any>({ dialect });
       this.resources = {
         dialect,
         dialectKind,
         db,
-        baseUrl: params.baseUrl,
+        baseUrl,
         auth: undefined,
         openapiEnabled: false,
         routes: [],

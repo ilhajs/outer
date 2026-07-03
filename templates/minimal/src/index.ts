@@ -1,10 +1,11 @@
 import { Outer, type InferRouter } from "@outerjs/server";
+import { pgliteDb } from "@outerjs/server/pglite";
 import { serve } from "srvx";
 import { z } from "zod";
 
 import { v1_0_0 } from "./schema";
 
-const outer = new Outer({ name: "Outer" })
+const outer = new Outer({ name: "Outer", db: pgliteDb() })
   .schema(v1_0_0)
   .openapi()
   .resource("post")

@@ -31,6 +31,10 @@
     ".": {
       "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs"
+    },
+    "./pglite": {
+      "types": "./dist/pglite.d.mts",
+      "import": "./dist/pglite.mjs"
     }
   },
   "publishConfig": {

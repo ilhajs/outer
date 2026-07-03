@@ -3,6 +3,7 @@ import { test, describe, beforeAll, expect } from "bun:test";
 import { z } from "zod/v4";
 
 import { Outer, schema } from "./index";
+import { pgliteDb } from "./pglite";
 
 const s = schema("1.0.0")
   .table("post", (t) => ({
@@ -14,7 +15,11 @@ const s = schema("1.0.0")
   .build();
 
 function makeApp(opts?: Parameters<ReturnType<typeof Outer.prototype.schema>["resource"]>[1]) {
-  return new Outer({ name: "Test", baseUrl: "http://localhost", db: { dataDir: "memory://" } })
+  return new Outer({
+    name: "Test",
+    baseUrl: "http://localhost",
+    db: pgliteDb({ dataDir: "memory://" }),
+  })
     .schema(s)
     .auth({ secret: "test-secret" })
     .resource("post", opts)
@@ -114,7 +119,11 @@ const uniqueSchema = schema("1.0.0")
   .build();
 
 function makeUniqueApp() {
-  return new Outer({ name: "Test", baseUrl: "http://localhost", db: { dataDir: "memory://" } })
+  return new Outer({
+    name: "Test",
+    baseUrl: "http://localhost",
+    db: pgliteDb({ dataDir: "memory://" }),
+  })
     .schema(uniqueSchema)
     .resource("post")
     .build();
@@ -268,7 +277,7 @@ const authSchema = schema("1.0.0")
 
 function makeAuthApp(opts?: Parameters<ReturnType<typeof Outer.prototype.schema>["resource"]>[1]) {
   return (
-    new Outer({ name: "Test", baseUrl: "http://localhost", db: { dataDir: "memory://" } })
+    new Outer({ name: "Test", baseUrl: "http://localhost", db: pgliteDb({ dataDir: "memory://" }) })
       .schema(authSchema)
       .auth({
         secret: "test-secret",

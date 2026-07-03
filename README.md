@@ -1,11 +1,12 @@
 # Outer
 
-Outer is an alternative to Supabase, PocketBase, and Firebase where you own 100% of the solution and data. It's a batteries-included TypeScript backend framework built on [PGlite](https://pglite.dev), [Kysely](https://kysely.dev), [oRPC](https://orpc.unnoq.com), and [Better Auth](https://better-auth.com), exposed through a fluent builder chain that produces a single fetch-compatible HTTP handler — deploy it to a VPS, Coolify, or any host with a persistent filesystem, alongside your frontend app. (Serverless/edge platforms like Vercel and Cloudflare Workers aren't supported yet — see the Roadmap in [SPEC.md](./SPEC.md).)
+Outer is an alternative to Supabase, PocketBase, and Firebase where you own 100% of the solution and data. It's a batteries-included TypeScript backend framework built on [Kysely](https://kysely.dev), [oRPC](https://orpc.unnoq.com), and [Better Auth](https://better-auth.com), exposed through a fluent builder chain that produces a single fetch-compatible HTTP handler. [PGlite](https://pglite.dev) (real embedded Postgres, zero external infra) is the recommended default database for persistent-hosting deploys (VPS, Coolify) — see `templates/minimal`. Serverless/edge platforms are supported via any Kysely dialect: see `templates/cloudflare` (Durable Objects) and `templates/vercel-neon` (Neon Postgres).
 
 ## Quick start
 
 ```ts
 import { Outer, schema } from "@outerjs/server";
+import { pgliteDb } from "@outerjs/server/pglite";
 import { serve } from "srvx";
 
 const v1_0 = schema("1.0.0")
@@ -17,7 +18,7 @@ const v1_0 = schema("1.0.0")
   }))
   .build();
 
-const outer = new Outer({ name: "My API", baseUrl: "http://localhost:3000" })
+const outer = new Outer({ name: "My API", baseUrl: "http://localhost:3000", db: pgliteDb() })
   .schema(v1_0)
   .auth({ secret: process.env.AUTH_SECRET! })
   .openapi()

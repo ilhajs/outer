@@ -1,6 +1,7 @@
 import { serve } from "srvx";
 
 import { Outer, schema } from "../src/index";
+import { pgliteDb } from "../src/pglite";
 
 const v1_0 = schema("1.0.0")
   .table("user", (t) => ({
@@ -51,7 +52,7 @@ const v1_0 = schema("1.0.0")
   .relation("account", (rel) => rel.belongsTo("user", { from: "userId", to: "id" }))
   .build();
 
-const outer = new Outer({ name: "Outer", baseUrl: "http://localhost:3000" })
+const outer = new Outer({ name: "Outer", baseUrl: "http://localhost:3000", db: pgliteDb() })
   .schema(v1_0)
   .auth({ secret: "test-secret" })
   .middleware(async ({ context, next }) => {

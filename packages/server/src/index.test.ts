@@ -4,6 +4,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { PGliteDialect } from "kysely";
 
 import { Outer, schema } from "./index";
+import { pgliteDb } from "./pglite";
 
 const s = schema("1.0.0")
   .table("post", (t) => ({ id: t.serial().primaryKey(), title: t.text() }))
@@ -13,7 +14,7 @@ function makeOuter() {
   return new Outer({
     name: "Test",
     baseUrl: "http://localhost",
-    db: { dataDir: "memory://" },
+    db: pgliteDb({ dataDir: "memory://" }),
   }).schema(s);
 }
 
@@ -63,7 +64,7 @@ describe("auth baseURL", () => {
     const app = new Outer({
       name: "Test",
       baseUrl: "http://ctor-default.test",
-      db: { dataDir: "memory://" },
+      db: pgliteDb({ dataDir: "memory://" }),
     })
       .schema(s)
       .auth({ secret: "test-secret" })
@@ -79,7 +80,7 @@ describe("auth baseURL", () => {
     const app = new Outer({
       name: "Test",
       baseUrl: "http://ctor-default.test",
-      db: { dataDir: "memory://" },
+      db: pgliteDb({ dataDir: "memory://" }),
     })
       .schema(s)
       .auth({ secret: "test-secret", baseURL: "http://override.test" })
@@ -125,7 +126,7 @@ describe("route", () => {
 });
 
 describe("db: custom dialect", () => {
-  test("accepts a caller-provided Kysely dialect + kind instead of the default embedded PGlite", async () => {
+  test("accepts a caller-provided Kysely dialect + kind", async () => {
     const dialect = new PGliteDialect({ pglite: new PGlite() });
     const app = new Outer({
       name: "Test",
