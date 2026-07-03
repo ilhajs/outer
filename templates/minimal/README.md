@@ -44,6 +44,8 @@ src/
 
 `src/index.ts` mounts `.resource("post")` (auto CRUD) plus one custom `.procedure("post.count", ...)`, and enables `.openapi()`. Add `.auth(...)`, `.middleware(...)`, and more `.procedure()` calls the same way — see [SPEC.md](https://github.com/ilhajs/outer/blob/main/SPEC.md) for the full API.
 
+Looking to deploy to Cloudflare Workers instead? See [`templates/cloudflare`](../cloudflare) — same schema shape, backed by a Durable Object instead of PGlite.
+
 ## Learn more
 
 - [Outer's full API reference](https://github.com/ilhajs/outer/blob/main/SPEC.md)
