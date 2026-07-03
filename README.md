@@ -62,13 +62,14 @@ See [SPEC.md](./SPEC.md) for the full API reference.
 
 This is a Bun workspace monorepo:
 
-| Path                   | Description                                                                                          |
-| ---------------------- | ---------------------------------------------------------------------------------------------------- |
-| `packages/server`      | The `@outerjs/server` package — Outer's core                                                         |
-| `packages/sdk`         | The `@outerjs/sdk` package — type-safe client (oRPC + Better Auth)                                   |
-| `templates/ilha`       | Example app: Outer mounted as a Nitro server entry inside an ilha frontend                           |
-| `templates/minimal`    | Minimal example: bare Outer server behind srvx, built with tsdown                                    |
-| `templates/cloudflare` | Outer on Cloudflare Workers, backed by a Durable Object (`kysely-durable-objects`) instead of PGlite |
+| Path                    | Description                                                                                          |
+| ----------------------- | ---------------------------------------------------------------------------------------------------- |
+| `packages/server`       | The `@outerjs/server` package — Outer's core                                                         |
+| `packages/sdk`          | The `@outerjs/sdk` package — type-safe client (oRPC + Better Auth)                                   |
+| `templates/ilha`        | Example app: Outer mounted as a Nitro server entry inside an ilha frontend                           |
+| `templates/minimal`     | Minimal example: bare Outer server behind srvx, built with tsdown                                    |
+| `templates/cloudflare`  | Outer on Cloudflare Workers, backed by a Durable Object (`kysely-durable-objects`) instead of PGlite |
+| `templates/vercel-neon` | Outer on Vercel serverless functions, backed by Neon Postgres (`kysely-neon`) instead of PGlite      |
 
 ## Development
 
