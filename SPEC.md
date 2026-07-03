@@ -25,11 +25,29 @@ Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`
 
 ## `new Outer(params?)`
 
-| Param        | Type     | Default               | Description                                                                                                   |
-| ------------ | -------- | --------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `name`       | `string` | `"Outer API"`         | API title in OpenAPI spec                                                                                     |
-| `baseUrl`    | `string` | —                     | Default `baseURL` passed to Better Auth when `.auth()` is called (override per-call via `.auth({ baseURL })`) |
-| `db.dataDir` | `string` | `<cwd>/.outer/pglite` | PGlite data directory (created if missing)                                                                    |
+| Param        | Type                     | Default               | Description                                                                                                   |
+| ------------ | ------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `name`       | `string`                 | `"Outer API"`         | API title in OpenAPI spec                                                                                     |
+| `baseUrl`    | `string`                 | —                     | Default `baseURL` passed to Better Auth when `.auth()` is called (override per-call via `.auth({ baseURL })`) |
+| `db.dataDir` | `string`                 | `<cwd>/.outer/pglite` | PGlite data directory (created if missing)                                                                    |
+| `db.dialect` | `Dialect`                | —                     | Bring your own Kysely `Dialect` instead of the embedded PGlite — see "Custom dialects" below                  |
+| `db.kind`    | `"postgres" \| "sqlite"` | —                     | Required alongside `db.dialect`. Drives DDL generation, Better Auth's schema, and DB error mapping            |
+
+### Custom dialects
+
+By default, `new Outer(...)` embeds [PGlite](https://pglite.dev) — a real Postgres engine that writes to local disk (`db.dataDir`), so there's zero external infra to run. This is the path to reach for first; it's what makes Outer deployable to a VPS/Coolify box with nothing else to provision.
+
+For platforms without a persistent filesystem (Vercel Functions, Cloudflare Workers), or to point at an existing database, pass any [Kysely `Dialect`](https://kysely.dev/docs/dialects) directly:
+
+```ts
+import { D1Dialect } from "kysely-d1"; // or PostgresDialect, MysqlDialect, kysely-durable-objects, etc.
+
+new Outer({
+  db: { dialect: new D1Dialect({ database: env.DB }), kind: "sqlite" },
+});
+```
+
+`kind` tells Outer which SQL dialect family to generate DDL for (column types like `serial`/`jsonb`/`uuid` don't exist in SQLite, so they're remapped) and which constraint-error codes to recognize when turning DB errors into `CONFLICT`/`BAD_REQUEST` responses. Currently supported: `"postgres"` (PGlite, or any network Postgres via `PostgresDialect`) and `"sqlite"` (Cloudflare D1, Durable Objects via `kysely-durable-objects`, libSQL/Turso, etc.). Kysely also ships `mysql`/`mssql` dialects, and Better Auth supports them — but Outer doesn't generate correct DDL for them yet, so `kind` is deliberately typed to just the two verified options. Widening this is mechanical (one more entry in the internal type/error-code maps per dialect family) if you need it — contributions welcome.
 
 ---
 
@@ -52,7 +70,7 @@ Toggles `GET /openapi.json`. Not mounted unless this is called — calling it wi
 
 Enables Better Auth and mounts `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain. Returns a new `Outer` whose `context.auth` type is narrowed to required (non-optional) for everything chained after this call (like `.middleware()`'s `next({ context })`). When `.auth()` is not called, `context.auth` is `undefined` and `/api/auth/**` is not mounted — resource permissions other than `"public"` will throw a configuration error.
 
-`config` is `Omit<BetterAuthOptions, "database"> & { secret: string }` — every Better Auth option (`plugins`, `emailAndPassword`, `trustedOrigins`, etc.) is accepted directly, with `secret` made required. `database` is owned by Outer (wired to the internal PGlite dialect) and cannot be overridden here. `baseURL` defaults to the `baseUrl` passed to `new Outer({ baseUrl })`, but can be overridden per-call via `.auth({ baseURL })` if you need a different value just for auth.
+`config` is `Omit<BetterAuthOptions, "database"> & { secret: string }` — every Better Auth option (`plugins`, `emailAndPassword`, `trustedOrigins`, etc.) is accepted directly, with `secret` made required. `database` is owned by Outer (wired to whichever dialect was configured via `new Outer({ db })` — PGlite by default, or your custom dialect, see "Custom dialects" above) and cannot be overridden here. `baseURL` defaults to the `baseUrl` passed to `new Outer({ baseUrl })`, but can be overridden per-call via `.auth({ baseURL })` if you need a different value just for auth.
 
 `baseURL` accepts either a static string or Better Auth's `DynamicBaseURLConfig` (`{ allowedHosts: string[], fallback?: string, protocol?: "http" | "https" | "auto" }`), which derives the correct origin per-request from the `Host` header instead of a fixed value. Use this for deployments behind a dynamic/preview domain (Vercel previews, StackBlitz, Coolify preview deployments, etc.) where the real origin isn't known at build time — a fixed `baseUrl` there causes Better Auth to scope session cookies to the wrong origin, so sign-in appears to succeed but the session is never actually persisted:
 
@@ -557,4 +575,4 @@ Use `withEventMeta` to attach an event `id` to each yield. On reconnect, oRPC pa
 Alpha focuses on persistent-hosting deployments (VPS, Coolify) with the bundled PGlite database. Two things are planned next, in no particular priority order yet:
 
 - **Admin dashboard/UI** — comparable to PocketBase's dashboard or Supabase Studio. Should expose: table data browser with CRUD, user/session management, and migration status. Planned as a separate `outer-admin` package served at `/admin` when enabled.
-- **Serverless/edge support** (Vercel Functions, Cloudflare Workers) — requires either a pluggable database layer so a real network-attached Postgres can replace PGlite's local-disk storage, or a managed/durable-storage-backed PGlite setup. Not usable on these platforms yet; `db.dataDir` assumes a persistent local filesystem.
+- **Serverless/edge support** (Vercel Functions, Cloudflare Workers) — `db: { dialect, kind }` (see "Custom dialects" above) now lets you swap PGlite for a network-attached Postgres or a `"sqlite"`-family dialect (Cloudflare D1, Durable Objects), which unblocks Workers specifically. Vercel Functions/Edge remain unverified — needs a template + real deployment test. `mysql`/`mssql` `kind`s aren't implemented yet either (Kysely ships dialects for both, but Outer's DDL generation and error mapping don't cover them).

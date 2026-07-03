@@ -1,7 +1,13 @@
 import { test, describe, beforeAll, expect } from "bun:test";
 
 import { PGlite } from "@electric-sql/pglite";
-import { Kysely, PGliteDialect } from "kysely";
+import {
+  Kysely,
+  PGliteDialect,
+  SqliteAdapter,
+  SqliteIntrospector,
+  SqliteQueryCompiler,
+} from "kysely";
 
 import { createMigrator, SchemaMigrationProvider } from "./migrator";
 import { schema } from "./schema";
@@ -29,6 +35,16 @@ async function columnExists(db: Kysely<any>, table: string, col: string): Promis
     .where("column_name" as any, "=", col)
     .executeTakeFirst();
   return row != null;
+}
+
+async function columnType(db: Kysely<any>, table: string, col: string): Promise<string> {
+  const row = await db
+    .selectFrom("information_schema.columns" as any)
+    .select("udt_name" as any)
+    .where("table_name" as any, "=", table)
+    .where("column_name" as any, "=", col)
+    .executeTakeFirstOrThrow();
+  return (row as any).udt_name;
 }
 
 describe("migrator", () => {
@@ -117,5 +133,75 @@ describe("migrator", () => {
     expect("1.0.0" in migrations).toBe(true);
     expect("2.0.0" in migrations).toBe(true);
     expect(Object.keys(migrations)).toHaveLength(2);
+  });
+});
+
+describe("dialect kinds", () => {
+  test("defaults to postgres DDL types", async () => {
+    const db = makeDb();
+    const s = schema("1.0.0")
+      .table("post", (t) => ({
+        id: t.serial().primaryKey(),
+        body: t.jsonb(),
+        userId: t.uuid(),
+        postedAt: t.timestamp(),
+      }))
+      .build();
+    await createMigrator({ db, schemas: [s] }).migrateToLatest();
+
+    expect(await columnType(db, "post", "id")).toBe("int4");
+    expect(await columnType(db, "post", "body")).toBe("jsonb");
+    expect(await columnType(db, "post", "userId")).toBe("uuid");
+    expect(await columnType(db, "post", "postedAt")).toBe("timestamptz");
+  });
+
+  test("kind: 'sqlite' generates SQLite-compatible DDL types", async () => {
+    const s = schema("1.0.0")
+      .table("post", (t) => ({
+        id: t.serial().primaryKey(),
+        body: t.jsonb(),
+        userId: t.uuid(),
+        postedAt: t.timestamp(),
+        title: t.varchar(),
+        active: t.boolean(),
+      }))
+      .build();
+
+    const captured: string[] = [];
+    const db = new Kysely<any>({
+      dialect: {
+        createDriver: () => ({
+          async init() {},
+          async acquireConnection() {
+            return {
+              async executeQuery(compiled: any) {
+                captured.push(compiled.sql);
+                return { rows: [] };
+              },
+              async *streamQuery() {},
+            };
+          },
+          async beginTransaction() {},
+          async commitTransaction() {},
+          async rollbackTransaction() {},
+          async releaseConnection() {},
+          async destroy() {},
+        }),
+        createQueryCompiler: () => new SqliteQueryCompiler(),
+        createAdapter: () => new SqliteAdapter(),
+        createIntrospector: (introspectedDb: Kysely<any>) => new SqliteIntrospector(introspectedDb),
+      },
+    });
+
+    const migrations = await new SchemaMigrationProvider([s], "sqlite").getMigrations();
+    await migrations["1.0.0"]!.up(db);
+
+    const createSql = captured.find((sql) => sql.includes("create table"))!;
+    expect(createSql).not.toContain("serial");
+    expect(createSql).not.toContain("jsonb");
+    expect(createSql).not.toContain("timestamptz");
+    expect(createSql).not.toContain("uuid");
+    expect(createSql).toContain("integer");
+    expect(createSql).toContain("text");
   });
 });

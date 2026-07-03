@@ -3,6 +3,7 @@ import { Builder, AnyProcedure } from "@orpc/server";
 import { NoResultError } from "kysely";
 import { z } from "zod/v4";
 
+import { DialectKind } from "./migrator";
 import { ColumnDef } from "./schema";
 
 // ── Permission types ───────────────────────────────────────────────────────
@@ -146,12 +147,37 @@ async function enforce(
 
 // ── DB error mapping ────────────────────────────────────────────────────────
 
+type ConstraintMapping = { code: "CONFLICT" | "BAD_REQUEST"; message: string };
+
 /** Postgres SQLSTATE class 23 (integrity constraint violation) codes we recognize. */
-const PG_CONSTRAINT_CODES: Record<string, { code: "CONFLICT" | "BAD_REQUEST"; message: string }> = {
+const PG_CONSTRAINT_CODES: Record<string, ConstraintMapping> = {
   "23505": { code: "CONFLICT", message: "A record with this value already exists" },
   "23503": { code: "CONFLICT", message: "This action conflicts with a related record" },
   "23502": { code: "BAD_REQUEST", message: "Missing a required field" },
   "23514": { code: "BAD_REQUEST", message: "Value does not satisfy a constraint" },
+};
+
+/** SQLite's `sqlite3_errstr` extended result codes (`.code` on the driver's thrown error). */
+const SQLITE_CONSTRAINT_CODES: Record<string, ConstraintMapping> = {
+  SQLITE_CONSTRAINT_UNIQUE: {
+    code: "CONFLICT",
+    message: "A record with this value already exists",
+  },
+  SQLITE_CONSTRAINT_PRIMARYKEY: {
+    code: "CONFLICT",
+    message: "A record with this value already exists",
+  },
+  SQLITE_CONSTRAINT_FOREIGNKEY: {
+    code: "CONFLICT",
+    message: "This action conflicts with a related record",
+  },
+  SQLITE_CONSTRAINT_NOTNULL: { code: "BAD_REQUEST", message: "Missing a required field" },
+  SQLITE_CONSTRAINT_CHECK: { code: "BAD_REQUEST", message: "Value does not satisfy a constraint" },
+};
+
+const CONSTRAINT_CODES_BY_KIND: Record<DialectKind, Record<string, ConstraintMapping>> = {
+  postgres: PG_CONSTRAINT_CODES,
+  sqlite: SQLITE_CONSTRAINT_CODES,
 };
 
 /**
@@ -160,13 +186,14 @@ const PG_CONSTRAINT_CODES: Record<string, { code: "CONFLICT" | "BAD_REQUEST"; me
  * is rethrown as-is — oRPC already sanitizes uncaught errors to a generic
  * "Internal Server Error" before they reach the client, so nothing leaks.
  */
-function mapDbError(error: unknown): never {
+function mapDbError(error: unknown, kind: DialectKind): never {
   if (error instanceof NoResultError) {
     throw new ORPCError("NOT_FOUND", { message: "Record not found", cause: error });
   }
-  const pgCode = (error as { code?: unknown } | null)?.code;
-  if (typeof pgCode === "string" && pgCode in PG_CONSTRAINT_CODES) {
-    const mapped = PG_CONSTRAINT_CODES[pgCode]!;
+  const dbCode = (error as { code?: unknown } | null)?.code;
+  const constraintCodes = CONSTRAINT_CODES_BY_KIND[kind];
+  if (typeof dbCode === "string" && dbCode in constraintCodes) {
+    const mapped = constraintCodes[dbCode]!;
     throw new ORPCError(mapped.code, { message: mapped.message, cause: error });
   }
   throw error;
@@ -193,6 +220,7 @@ export function buildResourceProcedures(
   cols: Record<string, ColumnDef>,
   base: Builder<any, any>,
   options: ResourceOptions = {},
+  kind: DialectKind = "postgres",
 ): Record<string, AnyProcedure> {
   const { permissions = {}, ownerColumn } = options;
   const { rowSchema, createSchema, updateSchema, whereSchema, pkName } = buildSchemas({
@@ -239,7 +267,7 @@ export function buildResourceProcedures(
           .returningAll()
           .executeTakeFirstOrThrow();
       } catch (error) {
-        mapDbError(error);
+        mapDbError(error, kind);
       }
     });
 
@@ -263,7 +291,7 @@ export function buildResourceProcedures(
           .returningAll()
           .executeTakeFirstOrThrow();
       } catch (error) {
-        mapDbError(error);
+        mapDbError(error, kind);
       }
     });
 
@@ -286,7 +314,7 @@ export function buildResourceProcedures(
           .returningAll()
           .executeTakeFirstOrThrow();
       } catch (error) {
-        mapDbError(error);
+        mapDbError(error, kind);
       }
     });
 

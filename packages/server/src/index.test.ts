@@ -1,5 +1,8 @@
 import { test, describe, expect } from "bun:test";
 
+import { PGlite } from "@electric-sql/pglite";
+import { PGliteDialect } from "kysely";
+
 import { Outer, schema } from "./index";
 
 const s = schema("1.0.0")
@@ -118,5 +121,32 @@ describe("route", () => {
       }),
     );
     expect(await res.text()).toBe("custom");
+  });
+});
+
+describe("db: custom dialect", () => {
+  test("accepts a caller-provided Kysely dialect + kind instead of the default embedded PGlite", async () => {
+    const dialect = new PGliteDialect({ pglite: new PGlite() });
+    const app = new Outer({
+      name: "Test",
+      baseUrl: "http://localhost",
+      db: { dialect, kind: "postgres" },
+    })
+      .schema(s)
+      .resource("post")
+      .build();
+
+    const { error } = await app.migrator.migrateToLatest();
+    expect(error).toBeUndefined();
+
+    const created = await app.handle(
+      new Request("http://localhost/rpc/post/create", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ json: { title: "hello" } }),
+      }),
+    );
+    expect(created.status).toBe(200);
+    expect(((await created.json()) as any).json.title).toBe("hello");
   });
 });

@@ -8,15 +8,15 @@ import { RPCHandler } from "@orpc/server/fetch";
 import { ZodToJsonSchemaConverter } from "@orpc/zod";
 import { betterAuth, Auth, BetterAuthOptions } from "better-auth";
 import { H3, H3Event, HTTPMethod } from "h3";
-import { Kysely, PGliteDialect } from "kysely";
+import { Dialect, Kysely, PGliteDialect } from "kysely";
 
-import { createMigrator } from "./migrator";
+import { createMigrator, DialectKind } from "./migrator";
 import { buildResourceProcedures, ResourceOptions } from "./resource";
 import { schema, SchemaResult, InferDB, TablesDef, ColumnDef } from "./schema";
 import { createSola, Sola } from "./sola";
 
 export { schema };
-export type { ResourceOptions };
+export type { ResourceOptions, DialectKind };
 
 type OuterAuth = Auth<any>;
 type OuterDB<TDB> = Kysely<TDB> & { query: Sola<TDB> };
@@ -64,7 +64,15 @@ export type AuthConfig = Omit<BetterAuthOptions, "database"> & {
 export type OuterParams = {
   name?: string;
   baseUrl?: string;
-  db?: { dataDir?: string };
+  /**
+   * Defaults to an embedded PGlite instance (real Postgres, zero external
+   * infra) writing to `dataDir`. To bring your own Kysely `Dialect` — e.g. a
+   * network Postgres, or a `"sqlite"`-family dialect for Cloudflare D1 /
+   * Durable Objects — pass `{ dialect, kind }` instead. `kind` drives DDL
+   * generation, Better Auth's schema, and DB error mapping; it must match the
+   * dialect you provide.
+   */
+  db?: { dataDir?: string } | { dialect: Dialect; kind: DialectKind };
 };
 
 type OuterRoute<TContext> = {
@@ -74,7 +82,8 @@ type OuterRoute<TContext> = {
 };
 
 type OuterResources = {
-  dialect: PGliteDialect;
+  dialect: Dialect;
+  dialectKind: DialectKind;
   db: Kysely<any>;
   baseUrl: string | undefined;
   auth: OuterAuth | undefined;
@@ -139,14 +148,23 @@ export class Outer<
       this.pendingRouter = _router ?? ({} as TRouter);
       this.schemas = _schemas ?? [];
     } else {
-      const dataDir = params.db?.dataDir ?? path.join(process.cwd(), ".outer", "pglite");
-      if (!dataDir.startsWith("memory://")) {
-        mkdirSync(dataDir, { recursive: true });
+      let dialect: Dialect;
+      let dialectKind: DialectKind;
+      if (params.db && "dialect" in params.db) {
+        dialect = params.db.dialect;
+        dialectKind = params.db.kind;
+      } else {
+        const dataDir = params.db?.dataDir ?? path.join(process.cwd(), ".outer", "pglite");
+        if (!dataDir.startsWith("memory://")) {
+          mkdirSync(dataDir, { recursive: true });
+        }
+        dialect = new PGliteDialect({ pglite: new PGlite({ dataDir }) });
+        dialectKind = "postgres";
       }
-      const dialect = new PGliteDialect({ pglite: new PGlite({ dataDir }) });
       const db = new Kysely<any>({ dialect });
       this.resources = {
         dialect,
+        dialectKind,
         db,
         baseUrl: params.baseUrl,
         auth: undefined,
@@ -173,7 +191,7 @@ export class Outer<
     this.resources.auth = betterAuth({
       baseURL: this.resources.baseUrl,
       ...config,
-      database: { type: "postgres" as const, dialect: this.resources.dialect },
+      database: { type: this.resources.dialectKind, dialect: this.resources.dialect },
     });
     return new Outer<TContext & { auth: OuterAuth }, TDB, TRouter>(
       { ...(this.name && { name: this.name }) },
@@ -249,7 +267,13 @@ export class Outer<
     const cols = this.schemas.at(-1)?.tables[name] as Record<string, ColumnDef> | undefined;
     if (!cols) throw new Error(`Table "${name}" not found in schema`);
     for (const [action, proc] of Object.entries(
-      buildResourceProcedures(name, cols, this.pendingBase as any, options),
+      buildResourceProcedures(
+        name,
+        cols,
+        this.pendingBase as any,
+        options,
+        this.resources.dialectKind,
+      ),
     )) {
       this.addToRouter(`${name}.${action}`, proc);
     }
@@ -326,7 +350,7 @@ export class Outer<
       return response;
     });
 
-    return new BuiltOuter(server, db, this.schemas, this.pendingRouter);
+    return new BuiltOuter(server, db, this.schemas, this.pendingRouter, this.resources.dialectKind);
   }
 
   private addToRouter(dotName: string, proc: AnyProcedure): void {
@@ -345,9 +369,15 @@ export class BuiltOuter<TRouter extends Record<string, any> = Router<any>> {
   readonly router: TRouter;
   private readonly server: H3;
 
-  constructor(server: H3, db: Kysely<any>, schemas: SchemaResult<any>[], router: TRouter) {
+  constructor(
+    server: H3,
+    db: Kysely<any>,
+    schemas: SchemaResult<any>[],
+    router: TRouter,
+    dialectKind: DialectKind = "postgres",
+  ) {
     this.server = server;
-    this.migrator = createMigrator({ db, schemas });
+    this.migrator = createMigrator({ db, schemas, kind: dialectKind });
     this.router = router;
   }
 
