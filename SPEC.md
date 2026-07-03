@@ -208,7 +208,7 @@ Seals the router and constructs the HTTP server. Returns a `BuiltOuter` with:
 The handler itself is host-agnostic, but the bundled PGlite database is not: it writes to local disk (`db.dataDir`), so the host needs a persistent, writable filesystem across requests. This works on a VPS, Coolify, or any long-lived Node process; it does not work on serverless/edge platforms (Vercel Functions, Cloudflare Workers) — see Roadmap.
 
 ```ts
-// e.g. Nitro server entry (see templates/nitro-ilha)
+// e.g. Nitro server entry (see templates/ilha)
 export default { fetch: (req: Request) => outer.handle(req) };
 ```
 
