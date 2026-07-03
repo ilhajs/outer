@@ -1,6 +1,6 @@
 import { v1_0_0 } from "$lib/schemas/v1-0-0";
 import { Outer, type InferRouter } from "@outerjs/server";
-import { pgliteDb } from "@outerjs/server/pglite";
+import { pglite } from "@outerjs/server/pglite";
 import { emailOTP } from "better-auth/plugins";
 import { useRuntimeConfig } from "nitro/runtime-config";
 import { useStorage } from "nitro/storage";
@@ -11,7 +11,7 @@ const runtimeConfig = useRuntimeConfig();
 const outer = new Outer({
   name: "Outer",
   baseUrl: import.meta.env.VITE_APP_URL,
-  db: pgliteDb(),
+  db: pglite(),
 })
   .schema(v1_0_0)
   .auth({

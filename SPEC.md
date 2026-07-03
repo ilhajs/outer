@@ -7,9 +7,9 @@ Outer is a batteries-included TypeScript backend framework built on Kysely, oRPC
 ## Builder chain
 
 ```ts
-import { pgliteDb } from "@outerjs/server/pglite";
+import { pglite } from "@outerjs/server/pglite";
 
-const server = new Outer({ name: "My API", baseUrl: "http://localhost:3000", db: pgliteDb() })
+const server = new Outer({ name: "My API", baseUrl: "http://localhost:3000", db: pglite() })
   .schema(v1_0)
   .schema(v1_1)        // each call adds a migration step and updates the DB type
   .auth({ secret: process.env.AUTH_SECRET! })
@@ -38,9 +38,9 @@ Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`
 
 ```ts
 import { Outer } from "@outerjs/server";
-import { pgliteDb } from "@outerjs/server/pglite";
+import { pglite } from "@outerjs/server/pglite";
 
-new Outer({ db: pgliteDb() }); // or pgliteDb({ dataDir: "..." }), defaults to <cwd>/.outer/pglite
+new Outer({ db: pglite() }); // or pglite({ dataDir: "..." }), defaults to <cwd>/.outer/pglite
 ```
 
 This is the path to reach for first; it's what makes Outer deployable to a VPS/Coolify box with nothing else to provision. Splitting it into a subpath keeps PGlite's WASM out of deploy bundles for platforms where it's dead weight (Cloudflare Workers, Vercel Functions) — see `templates/cloudflare` and `templates/vercel-neon`.
@@ -233,7 +233,7 @@ Seals the router and constructs the HTTP server. Returns a `BuiltOuter` with:
 
 `BuiltOuter.handle(request: Request): Promise<Response>` is a plain Fetch API handler, so Outer mounts as the server entry for any framework that speaks `fetch` — Nitro, Hono, H3, Next.js API Routes, etc. Export whatever shape the host expects and delegate to `outer.handle`:
 
-The handler itself is host-agnostic, but if you're using `pgliteDb()` (the recommended default), PGlite is not: it writes to local disk (`dataDir`), so the host needs a persistent, writable filesystem across requests. This works on a VPS, Coolify, or any long-lived Node process; it does not work on serverless/edge platforms (Vercel Functions, Cloudflare Workers) unless you swap in a different dialect — see "Custom dialects" and Roadmap.
+The handler itself is host-agnostic, but if you're using `pglite()` (the recommended default), PGlite is not: it writes to local disk (`dataDir`), so the host needs a persistent, writable filesystem across requests. This works on a VPS, Coolify, or any long-lived Node process; it does not work on serverless/edge platforms (Vercel Functions, Cloudflare Workers) unless you swap in a different dialect — see "Custom dialects" and Roadmap.
 
 ```ts
 // e.g. Nitro server entry (see templates/ilha)
@@ -582,7 +582,7 @@ Use `withEventMeta` to attach an event `id` to each yield. On reconnect, oRPC pa
 
 ## Roadmap
 
-Alpha focuses on persistent-hosting deployments (VPS, Coolify) with `pgliteDb()` as the recommended default. One thing is planned next:
+Alpha focuses on persistent-hosting deployments (VPS, Coolify) with `pglite()` as the recommended default. One thing is planned next:
 
 - **Admin dashboard/UI** — comparable to PocketBase's dashboard or Supabase Studio. Should expose: table data browser with CRUD, user/session management, and migration status. Planned as a separate `outer-admin` package served at `/admin` when enabled.
 

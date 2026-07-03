@@ -1,15 +1,15 @@
 import { test, describe, expect } from "bun:test";
 
-import { pgliteDb } from "./pglite";
+import { pglite } from "./pglite";
 
-describe("pgliteDb", () => {
+describe("pglite", () => {
   test("returns a postgres dialect + kind pair usable as Outer's db param", () => {
-    const db = pgliteDb({ dataDir: "memory://" });
+    const db = pglite({ dataDir: "memory://" });
     expect(db.kind).toBe("postgres");
     expect(db.dialect).toBeDefined();
   });
 
   test("skips mkdirSync for memory:// data dirs", () => {
-    expect(() => pgliteDb({ dataDir: "memory://" })).not.toThrow();
+    expect(() => pglite({ dataDir: "memory://" })).not.toThrow();
   });
 });

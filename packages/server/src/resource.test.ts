@@ -3,7 +3,7 @@ import { test, describe, beforeAll, expect } from "bun:test";
 import { z } from "zod/v4";
 
 import { Outer, schema } from "./index";
-import { pgliteDb } from "./pglite";
+import { pglite } from "./pglite";
 
 const s = schema("1.0.0")
   .table("post", (t) => ({
@@ -18,7 +18,7 @@ function makeApp(opts?: Parameters<ReturnType<typeof Outer.prototype.schema>["re
   return new Outer({
     name: "Test",
     baseUrl: "http://localhost",
-    db: pgliteDb({ dataDir: "memory://" }),
+    db: pglite({ dataDir: "memory://" }),
   })
     .schema(s)
     .auth({ secret: "test-secret" })
@@ -122,7 +122,7 @@ function makeUniqueApp() {
   return new Outer({
     name: "Test",
     baseUrl: "http://localhost",
-    db: pgliteDb({ dataDir: "memory://" }),
+    db: pglite({ dataDir: "memory://" }),
   })
     .schema(uniqueSchema)
     .resource("post")
@@ -277,7 +277,7 @@ const authSchema = schema("1.0.0")
 
 function makeAuthApp(opts?: Parameters<ReturnType<typeof Outer.prototype.schema>["resource"]>[1]) {
   return (
-    new Outer({ name: "Test", baseUrl: "http://localhost", db: pgliteDb({ dataDir: "memory://" }) })
+    new Outer({ name: "Test", baseUrl: "http://localhost", db: pglite({ dataDir: "memory://" }) })
       .schema(authSchema)
       .auth({
         secret: "test-secret",

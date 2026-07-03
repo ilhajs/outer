@@ -6,7 +6,7 @@ Outer is an alternative to Supabase, PocketBase, and Firebase where you own 100%
 
 ```ts
 import { Outer, schema } from "@outerjs/server";
-import { pgliteDb } from "@outerjs/server/pglite";
+import { pglite } from "@outerjs/server/pglite";
 import { serve } from "srvx";
 
 const v1_0 = schema("1.0.0")
@@ -18,7 +18,7 @@ const v1_0 = schema("1.0.0")
   }))
   .build();
 
-const outer = new Outer({ name: "My API", baseUrl: "http://localhost:3000", db: pgliteDb() })
+const outer = new Outer({ name: "My API", baseUrl: "http://localhost:3000", db: pglite() })
   .schema(v1_0)
   .auth({ secret: process.env.AUTH_SECRET! })
   .openapi()

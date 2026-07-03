@@ -64,8 +64,8 @@ export type OuterParams = {
    * A Kysely `Dialect` plus the dialect family it belongs to — `kind` drives
    * DDL generation, Better Auth's schema, and DB error mapping, so it must
    * match the dialect you provide. For the zero-infra embedded Postgres
-   * default, use `pgliteDb()` from `@outerjs/server/pglite`:
-   * `new Outer({ db: pgliteDb() })`. For anything else (network Postgres,
+   * default, use `pglite()` from `@outerjs/server/pglite`:
+   * `new Outer({ db: pglite() })`. For anything else (network Postgres,
    * Cloudflare D1/Durable Objects, etc.) construct the `Dialect` yourself.
    */
   db: { dialect: Dialect; kind: DialectKind };

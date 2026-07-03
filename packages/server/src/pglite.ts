@@ -9,8 +9,8 @@ export type PGliteDbConfig = {
   dataDir?: string;
 };
 
-/** Embedded, zero-infra Postgres via PGlite — the default most Outer apps want. Pass the result as `new Outer({ db: pgliteDb() })`. */
-export function pgliteDb(config: PGliteDbConfig = {}): { dialect: Dialect; kind: "postgres" } {
+/** Embedded, zero-infra Postgres via PGlite — the default most Outer apps want. Pass the result as `new Outer({ db: pglite() })`. */
+export function pglite(config: PGliteDbConfig = {}): { dialect: Dialect; kind: "postgres" } {
   const dataDir = config.dataDir ?? path.join(process.cwd(), ".outer", "pglite");
   if (!dataDir.startsWith("memory://")) {
     mkdirSync(dataDir, { recursive: true });
