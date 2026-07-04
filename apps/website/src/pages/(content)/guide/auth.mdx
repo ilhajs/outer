@@ -1,0 +1,66 @@
+---
+title: Auth & Permissions
+description: Enable Better Auth with .auth(), configure baseURL for dynamic origins, and pull the session into procedures.
+order: 3
+tags: [auth, better-auth, permissions, middleware]
+---
+
+# Auth & Permissions
+
+Outer wraps [Better Auth](https://www.better-auth.com) directly — `.auth(config)` mounts the handler at `/api/auth/**` and wires Better Auth's database to whichever dialect you configured on `new Outer({ db })`.
+
+## Enabling auth
+
+```ts
+new Outer({ db: pglite() }).schema(v1_0).auth({ secret: process.env.AUTH_SECRET! }).build();
+```
+
+`.auth()` can appear anywhere in the builder chain, and must be called before `.build()`. Its `config` is `Omit<BetterAuthOptions, "database"> & { secret: string }` — every Better Auth option (`plugins`, `emailAndPassword`, `trustedOrigins`, etc.) is accepted directly, with `secret` made required. `database` is owned by Outer and cannot be overridden here.
+
+Calling `.auth()` returns a new `Outer` whose `context.auth` type is narrowed to required (non-optional) for everything chained after it. When `.auth()` is **not** called, `context.auth` is `undefined`, `/api/auth/**` is not mounted, and resource permissions other than `"public"` will throw a configuration error.
+
+Outer's core does not set any Better Auth defaults — no default plugins, no default email options. Configure everything explicitly.
+
+## `baseURL`
+
+`baseURL` defaults to the `baseUrl` passed to `new Outer({ baseUrl })`, but can be overridden per-call via `.auth({ baseURL })`.
+
+It accepts either a static string or Better Auth's `DynamicBaseURLConfig`, which derives the correct origin per-request from the `Host` header instead of a fixed value:
+
+```ts
+.auth({
+  secret: process.env.AUTH_SECRET!,
+  baseURL: {
+    // "*" allows every host — fine for scaffolding/previews, but means
+    // anyone can point this server at itself with a spoofed Host header.
+    // Once you have a real domain, restrict this to only the hosts you
+    // actually serve, e.g. ["yourapp.com", "*.yourapp.com"].
+    allowedHosts: ["*"],
+    fallback: "http://localhost:3000", // must resolve to a real value — an unset env var here silently disables the fallback
+  },
+})
+```
+
+Use this for deployments behind a dynamic or preview domain (Vercel previews, StackBlitz, Coolify preview deployments) where the real origin isn't known at build time. A fixed `baseUrl` there causes Better Auth to scope session cookies to the wrong origin, so sign-in appears to succeed but the session is never actually persisted.
+
+Patterns are matched against the full `Host` header including port — bare `"localhost"` will **not** match `"localhost:3000"`; use `"localhost:*"` if you need to restrict rather than allow all hosts.
+
+## Reading the session in procedures
+
+Use `.middleware()` to load the session once and add it to `context`:
+
+```ts
+.auth()
+.middleware(async ({ context, next }) => {
+  const session = await context.auth.api.getSession({ headers: context.headers });
+  return next({ context: { user: session?.user } });
+})
+```
+
+Fields added via `next({ context: { ... } })` are merged into every subsequent `.procedure()` handler's context.
+
+## Permissions on `.resource()`
+
+`.resource()` accepts a `permissions` map per CRUD action — see [Schema & Migrations](/guide/schema#permissions) for the full table of `"public"`, `"authenticated"`, `"admin"`, and `"owner"` behavior, including automatic owner-column injection and 403 handling.
+
+Next: register custom [Procedures](/guide/procedures), or stream updates with [Realtime](/guide/realtime).

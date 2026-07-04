@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -24,3 +28,34 @@ jobs:
       - run: bun run build
 
       - run: bunx pkg-pr-new publish ./packages/server ./packages/sdk
+
+  deploy-website:
+    runs-on: ubuntu-latest
+    needs: publish
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - run: bun run build
+        working-directory: apps/website
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/website/dist
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

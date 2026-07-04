@@ -1,0 +1,109 @@
+---
+title: Deployment
+description: Deploy Outer with the zero-infra pglite() default, swap in custom Kysely dialects for serverless platforms, and embed the handler in any host framework.
+order: 6
+tags: [deploy, pglite, dialects, vps, serverless]
+---
+
+# Deployment
+
+`BuiltOuter.handle(request: Request): Promise<Response>` is a plain Fetch API handler, so Outer mounts as the server entry for any framework that speaks `fetch` — Nitro, Hono, H3, Next.js API Routes, etc.
+
+## The zero-infra default: `pglite()`
+
+For persistent-hosting deployments (VPS, Coolify), import the `pglite()` helper from the `/pglite` subpath:
+
+```ts
+import { Outer } from "@outerjs/server";
+import { pglite } from "@outerjs/server/pglite";
+
+new Outer({ db: pglite() }); // or pglite({ dataDir: "..." }), defaults to <cwd>/.outer/pglite
+```
+
+[PGlite](https://pglite.dev) is real Postgres, running embedded and writing to local disk — no external infra to run. This is the path to reach for first; it's what makes Outer deployable to a VPS/Coolify box with nothing else to provision. Splitting it into a subpath keeps PGlite's WASM out of deploy bundles for platforms where it's dead weight (Cloudflare Workers, Vercel Functions).
+
+Because PGlite writes to local disk, the host needs a persistent, writable filesystem across requests. This works on a VPS, Coolify, or any long-lived Node process — it does not work on serverless/edge platforms unless you swap in a different dialect.
+
+## Custom dialects for serverless/edge
+
+For platforms without a persistent filesystem (Vercel Functions, Cloudflare Workers), or to point at an existing database, pass any [Kysely `Dialect`](https://kysely.dev/docs/dialects) directly:
+
+```ts
+import { D1Dialect } from "kysely-d1"; // or PostgresDialect, MysqlDialect, kysely-durable-objects, etc.
+
+new Outer({
+  db: { dialect: new D1Dialect({ database: env.DB }), kind: "sqlite" },
+});
+```
+
+`kind` tells Outer which SQL dialect family to generate DDL for (column types like `serial`/`jsonb`/`uuid` don't exist in SQLite, so they're remapped) and which constraint-error codes to recognize when turning DB errors into `CONFLICT`/`BAD_REQUEST` responses.
+
+Currently supported:
+
+- `"postgres"` — PGlite, or any network Postgres via `PostgresDialect`
+- `"sqlite"` — Cloudflare D1, Durable Objects via `kysely-durable-objects`, libSQL/Turso, etc.
+
+Kysely also ships `mysql`/`mssql` dialects, and Better Auth supports them — but Outer doesn't generate correct DDL for them yet, so `kind` is deliberately typed to just the two verified options.
+
+### Verified templates
+
+- `templates/cloudflare` — Cloudflare Workers with Durable Objects
+- `templates/vercel-neon` — Vercel Functions with Neon Postgres
+
+Both ship with a `deploy` script:
+
+```sh
+$ npm run deploy
+
+# templates/cloudflare   -> wrangler deploy
+# templates/vercel-neon  -> vercel deploy --prod
+```
+
+## Embedding in a host framework
+
+The handler itself is host-agnostic. Export whatever shape the host expects and delegate to `outer.handle`:
+
+```ts
+// e.g. Nitro server entry (see templates/ilha)
+export default { fetch: (req: Request) => outer.handle(req) };
+```
+
+Use `.middleware()` to pull the host runtime's own utilities into `context`, alongside `context.db`/`context.auth`, so they're available in every `.procedure()`:
+
+```ts
+import { useStorage } from "nitro/storage";
+import { runTask } from "nitro/task";
+
+const outer = new Outer(...)
+  .schema(v1_0)
+  .auth({ secret: useRuntimeConfig().authSecret })
+  .middleware(async ({ context, next }) => {
+    const kv = useStorage();
+    return next({ context: { kv, runTask } });
+  })
+  .procedure("foo", (base) =>
+    base.handler(async ({ context }) => {
+      await context.kv.setItem("foo", "bar");
+      return { foo: await context.kv.getItem("foo") };
+    }),
+  )
+  .build();
+```
+
+This is the same pattern regardless of host — swap `nitro/storage`/`nitro/task` for whatever the framework provides (Cloudflare bindings, Next.js `headers()`, etc.).
+
+## HTTP routes
+
+| Method | Path            | Handler                                                                       |
+| ------ | --------------- | ----------------------------------------------------------------------------- |
+| `GET`  | `/openapi.json` | OpenAPI 3.x spec (only mounted when `.openapi({ enabled: true })` was called) |
+| `ALL`  | `/api/auth/**`  | Better Auth handler (only mounted when `.auth()` was called)                  |
+| `ALL`  | `/rpc/**`       | oRPC handler (prefix `/rpc`)                                                  |
+
+## Roadmap
+
+Alpha focuses on persistent-hosting deployments (VPS, Coolify) with `pglite()` as the recommended default. One thing is planned next:
+
+- **Admin dashboard/UI** — comparable to PocketBase's dashboard or Supabase Studio. Should expose: table data browser with CRUD, user/session management, and migration status. Planned as a separate `outer-admin` package served at `/admin` when enabled.
+
+Serverless/edge support is no longer blocked — `db: { dialect, kind }` lets you swap PGlite for a network-attached Postgres or a `"sqlite"`-family dialect, with working, verified templates for both. `mysql`/`mssql` `kind`s still aren't implemented (Kysely ships dialects for both, but Outer's DDL generation and error mapping don't cover them).

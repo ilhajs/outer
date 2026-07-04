@@ -1,0 +1,67 @@
+---
+title: Getting Started
+description: Scaffold an Outer server, wire up schema, auth, and procedures, and run migrations.
+order: 1
+tags: [setup, quickstart]
+---
+
+# Getting Started
+
+Outer is a batteries-included TypeScript backend framework built on Kysely, oRPC, and Better Auth, with [PGlite](https://pglite.dev) as the recommended zero-infra default database. It exposes a builder-chain API that produces a fetch-compatible HTTP handler.
+
+## Create a server
+
+```bash
+npx giget@latest gh:ilhajs/outer/templates/minimal my-outer-app
+cd my-outer-app
+npm install
+npm run dev
+```
+
+## The builder chain
+
+```ts
+import { Outer, schema } from "@outerjs/server";
+import { pglite } from "@outerjs/server/pglite";
+
+const v1_0 = schema("1.0.0")
+  .table("user", (t) => ({
+    id: t.text().primaryKey(),
+    email: t.text().unique(),
+    name: t.text(),
+  }))
+  .build();
+
+const server = new Outer({ name: "My API", baseUrl: "http://localhost:3000", db: pglite() })
+  .schema(v1_0)
+  .auth({ secret: process.env.AUTH_SECRET! })
+  .middleware(async ({ context, next }) => {
+    const session = await context.auth.api.getSession({ headers: context.headers });
+    return next({ context: { user: session?.user } });
+  })
+  .procedure("user.me", (base) => base.handler(({ context }) => context.user))
+  .build();
+
+await server.migrator.migrateToLatest();
+serve({ fetch: (req) => server.handle(req) });
+```
+
+Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`. `.auth()` and `.openapi()` can appear anywhere in the chain.
+
+## Project structure
+
+```txt
+my-outer-app/
+├── src/
+│   ├── schema.ts   # schema("1.0.0")...build() versions
+│   └── index.ts    # new Outer(...).schema(...).auth(...).procedure(...).build()
+└── package.json
+```
+
+## Where to next
+
+- [Schema & Migrations](/guide/schema) — define tables, relations, and auto-generated CRUD with `.resource()`
+- [Auth & Permissions](/guide/auth) — enable Better Auth and read the session in procedures
+- [Procedures & Context](/guide/procedures) — register custom procedures, raw routes, and query with the Sola ORM
+- [Realtime](/guide/realtime) — stream updates over SSE with oRPC's event iterators
+- [Deployment](/guide/deployment) — the `pglite()` default, custom dialects, and embedding in a host framework

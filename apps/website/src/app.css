@@ -1,0 +1,7 @@
+@import "imprensa/default.css";
+
+* {
+  --font-sans: "Geist Variable", sans-serif;
+  --font-mono: "Geist Mono Variable", monospace;
+  --areia-primary: #642dff;
+}

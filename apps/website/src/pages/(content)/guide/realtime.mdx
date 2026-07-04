@@ -1,0 +1,76 @@
+---
+title: Realtime
+description: Stream updates over SSE with oRPC's event iterators, fan out events with EventPublisher, and resume dropped connections.
+order: 5
+tags: [realtime, sse, event-iterator, eventpublisher]
+---
+
+# Realtime
+
+Outer supports realtime streaming via oRPC's built-in event iterator (SSE) support. No additional infrastructure is needed — the existing `/rpc/**` handler streams async generators automatically.
+
+## Basic event stream
+
+```ts
+import { eventIterator } from "@orpc/server";
+
+.procedure("notifications.stream", (base) =>
+  base
+    .output(eventIterator(z.object({ message: z.string() })))
+    .handler(async function* ({ context, signal }) {
+      while (!signal?.aborted) {
+        const notification = await waitForNotification(context.db);
+        yield { message: notification.text };
+      }
+    })
+)
+```
+
+## Fan-out with `EventPublisher`
+
+For broadcasting events across procedures (e.g. subscribe to mutations triggered by other users), instantiate an `EventPublisher` at module scope and reference it in your procedures:
+
+```ts
+import { EventPublisher, withEventMeta } from "@orpc/server";
+
+const postEvents = new EventPublisher<{ created: { id: number; title: string } }>();
+
+const server = new Outer(...)
+  .procedure("post.create", (base) =>
+    base.input(z.object({ title: z.string() })).handler(async ({ context, input }) => {
+      const row = await context.db.insertInto("post").values(input).returningAll().executeTakeFirstOrThrow();
+      postEvents.publish("created", row);
+      return row;
+    })
+  )
+  .procedure("post.live", (base) =>
+    base
+      .output(eventIterator(z.object({ id: z.number(), title: z.string() })))
+      .handler(async function* ({ signal }) {
+        for await (const payload of postEvents.subscribe("created", { signal })) {
+          yield withEventMeta(payload, { id: String(payload.id) });
+        }
+      })
+  )
+  .build();
+```
+
+## Resume support
+
+Use `withEventMeta` to attach an event `id` to each yield. On reconnect, oRPC passes the last seen ID as `lastEventId` so the handler can resume from a known position:
+
+```ts
+.handler(async function* ({ lastEventId }) {
+  // fetch missed events from DB if lastEventId is set
+  if (lastEventId) { /* replay from DB */ }
+  for await (const event of publisher.subscribe("updated", { signal })) {
+    yield withEventMeta(event, { id: event.id });
+  }
+})
+```
+
+## Serverless caveat
+
+`EventPublisher` is in-memory and tied to a single process. It works correctly on VPS, Coolify, or any long-lived single-instance deployment. On multi-instance platforms (Cloudflare Workers, Vercel serverless functions, horizontally scaled Node), events published in one instance are not visible to subscribers in other instances. For those environments, route events through an external pub/sub system (Redis, Cloudflare Durable Objects, etc.) and subscribe from there instead of from a module-level `EventPublisher`.
+
+Next: see [Deployment](/guide/deployment) for hosting options and how this caveat interacts with each platform.

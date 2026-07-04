@@ -1,0 +1,30 @@
+{
+  "name": "imprensa-starter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && tsc",
+    "preview": "vite preview",
+    "lint": "oxlint",
+    "fmt": "oxfmt"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist": "^5.2.9",
+    "@fontsource-variable/geist-mono": "^5.2.8",
+    "@ilha/router": "^0.6.8",
+    "@ilha/store": "^0.5.10",
+    "areia": "^0.1.34",
+    "ilha": "^0.8.5",
+    "imprensa": "^0.1.16",
+    "lucide": "^1.17.0",
+    "sonner": "^2.0.7"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.53.0",
+    "oxlint": "^1.68.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.1.0"
+  }
+}

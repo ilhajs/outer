@@ -1,0 +1,196 @@
+---
+title: Procedures & Context
+description: Register oRPC procedures with .procedure(), mount raw routes with .route(), and query the DB with context.db and the Sola ORM.
+order: 4
+tags: [procedure, route, context, orm, sola]
+---
+
+# Procedures & Context
+
+## `.procedure(name, cb)`
+
+Registers an oRPC procedure. `name` supports dot-notation — `"user.me"` nests the procedure as `{ user: { me: proc } }`, served at `POST /rpc/user/me`. Multiple procedures under the same namespace are deep-merged.
+
+```ts
+.procedure("user.me",     (base) => base.handler(...))
+.procedure("user.update", (base) => base.input(z.object({...})).handler(...))
+```
+
+`.procedure()` fully infers each procedure's `.input()`/`.output()` types into the router, so `client.foo(...)`, `client.user.me(...)`, etc. are properly typed on `RouterClient<Router>` — see [`outer.router`](#outerrouter-type-extraction) below.
+
+## `.route(method, path, handler)`
+
+Mounts a raw H3 route alongside `.procedure()`-defined RPC routes — for webhooks, custom REST endpoints, or anything that doesn't fit the oRPC shape. `handler` receives the H3 `event` and the same `context` (`headers`, `db`, `auth`) available in procedure handlers. Registered before `/rpc/**`, so it takes precedence on overlapping paths.
+
+```ts
+.route("post", "/webhooks/stripe", async (event, { db }) => {
+  const body = await event.req.json();
+  // ...
+  return new Response("ok");
+})
+```
+
+## Request context
+
+Available in every procedure handler:
+
+```ts
+type OuterRpcContext<TDB> = {
+  headers: Headers;
+  auth?: OuterAuth; // Better Auth instance; undefined if .auth() was not called
+  db: OuterDB<TDB>; // Kysely<TDB> + .query (Sola)
+};
+```
+
+### `context.db`
+
+The full Kysely instance, typed to the latest schema. Use it for raw queries and writes:
+
+```ts
+context.db.insertInto("user").values({...}).execute()
+context.db.selectFrom("session").where("userId", "=", id).selectAll().execute()
+```
+
+### `context.db.query` — the Sola ORM
+
+A read-focused, ergonomic API over the same Kysely instance. Table names match the schema exactly (singular: `user`, `session`).
+
+**`findMany(args?)`**
+
+```ts
+const users = await context.db.query.user.findMany({
+  where: { email: { contains: "acme.com" } },
+  include: { session: { orderBy: [{ createdAt: "desc" }], take: 5 } },
+  orderBy: [{ createdAt: "desc" }],
+  take: 20,
+  skip: 0,
+});
+```
+
+**`findFirst(args?)`** — same as `findMany` but returns `T | null` (applies `LIMIT 1` internally).
+
+**`findUnique({ where })`** — lookup by exact field value. Throws if no record found. `where` accepts direct values only (no filter operators).
+
+```ts
+const user = await context.db.query.user.findUnique({ where: { id: "abc" } });
+```
+
+**`count(args?)`**
+
+```ts
+const n = await context.db.query.user.count({ where: { emailVerified: true } });
+```
+
+**`exists(args?)`** — cheaper than `count`, uses `SELECT 1 ... LIMIT 1`.
+
+```ts
+const taken = await context.db.query.user.exists({ where: { email: "x@y.com" } });
+```
+
+**`paginate(args)`** — `orderBy` and `take` are required.
+
+Offset mode (pass `skip`):
+
+```ts
+const page = await context.db.query.user.paginate({
+  orderBy: [{ createdAt: "desc" }],
+  take: 20,
+  skip: 40,
+});
+```
+
+Cursor mode (pass `after` or `before`):
+
+```ts
+const page1 = await context.db.query.user.paginate({ orderBy: [{ id: "desc" }], take: 20 });
+const page2 = await context.db.query.user.paginate({
+  orderBy: [{ id: "desc" }],
+  take: 20,
+  after: page1.pagination.endCursor!,
+});
+```
+
+Result shape:
+
+```ts
+{
+  data: T[],
+  pagination: {
+    count:       number,   // total matching rows
+    hasNext:     boolean,
+    hasPrevious: boolean,
+    startCursor: string | null,  // null in offset mode
+    endCursor:   string | null,  // null in offset mode
+  }
+}
+```
+
+Cursors are opaque base64-encoded strings derived from `orderBy` column values. Multi-column `orderBy` uses correct row-comparison keyset semantics — always include a unique column (e.g. `id`) as the final `orderBy` entry to guarantee stable pages.
+
+### `where` operators
+
+| Operator                    | Types        | SQL                                          |
+| --------------------------- | ------------ | -------------------------------------------- |
+| `equals`                    | all          | `= val`                                      |
+| `not`                       | all          | `!= val`                                     |
+| `in`                        | all          | `IN (...)`                                   |
+| `notIn`                     | all          | `NOT IN (...)`                               |
+| `lt` / `lte` / `gt` / `gte` | number, Date | `< <= > >=`                                  |
+| `contains`                  | string       | `LIKE %val%`                                 |
+| `startsWith`                | string       | `LIKE val%`                                  |
+| `endsWith`                  | string       | `LIKE %val`                                  |
+| `isNull: true`              | nullable     | `IS NULL`                                    |
+| `isNull: false`             | nullable     | `IS NOT NULL`                                |
+| `AND`                       | —            | implicit (multiple fields) or explicit array |
+| `OR`                        | —            | `OR(...)`                                    |
+| `NOT`                       | —            | `NOT(...)`                                   |
+
+### `include`
+
+Loads related tables defined via `.relation()` in the schema. Uses separate queries per relation (Prisma-style) — one extra query per included relation, results merged in JS.
+
+- `hasMany` / `manyToMany` → array on the result
+- `belongsTo` / `hasOne` → single object or `null`
+
+Nested include is not supported — max one level of relations per query. `manyToMany` includes require `pivotTable` to be set on the relation definition; Outer performs a two-hop join through the pivot table automatically.
+
+## `outer.router` (type extraction)
+
+Both the `Outer` instance and `BuiltOuter` (the return value of `.build()`) expose a `router` property with the internal oRPC router type. Use the exported `InferRouter<T>` helper to extract it:
+
+```ts
+// src/index.ts
+export const outer = new Outer(...)
+  .schema(v1_0)
+  .procedure("user.me", (base) => base.handler(...))
+  .build();
+```
+
+```ts
+// outer.types.ts
+import type { RouterClient } from "@orpc/server";
+import type { InferRouter } from "@outerjs/server";
+import type { outer } from "./src/index.js";
+
+export type Router = InferRouter<typeof outer>;
+export type AppClient = RouterClient<Router>;
+```
+
+Outer's core has no CLI — write the file above by hand, or generate it with your own script if you want automation.
+
+## OpenAPI
+
+`.openapi(config?)` toggles `GET /openapi.json` — not mounted unless this is called, and calling it with no args enables it. Must be called before `.build()`, but can appear anywhere in the chain.
+
+| Option    | Type      | Default | Description                      |
+| --------- | --------- | ------- | -------------------------------- |
+| `enabled` | `boolean` | `true`  | Whether to mount `/openapi.json` |
+
+```ts
+.openapi() // always enabled
+.openapi({ enabled: import.meta.env.DEV }) // enable on dev/staging only, keep it off in prod
+```
+
+`GET /openapi.json` returns an OpenAPI 3.x document generated by `@orpc/openapi`. Title comes from the `name` param, version from the last registered schema. Procedures with `.input(zodSchema)` / `.output(zodSchema)` are fully documented — output schema is not inferred from handler return types, so explicit `.output()` is required for response documentation.
+
+Next: stream updates with [Realtime](/guide/realtime), or see [Deployment](/guide/deployment) for hosting options.

@@ -1,0 +1,138 @@
+---
+title: Schema & Migrations
+description: Define tables and relations with schema(), register versions with .schema(), and auto-generate CRUD with .resource().
+order: 2
+tags: [schema, migrations, resource, crud]
+---
+
+# Schema & Migrations
+
+Outer's schema builder defines tables and relations, and doubles as your migration history: every `.schema()` call registered on the builder chain becomes one migration step.
+
+## Defining a schema version
+
+```ts
+import { schema } from "@outerjs/server";
+
+const v1_0 = schema("1.0.0")
+  .table("user", (t) => ({
+    id: t.text().primaryKey(),
+    email: t.text().unique(),
+    name: t.text(),
+    image: t.text().nullable(),
+  }))
+  .table("post", (t) => ({
+    id: t.serial().primaryKey(),
+    title: t.text(),
+    body: t.text().nullable(),
+    authorId: t.text().references("user", "id"),
+  }))
+  .relation("user", (rel) => rel.hasMany("post", { from: "id", to: "authorId" }))
+  .relation("post", (rel) => rel.belongsTo("user", { from: "authorId", to: "id" }))
+  .build();
+```
+
+### Column types
+
+`text` · `varchar` · `integer` · `serial` · `boolean` · `timestamp` · `jsonb` · `uuid`
+
+`timestamp` maps to `timestamptz` in the generated DDL.
+
+### Column modifiers
+
+`.primaryKey()` · `.unique()` · `.nullable()` · `.default(expr: string)` · `.references(table, column)`
+
+### Relation kinds
+
+`hasMany` · `hasOne` · `belongsTo` · `manyToMany`
+
+### Type inference
+
+`SchemaResult<T>["_db"]` is the fully inferred Kysely database type — `{ [tableName]: { [column]: TSType } }`. Nullable columns become `TSType | null | undefined`.
+
+## Registering versions
+
+Pass each schema version to `.schema()` on the builder, in order:
+
+```ts
+new Outer({ db: pglite() })
+  .schema(v1_0)
+  .schema(v1_1) // each call adds a migration step and updates the DB type
+  .build();
+```
+
+Each call also advances `context.db`'s type to `InferDB<T>`, so procedures registered after a `.schema()` call see the new columns.
+
+## Running migrations
+
+```ts
+await server.migrator.migrateToLatest();
+```
+
+Outer uses a custom `SchemaMigrationProvider` that diffs consecutive schema versions. Each `schema("x.y.z")` call becomes one Kysely migration keyed by its version string, and migrations run in alphabetical version order.
+
+- **Up** — creates new tables, adds new columns, drops removed columns.
+- **Down** — reverses: drops added tables/columns, restores dropped ones.
+
+Type changes on existing columns are not handled automatically — use `context.db` directly for those.
+
+## Auto-generated CRUD with `.resource()`
+
+`.resource(name, options?)` generates five procedures for a table defined in the last `.schema()` call:
+
+```ts
+.resource("post", {
+  permissions: {
+    list: "public",
+    get: "public",
+    create: "authenticated",
+    update: "owner",
+    delete: "owner",
+  },
+  ownerColumn: "userId",
+})
+// Registers: post.list, post.get, post.create, post.update, post.delete
+```
+
+| Procedure       | Input                                             | Output        | Description              |
+| --------------- | ------------------------------------------------- | ------------- | ------------------------ |
+| `{name}.list`   | —                                                 | `Row[]`       | `SELECT *`               |
+| `{name}.get`    | `{ <pk>: ... }`                                   | `Row \| null` | Fetch by primary key     |
+| `{name}.create` | Row minus serial PK, defaults, and `ownerColumn`  | `Row`         | `INSERT ... RETURNING *` |
+| `{name}.update` | `{ where: { <pk> }, data: Partial<createInput> }` | `Row`         | `UPDATE ... RETURNING *` |
+| `{name}.delete` | `{ <pk>: ... }`                                   | `Row`         | `DELETE ... RETURNING *` |
+
+Input types are derived from column definitions at build time. `serial` primary key columns, columns with `.default()`, and `ownerColumn` are omitted from create input.
+
+`create`/`update` map common Postgres constraint violations to clean errors instead of a raw 500: unique/foreign-key violations → `409 CONFLICT`, not-null/check violations → `400 BAD_REQUEST`. `update`/`delete` on a row that doesn't exist → `404 NOT_FOUND`. Unrecognized DB errors still surface as a generic `500` with no internal details leaked.
+
+### Permissions
+
+| Value             | Description                                                                      |
+| ----------------- | -------------------------------------------------------------------------------- |
+| `"public"`        | No restriction (default)                                                         |
+| `"authenticated"` | User must be signed in — calls `context.auth.api.getSession()` internally        |
+| `"admin"`         | User must have `role === "admin"` (requires the Better Auth admin plugin)        |
+| `"owner"`         | User must own the row — requires `ownerColumn`; not valid for `list` or `create` |
+
+When `create` is `"authenticated"` and `ownerColumn` is set, the current user's ID is automatically injected into the insert — no need to pass it in the request.
+
+When `update` or `delete` is `"owner"`, the existing row is fetched first and `row[ownerColumn]` is compared to the session user's ID. Returns `403 FORBIDDEN` if they do not match.
+
+```ts
+// Full example
+.resource("post", {
+  permissions: {
+    list: "public",         // anyone can list
+    get: "public",          // anyone can read
+    create: "authenticated", // must be signed in; userId auto-filled
+    update: "owner",        // only the creator can edit
+    delete: "admin",        // only admins can delete
+  },
+  ownerColumn: "userId",
+})
+```
+
+`.resource()` currently registers its five CRUD procedures as loosely-typed `AnyProcedure` in the router type — their runtime behavior and validation are fully typed internally, but that derivation isn't yet mirrored at the type level. Use [`.procedure()`](/guide/procedures) directly if you need full type safety on a given endpoint.
+
+Next: wire up [Auth & Permissions](/guide/auth), or write custom [Procedures](/guide/procedures).
