@@ -69,7 +69,7 @@ Each call also advances `context.db`'s type to `InferDB<T>`, so procedures regis
 await server.migrator.migrateToLatest();
 ```
 
-Outer uses a custom `SchemaMigrationProvider` that diffs consecutive schema versions. Each `schema("x.y.z")` call becomes one Kysely migration keyed by its version string, and migrations run in alphabetical version order.
+Outer uses a custom `SchemaMigrationProvider` that diffs consecutive schema versions. Each `schema("x.y.z")` call becomes one Kysely migration keyed by its version string. Kysely applies migrations in plain lexicographic order of those version-string keys, which can disagree with numeric order once a segment reaches double digits (`"1.10.0"` sorts before `"1.2.0"` as a string). `migrateToLatest()` detects this mismatch up front and returns an error telling you to zero-pad segments (e.g. `"1.02.00"`) instead of silently applying migrations out of order.
 
 - **Up** — creates new tables, adds new columns, drops removed columns.
 - **Down** — reverses: drops added tables/columns, restores dropped ones.
@@ -96,7 +96,7 @@ Type changes on existing columns are not handled automatically — use `context.
 
 | Procedure       | Input                                             | Output        | Description              |
 | --------------- | ------------------------------------------------- | ------------- | ------------------------ |
-| `{name}.list`   | —                                                 | `Row[]`       | `SELECT *`               |
+| `{name}.list`   | `{ take?: number }`                               | `Row[]`       | `SELECT * LIMIT take`    |
 | `{name}.get`    | `{ <pk>: ... }`                                   | `Row \| null` | Fetch by primary key     |
 | `{name}.create` | Row minus serial PK, defaults, and `ownerColumn`  | `Row`         | `INSERT ... RETURNING *` |
 | `{name}.update` | `{ where: { <pk> }, data: Partial<createInput> }` | `Row`         | `UPDATE ... RETURNING *` |
@@ -104,7 +104,11 @@ Type changes on existing columns are not handled automatically — use `context.
 
 Input types are derived from column definitions at build time. `serial` primary key columns, columns with `.default()`, and `ownerColumn` are omitted from create input.
 
-`create`/`update` map common Postgres constraint violations to clean errors instead of a raw 500: unique/foreign-key violations → `409 CONFLICT`, not-null/check violations → `400 BAD_REQUEST`. `update`/`delete` on a row that doesn't exist → `404 NOT_FOUND`. Unrecognized DB errors still surface as a generic `500` with no internal details leaked.
+`list` defaults to 50 rows and rejects a `take` above 100 (`400 BAD_REQUEST`) — pass `listLimit: { default, max }` in `options` to change either bound. This keeps an unqualified `.resource()` call from becoming an unbounded `SELECT *` on a large table; reach for `context.db.query[table].paginate(...)` directly in a custom `.procedure()` when you need real pagination metadata.
+
+`create`/`update` map common Postgres constraint violations to clean errors instead of a raw 500: unique/foreign-key violations → `409 CONFLICT`, not-null/check violations → `400 BAD_REQUEST`. `update`/`delete` on a row that doesn't exist → `404 NOT_FOUND`. `update` with an empty `data` object → `400 BAD_REQUEST`. Unrecognized DB errors still surface as a generic `500` with no internal details leaked.
+
+`.resource()` and `.build()` validate configuration eagerly instead of failing on the first request: using `"owner"` on any action without `ownerColumn` throws as soon as `.resource()` is called, and if any action's permission requires a session (`"authenticated"`, `"admin"`, or `"owner"`) but `.auth()` was never called anywhere in the chain, `.build()` throws listing the offending `resource.action` names.
 
 ### Permissions
 

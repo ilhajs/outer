@@ -177,7 +177,9 @@ describe("cors", () => {
   });
 
   test("responds to a preflight OPTIONS request", async () => {
-    const app = makeOuter().cors({ origins: ["https://allowed.test"] }).build();
+    const app = makeOuter()
+      .cors({ origins: ["https://allowed.test"] })
+      .build();
 
     const res = await app.handle(
       new Request("http://localhost/rpc/ping", {

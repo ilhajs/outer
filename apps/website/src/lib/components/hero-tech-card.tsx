@@ -19,7 +19,7 @@ function HeroTechCard({ icon, title, description }: HeroTechCardInput) {
       <div class={heroCardInnerClass}>
         {icon}
         <div class="text-areia-foreground leading-snug font-semibold">{title}</div>
-        <div class="text-areia-subtle text-sm leading-relaxed">{description}</div>
+        <div class="text-areia-subtle text-xs leading-relaxed">{description}</div>
       </div>
     </div>
   );
@@ -72,23 +72,23 @@ export function HeroTechCards() {
     >
       <HeroTechCard
         icon={<Icon icon={Database} class="text-areia-foreground mb-1 size-6 sm:mb-2" />}
-        title="Kysely"
-        description="Typed SQL query builder"
+        title="Typed SQL queries"
+        description="Powered by Kysely"
       />
       <HeroTechCard
         icon={<Icon icon={Route} class="text-areia-foreground mb-1 size-6 sm:mb-2" />}
-        title="oRPC"
-        description="End-to-end typed procedures"
+        title="Type-safe API calls"
+        description="Powered by oRPC"
       />
       <HeroTechCard
         icon={<Icon icon={KeyRound} class="text-areia-foreground mb-1 size-6 sm:mb-2" />}
-        title="Better Auth"
-        description="Sessions, users, plugins"
+        title="Sessions & user accounts"
+        description="Powered by Better Auth"
       />
       <HeroTechCard
         icon={<Icon icon={Server} class="text-areia-foreground mb-1 size-6 sm:mb-2" />}
-        title="PGlite"
-        description="Zero-infra embedded Postgres"
+        title="Zero-infra database"
+        description="Powered by embedded Postgres"
       />
     </div>
   );

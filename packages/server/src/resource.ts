@@ -50,7 +50,9 @@ export type ResourceOptions = {
 /** Actions (of a given resource) whose permission requires a signed-in session — used by `Outer.build()` to fail fast if `.auth()` was never called. */
 export function actionsRequiringAuth(permissions: ResourcePermissions): string[] {
   return Object.entries(permissions)
-    .filter(([, permission]) => permission && permission !== "public" && typeof permission !== "function")
+    .filter(
+      ([, permission]) => permission && permission !== "public" && typeof permission !== "function",
+    )
     .map(([action]) => action);
 }
 
@@ -325,7 +327,9 @@ export function buildResourceProcedures(
       );
       await enforce(permissions.update, context, row, ownerColumn);
       if (Object.keys(input.data).length === 0) {
-        throw new ORPCError("BAD_REQUEST", { message: "update requires at least one field in `data`" });
+        throw new ORPCError("BAD_REQUEST", {
+          message: "update requires at least one field in `data`",
+        });
       }
       try {
         return await context.db

@@ -13,19 +13,21 @@ Outer is a batteries-included TypeScript backend framework built on Kysely, oRPC
 
 ## Create a server
 
-<ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/minimal my-outer-app" tooltip />
-<ClipboardText text="cd my-outer-app" tooltip />
-<ClipboardText text="npm install" tooltip />
-<ClipboardText text="npm run dev" tooltip />
+```bash
+npx giget@latest gh:ilhajs/outer/templates/minimal my-outer-app
+cd my-outer-app
+npm install
+npm run dev
+```
 
 ## Templates
 
-| Template | Description | Command |
-| --- | --- | --- |
-| `minimal` | The smallest possible Outer server — no frontend, just `new Outer(...).build()` behind [srvx](https://srvx.h3.dev). | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/minimal my-outer-app" tooltip /> |
-| `ilha` | Full-stack starter: Outer mounted as a [Nitro](https://nitro.build) server entry with an [Ilha](https://ilha.build) + Vite frontend. | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/ilha my-outer-app" tooltip /> |
-| `cloudflare` | Outer on Cloudflare Workers, backed by a Durable Object's SQLite storage instead of PGlite. | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/cloudflare my-outer-app" tooltip /> |
-| `vercel-neon` | Outer on Vercel serverless functions, backed by [Neon](https://neon.tech) Postgres instead of PGlite. | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/vercel-neon my-outer-app" tooltip /> |
+| Template      | Description                                                                                                                          | Command                                                                                                       |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `minimal`     | The smallest possible Outer server — no frontend, just `new Outer(...).build()` behind [srvx](https://srvx.h3.dev).                  | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/minimal my-outer-app" class="max-w-xs" />     |
+| `ilha`        | Full-stack starter: Outer mounted as a [Nitro](https://nitro.build) server entry with an [Ilha](https://ilha.build) + Vite frontend. | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/ilha my-outer-app" class="max-w-xs" />        |
+| `cloudflare`  | Outer on Cloudflare Workers, backed by a Durable Object's SQLite storage instead of PGlite.                                          | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/cloudflare my-outer-app" class="max-w-xs" />  |
+| `vercel-neon` | Outer on Vercel serverless functions, backed by [Neon](https://neon.tech) Postgres instead of PGlite.                                | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/vercel-neon my-outer-app" class="max-w-xs" /> |
 
 ## The builder chain
 

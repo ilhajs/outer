@@ -92,6 +92,8 @@ const outer = new Outer(...)
 
 This is the same pattern regardless of host — swap `nitro/storage`/`nitro/task` for whatever the framework provides (Cloudflare bindings, Next.js `headers()`, etc.).
 
+If your frontend is deployed on a different origin than the Outer server (a static frontend calling a separately-hosted API, or `templates/cloudflare`/`templates/vercel-neon` split from their frontend), add [`.cors({ origins })`](/guide/auth#corsconfig) — without it, browsers block cross-origin calls to `/rpc/**` and `/api/auth/**`.
+
 ## HTTP routes
 
 | Method | Path            | Handler                                                                       |

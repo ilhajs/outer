@@ -196,7 +196,9 @@ export class Outer<
   /** Enables Better Auth and mounts `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain. Narrows `context.auth` to non-null. */
   auth(config: AuthConfig): Outer<TContext & { auth: OuterAuth }, TDB, TRouter> {
     const corsOrigins = this.resources.cors?.origins ?? [];
-    const existingTrustedOrigins = Array.isArray(config.trustedOrigins) ? config.trustedOrigins : [];
+    const existingTrustedOrigins = Array.isArray(config.trustedOrigins)
+      ? config.trustedOrigins
+      : [];
     this.resources.auth = betterAuth({
       baseURL: this.resources.baseUrl,
       ...config,

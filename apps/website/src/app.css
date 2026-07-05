@@ -5,3 +5,7 @@
   --font-mono: "Geist Mono Variable", monospace;
   --areia-primary: #642dff;
 }
+
+[data-hero-snippet] .shiki {
+  @apply bg-areia-background!;
+}

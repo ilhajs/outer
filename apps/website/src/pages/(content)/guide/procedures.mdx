@@ -18,6 +18,8 @@ Registers an oRPC procedure. `name` supports dot-notation — `"user.me"` nests 
 
 `.procedure()` fully infers each procedure's `.input()`/`.output()` types into the router, so `client.foo(...)`, `client.user.me(...)`, etc. are properly typed on `RouterClient<Router>` — see [`outer.router`](#outerrouter-type-extraction) below.
 
+Registering the same dot-path twice — whether via two `.procedure()` calls, or a `.procedure()` name colliding with a `.resource()`-generated action — throws immediately rather than silently letting the second registration overwrite the first.
+
 ## `.route(method, path, handler)`
 
 Mounts a raw H3 route alongside `.procedure()`-defined RPC routes — for webhooks, custom REST endpoints, or anything that doesn't fit the oRPC shape. `handler` receives the H3 `event` and the same `context` (`headers`, `db`, `auth`) available in procedure handlers. Registered before `/rpc/**`, so it takes precedence on overlapping paths.
@@ -125,7 +127,7 @@ Result shape:
 }
 ```
 
-Cursors are opaque base64-encoded strings derived from `orderBy` column values. Multi-column `orderBy` uses correct row-comparison keyset semantics — always include a unique column (e.g. `id`) as the final `orderBy` entry to guarantee stable pages.
+Cursors are opaque base64-encoded strings derived from `orderBy` column values. Multi-column `orderBy` uses correct row-comparison keyset semantics — always include a unique column (e.g. `id`) as the final `orderBy` entry to guarantee stable pages. A malformed or tampered `after`/`before` cursor is rejected with `400 BAD_REQUEST` rather than throwing an unhandled error.
 
 ### `where` operators
 

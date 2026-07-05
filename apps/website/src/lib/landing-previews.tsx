@@ -1,5 +1,20 @@
 import { raw } from "ilha";
-import { buildHtml, fileTreeHtml, mdxHtml, realtimeHtml } from "imprensa/landing-shiki";
+import {
+  buildHtml,
+  clientHtml,
+  fileTreeHtml,
+  heroHtml,
+  mdxHtml,
+  realtimeHtml,
+} from "imprensa/landing-shiki";
+
+export function LandingHeroPreview() {
+  return raw(heroHtml);
+}
+
+export function LandingClientPreview() {
+  return raw(clientHtml);
+}
 
 export function LandingFileTreePreview() {
   return raw(fileTreeHtml);
