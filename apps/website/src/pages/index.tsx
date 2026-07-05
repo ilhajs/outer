@@ -41,7 +41,7 @@ export default ilha
                 Read the Spec
               </LinkButton>
             </div>
-            <ClipboardText.Static
+            <ClipboardText
               text="npx giget@latest gh:ilhajs/outer/templates/minimal my-outer-app"
               tooltip
               class="w-full max-w-md px-0.5 text-left sm:px-0"

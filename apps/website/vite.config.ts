@@ -5,6 +5,7 @@ export default defineConfig({
   plugins: [
     imprensa({
       hostname: "https://outer.now",
+      siteName: "Outer",
       repo: "https://github.com/ilhajs/outer",
       repoPath: "apps/website",
       shiki: {
@@ -12,7 +13,7 @@ export default defineConfig({
         langs: ["typescript", "tsx", "mdx", "shell", "yaml", "json"],
       },
       head: {
-        title: "Imprensa — Documentation starter for Ilha",
+        title: "Outer — Agent-first tiny backend",
       },
       socials: [
         { service: "x", url: "https://x.com/ilha_js" },

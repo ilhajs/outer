@@ -107,6 +107,34 @@ describe("resource — CRUD", () => {
     const { status } = await rpc(app, "delete", { id: 99999 });
     expect(status).toBe(404);
   });
+
+  test("update with an empty data object returns 400", async () => {
+    const { output: created } = await rpc(app, "create", { title: "Untouched" });
+    const { status } = await rpc(app, "update", { where: { id: created.id }, data: {} });
+    expect(status).toBe(400);
+  });
+});
+
+describe("resource — list pagination cap", () => {
+  test("defaults to 50 rows and rejects `take` above the max", async () => {
+    const app = makeApp({ listLimit: { default: 2, max: 3 } });
+    await app.migrator.migrateToLatest();
+    await rpc(app, "create", { title: "A" });
+    await rpc(app, "create", { title: "B" });
+    await rpc(app, "create", { title: "C" });
+
+    const { output: defaultPage } = await rpc(app, "list");
+    expect(defaultPage.length).toBe(2);
+
+    const { status } = await rpc(app, "list", { take: 4 });
+    expect(status).toBe(400);
+  });
+});
+
+describe("resource — eager config validation", () => {
+  test("'owner' permission without ownerColumn throws when .resource() is called", () => {
+    expect(() => makeApp({ permissions: { update: "owner" } })).toThrow(/ownerColumn/);
+  });
 });
 
 // ── DB error mapping ─────────────────────────────────────────────────────

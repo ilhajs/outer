@@ -252,6 +252,12 @@ describe("sola — paginate", () => {
     }
   });
 
+  test("malformed cursor raises a clean BAD_REQUEST instead of an unhandled crash", async () => {
+    await expect(
+      query.author.paginate({ orderBy: [{ id: "asc" }], take: 3, after: "not-valid-base64-json" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
   test("offset: first page", async () => {
     const r = await query.author.paginate({ orderBy: [{ id: "asc" }], take: 3, skip: 0 });
     expect(r.data).toHaveLength(3);

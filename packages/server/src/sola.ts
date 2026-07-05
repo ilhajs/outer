@@ -384,7 +384,11 @@ function encodeCursor({ row, orderBy }: { row: any; orderBy: OrderByClause<any>[
 }
 
 function decodeCursor(cursor: string): Record<string, any> {
-  return JSON.parse(Buffer.from(cursor, "base64").toString("utf8"));
+  try {
+    return JSON.parse(Buffer.from(cursor, "base64").toString("utf8"));
+  } catch (error) {
+    throw new ORPCError("BAD_REQUEST", { message: "Invalid pagination cursor", cause: error });
+  }
 }
 
 function applyCursorWhere({

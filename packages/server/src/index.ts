@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/client";
 import { OpenAPIGenerator } from "@orpc/openapi";
 import { os, onError, Router, Builder, AnyProcedure, Middleware } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
@@ -7,7 +8,7 @@ import { H3, H3Event, HTTPMethod } from "h3";
 import { Dialect, Kysely } from "kysely";
 
 import { createMigrator, DialectKind } from "./migrator";
-import { buildResourceProcedures, ResourceOptions } from "./resource";
+import { actionsRequiringAuth, buildResourceProcedures, ResourceOptions } from "./resource";
 import { schema, SchemaResult, InferDB, TablesDef, ColumnDef } from "./schema";
 import { createSola, Sola } from "./sola";
 
@@ -85,11 +86,20 @@ type OuterResources = {
   auth: OuterAuth | undefined;
   openapiEnabled: boolean;
   routes: OuterRoute<any>[];
+  /** `"resource.action"` entries whose permission requires a session — checked against `auth` at `.build()`. */
+  authRequiredBy: string[];
+  cors: CorsConfig | undefined;
 };
 
 export type OpenApiConfig = {
   /** Whether to mount `GET /openapi.json`. Defaults to `true` when `.openapi()` is called — pass `import.meta.env.DEV` or similar to gate it on dev/staging only. */
   enabled?: boolean;
+};
+
+export type CorsConfig = {
+  /** Allowed origins. Also merged into Better Auth's `trustedOrigins` when `.auth()` is used. */
+  origins: string[];
+  credentials?: boolean;
 };
 
 function deepMerge({
@@ -138,8 +148,12 @@ export class Outer<
   ) {
     this.name = params.name;
     if (_resources && _base) {
-      // Clone path: copy resources so mutations (e.g. .storage()) don't bleed across instances
-      this.resources = { ..._resources };
+      // Clone path: copy resources (including mutable arrays) so mutations don't bleed across instances
+      this.resources = {
+        ..._resources,
+        routes: [..._resources.routes],
+        authRequiredBy: [..._resources.authRequiredBy],
+      };
       this.pendingBase = _base;
       this.pendingRouter = _router ?? ({} as TRouter);
       this.schemas = _schemas ?? [];
@@ -155,6 +169,8 @@ export class Outer<
         auth: undefined,
         openapiEnabled: false,
         routes: [],
+        authRequiredBy: [],
+        cors: undefined,
       };
       this.pendingBase = os.$context<OuterRpcContext>() as unknown as Builder<
         TContext & object,
@@ -171,11 +187,22 @@ export class Outer<
     return this;
   }
 
+  /** Sets the allowed cross-origin callers for `/rpc/**` and `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain. */
+  cors(config: CorsConfig): this {
+    this.resources.cors = config;
+    return this;
+  }
+
   /** Enables Better Auth and mounts `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain. Narrows `context.auth` to non-null. */
   auth(config: AuthConfig): Outer<TContext & { auth: OuterAuth }, TDB, TRouter> {
+    const corsOrigins = this.resources.cors?.origins ?? [];
+    const existingTrustedOrigins = Array.isArray(config.trustedOrigins) ? config.trustedOrigins : [];
     this.resources.auth = betterAuth({
       baseURL: this.resources.baseUrl,
       ...config,
+      ...(corsOrigins.length > 0 && {
+        trustedOrigins: [...corsOrigins, ...existingTrustedOrigins],
+      }),
       database: { type: this.resources.dialectKind, dialect: this.resources.dialect },
     });
     return new Outer<TContext & { auth: OuterAuth }, TDB, TRouter>(
@@ -251,6 +278,9 @@ export class Outer<
   > {
     const cols = this.schemas.at(-1)?.tables[name] as Record<string, ColumnDef> | undefined;
     if (!cols) throw new Error(`Table "${name}" not found in schema`);
+    for (const action of actionsRequiringAuth(options?.permissions ?? {})) {
+      this.resources.authRequiredBy.push(`${name}.${action}`);
+    }
     for (const [action, proc] of Object.entries(
       buildResourceProcedures(
         name,
@@ -278,7 +308,13 @@ export class Outer<
   }
 
   build(): BuiltOuter<TRouter> {
-    const { db, auth } = this.resources;
+    const { db, auth, authRequiredBy, cors } = this.resources;
+
+    if (authRequiredBy.length > 0 && !auth) {
+      throw new Error(
+        `The following resource actions require a signed-in session but \`.auth()\` was never called: ${authRequiredBy.join(", ")}. Call \`.auth({ secret, ... })\` before \`.build()\`.`,
+      );
+    }
 
     const router: Router<OuterRpcContext<TDB>> = this.pendingRouter as unknown as Router<
       OuterRpcContext<TDB>
@@ -296,12 +332,38 @@ export class Outer<
     const rpc = new RPCHandler(router, {
       interceptors: [
         onError((error) => {
-          console.error(error);
+          // ORPCError is an intentional application response (400/401/403/404/409, etc.) —
+          // only log genuinely unexpected failures to avoid noisy/sensitive logs.
+          if (!(error instanceof ORPCError)) console.error(error);
         }),
       ],
     });
 
     let server = new H3();
+
+    if (cors) {
+      server = server.use((event, next) => {
+        const origin = event.req.headers.get("origin");
+        if (origin && cors.origins.includes(origin)) {
+          event.res.headers.set("Access-Control-Allow-Origin", origin);
+          event.res.headers.set("Vary", "Origin");
+          if (cors.credentials) event.res.headers.set("Access-Control-Allow-Credentials", "true");
+          event.res.headers.set(
+            "Access-Control-Allow-Methods",
+            "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+          );
+          event.res.headers.set(
+            "Access-Control-Allow-Headers",
+            event.req.headers.get("access-control-request-headers") ?? "content-type",
+          );
+        }
+        if (event.req.method === "OPTIONS") {
+          event.res.status = 204;
+          return "";
+        }
+        return next();
+      });
+    }
 
     if (this.resources.openapiEnabled) {
       server = server.get("/openapi.json", async () => {
@@ -339,9 +401,22 @@ export class Outer<
   }
 
   private addToRouter(dotName: string, proc: AnyProcedure): void {
-    const nested = dotName
-      .split(".")
-      .reduceRight<Record<string, any> | AnyProcedure>((acc, key) => ({ [key]: acc }), proc);
+    const keys = dotName.split(".");
+    let cursor: any = this.pendingRouter;
+    for (const key of keys) {
+      if (cursor == null || typeof cursor !== "object") break;
+      cursor = cursor[key];
+    }
+    if (cursor !== undefined) {
+      throw new Error(
+        `Procedure name collision: "${dotName}" is already registered. Choose a different name.`,
+      );
+    }
+
+    const nested = keys.reduceRight<Record<string, any> | AnyProcedure>(
+      (acc, key) => ({ [key]: acc }),
+      proc,
+    );
     this.pendingRouter = deepMerge({
       a: this.pendingRouter as Record<string, any>,
       b: nested as Record<string, any>,

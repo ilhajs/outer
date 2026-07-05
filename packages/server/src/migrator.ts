@@ -139,6 +139,18 @@ function buildMigration({
   };
 }
 
+/** Compares dot-separated numeric versions (e.g. "1.10.0" > "1.2.0"), unlike string/locale comparison. */
+function compareVersions(a: string, b: string): number {
+  const partsA = a.split(".").map(Number);
+  const partsB = b.split(".").map(Number);
+  const len = Math.max(partsA.length, partsB.length);
+  for (let i = 0; i < len; i++) {
+    const diff = (partsA[i] ?? 0) - (partsB[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
 export class SchemaMigrationProvider implements MigrationProvider {
   constructor(
     private readonly schemas: SchemaResult<any>[],
@@ -146,7 +158,23 @@ export class SchemaMigrationProvider implements MigrationProvider {
   ) {}
 
   async getMigrations(): Promise<Record<string, Migration>> {
-    const sorted = [...this.schemas].sort((a, b) => a.version.localeCompare(b.version));
+    const sorted = [...this.schemas].sort((a, b) => compareVersions(a.version, b.version));
+
+    // Kysely's own Migrator re-sorts migration names with a plain lexicographic
+    // `Array.prototype.sort()` before applying them — it ignores the order this
+    // object is built in. If that lexicographic order disagrees with numeric
+    // version order (e.g. "1.10.0" sorts before "1.2.0" as plain strings), the
+    // migrations would silently run in the wrong order. Fail loudly instead.
+    const numericOrder = sorted.map((s) => s.version);
+    const lexicalOrder = [...numericOrder].sort();
+    if (numericOrder.some((v, i) => v !== lexicalOrder[i])) {
+      throw new Error(
+        `Schema versions [${numericOrder.join(", ")}] sort correctly by number but not lexicographically, ` +
+          `and migrations run in lexicographic order internally — this would apply them out of order. ` +
+          `Zero-pad each segment (e.g. "1.02.00" instead of "1.2.0") so numeric and lexicographic order match.`,
+      );
+    }
+
     const migrations: Record<string, Migration> = {};
     for (let i = 0; i < sorted.length; i++) {
       migrations[sorted[i]!.version] = buildMigration({
@@ -171,5 +199,9 @@ export function createMigrator({
   return new Migrator({
     db,
     provider: new SchemaMigrationProvider(schemas, kind),
+    // Kysely's Migrator re-sorts migration names itself (default: localeCompare) before
+    // running them, regardless of the order SchemaMigrationProvider.getMigrations() returns —
+    // so version ordering must also be enforced here, not just in the provider.
+    nameComparator: compareVersions,
   });
 }

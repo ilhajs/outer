@@ -125,6 +125,71 @@ describe("route", () => {
   });
 });
 
+describe("build-time validation", () => {
+  test(".build() throws if a resource permission requires auth but .auth() was never called", () => {
+    expect(() =>
+      makeOuter()
+        .resource("post", { permissions: { create: "authenticated" } })
+        .build(),
+    ).toThrow(/auth/i);
+  });
+
+  test("registering two procedures under the same dot-path throws", () => {
+    expect(() =>
+      makeOuter()
+        .procedure("dup", (base) => base.handler(async () => "a"))
+        .procedure("dup", (base) => base.handler(async () => "b")),
+    ).toThrow(/collision/i);
+  });
+});
+
+describe("cors", () => {
+  test("adds Access-Control-Allow-Origin for a listed origin", async () => {
+    const app = makeOuter()
+      .cors({ origins: ["https://allowed.test"] })
+      .procedure("ping", (base) => base.handler(async () => "pong"))
+      .build();
+
+    const res = await app.handle(
+      new Request("http://localhost/rpc/ping", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://allowed.test" },
+        body: JSON.stringify({ json: {} }),
+      }),
+    );
+    expect(res.headers.get("access-control-allow-origin")).toBe("https://allowed.test");
+  });
+
+  test("does not add CORS headers for an origin not in the allow-list", async () => {
+    const app = makeOuter()
+      .cors({ origins: ["https://allowed.test"] })
+      .procedure("ping", (base) => base.handler(async () => "pong"))
+      .build();
+
+    const res = await app.handle(
+      new Request("http://localhost/rpc/ping", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://evil.test" },
+        body: JSON.stringify({ json: {} }),
+      }),
+    );
+    expect(res.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  test("responds to a preflight OPTIONS request", async () => {
+    const app = makeOuter().cors({ origins: ["https://allowed.test"] }).build();
+
+    const res = await app.handle(
+      new Request("http://localhost/rpc/ping", {
+        method: "OPTIONS",
+        headers: { origin: "https://allowed.test" },
+      }),
+    );
+    expect(res.status).toBe(204);
+    expect(res.headers.get("access-control-allow-origin")).toBe("https://allowed.test");
+  });
+});
+
 describe("db: custom dialect", () => {
   test("accepts a caller-provided Kysely dialect + kind", async () => {
     const dialect = new PGliteDialect({ pglite: new PGlite() });

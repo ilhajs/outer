@@ -104,6 +104,18 @@ Outer's core does not set any Better Auth defaults (no default plugins, no defau
 
 ---
 
+## `.cors(config)`
+
+Allows browser clients on other origins to call `/rpc/**` and `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain — if used before `.auth()`, its `origins` are also merged into Better Auth's `trustedOrigins` automatically.
+
+```ts
+.cors({ origins: ["https://app.example.com"], credentials: true })
+```
+
+Without `.cors()`, no `Access-Control-Allow-Origin` header is set — same-origin requests (and non-browser clients) are unaffected, but cross-origin browser requests will be blocked by the browser.
+
+---
+
 ## `.schema(s: SchemaResult<T>)`
 
 Registers a schema version for migrations and advances the DB type to `InferDB<T>`. Multiple calls accumulate in order — the migrator diffs consecutive versions.
@@ -146,7 +158,7 @@ Auto-generates five CRUD procedures for a schema table. `name` must match a tabl
 
 | Procedure       | Input                                             | Output        | Description              |
 | --------------- | ------------------------------------------------- | ------------- | ------------------------ |
-| `{name}.list`   | —                                                 | `Row[]`       | `SELECT *`               |
+| `{name}.list`   | `{ take?: number }`                               | `Row[]`       | `SELECT * LIMIT take`    |
 | `{name}.get`    | `{ <pk>: ... }`                                   | `Row \| null` | Fetch by primary key     |
 | `{name}.create` | Row minus serial PK, defaults, and `ownerColumn`  | `Row`         | `INSERT ... RETURNING *` |
 | `{name}.update` | `{ where: { <pk> }, data: Partial<createInput> }` | `Row`         | `UPDATE ... RETURNING *` |
@@ -154,7 +166,11 @@ Auto-generates five CRUD procedures for a schema table. `name` must match a tabl
 
 Input types are derived from column definitions at build time. `serial` primary key columns, columns with `.default()`, and `ownerColumn` are omitted from create input.
 
-`create`/`update` map common Postgres constraint violations to clean errors instead of a raw 500: unique/foreign-key violations → `409 CONFLICT`, not-null/check violations → `400 BAD_REQUEST`. `update`/`delete` on a row that doesn't exist → `404 NOT_FOUND`. Unrecognized DB errors still surface as a generic `500` with no internal details leaked.
+`list` defaults to returning 50 rows and caps `take` at 100 — pass `listLimit: { default, max }` in `options` to change these. This prevents an unbounded `SELECT *` on large tables; use `.procedure()` with `context.db.query[table].paginate(...)` directly if you need real pagination metadata.
+
+`create`/`update` map common Postgres constraint violations to clean errors instead of a raw 500: unique/foreign-key violations → `409 CONFLICT`, not-null/check violations → `400 BAD_REQUEST`. `update`/`delete` on a row that doesn't exist → `404 NOT_FOUND`. `update` with an empty `data` object → `400 BAD_REQUEST`. Unrecognized DB errors still surface as a generic `500` with no internal details leaked.
+
+`.resource()` and `.build()` validate configuration eagerly rather than failing at request time: using `"owner"` on any action without `ownerColumn` throws immediately when `.resource()` is called; if any resource action's permission requires a session (`"authenticated"`, `"admin"`, or `"owner"`) but `.auth()` was never called anywhere in the chain, `.build()` throws listing the offending `resource.action` names instead of surfacing a confusing 500 on the first request.
 
 ### Permissions
 
@@ -340,7 +356,7 @@ const v1_0 = schema("1.0.0")
 const { error, results } = await server.migrator.migrateToLatest();
 ```
 
-Uses a custom `SchemaMigrationProvider` that diffs consecutive schema versions. Each `schema("x.y.z")` call becomes one Kysely migration keyed by its version string. Migrations run in alphabetical version order.
+Uses a custom `SchemaMigrationProvider` that diffs consecutive schema versions. Each `schema("x.y.z")` call becomes one Kysely migration keyed by its version string. Diffing (which schema is "previous" vs "current") happens in numeric-per-segment version order. Kysely itself still applies migrations in plain lexicographic order of the version-string keys — for double-digit segments this can disagree with numeric order (`"1.10.0"` sorts before `"1.2.0"` as a string). `getMigrations()` detects this mismatch and throws before migrating, telling you to zero-pad segments (e.g. `"1.02.00"`) so lexicographic and numeric order match.
 
 **Up** — creates new tables, adds new columns, drops removed columns.  
 **Down** — reverses: drops added tables/columns, restores dropped ones.

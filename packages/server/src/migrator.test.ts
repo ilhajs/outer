@@ -122,6 +122,37 @@ describe("migrator", () => {
     expect(await columnExists(db5, "t", "added")).toBe(true);
   });
 
+  test("versions that sort numerically but not lexicographically are rejected", async () => {
+    const db6 = makeDb();
+    const v1 = schema("1.2.0")
+      .table("t2", (t) => ({ id: t.serial().primaryKey() }))
+      .build();
+    const v2 = schema("1.10.0")
+      .table("t2", (t) => ({ id: t.serial().primaryKey(), added: t.text() }))
+      .build();
+
+    // Kysely applies migrations in lexicographic order of the version-string keys, which
+    // disagrees with numeric order here ("1.10.0" < "1.2.0" as a string) — must fail loudly
+    // instead of silently migrating out of order.
+    const { error } = await createMigrator({ db: db6, schemas: [v2, v1] }).migrateToLatest();
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/zero-pad/i);
+  });
+
+  test("zero-padded versions that sort numerically and lexicographically the same way succeed", async () => {
+    const db7 = makeDb();
+    const v1 = schema("1.02.0")
+      .table("t3", (t) => ({ id: t.serial().primaryKey() }))
+      .build();
+    const v2 = schema("1.10.0")
+      .table("t3", (t) => ({ id: t.serial().primaryKey(), added: t.text() }))
+      .build();
+
+    const { error } = await createMigrator({ db: db7, schemas: [v2, v1] }).migrateToLatest();
+    expect(error).toBeUndefined();
+    expect(await columnExists(db7, "t3", "added")).toBe(true);
+  });
+
   test("SchemaMigrationProvider returns one migration per schema", async () => {
     const v1 = schema("1.0.0")
       .table("x", (t) => ({ id: t.text().primaryKey() }))

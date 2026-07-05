@@ -43,11 +43,37 @@ export type ResourceOptions = {
    * the current user's ID is automatically injected into the insert.
    */
   ownerColumn?: string;
+  /** Max rows `list` can return per call, and the default when `take` isn't passed. Defaults to 100/50. */
+  listLimit?: { default?: number; max?: number };
 };
+
+/** Actions (of a given resource) whose permission requires a signed-in session — used by `Outer.build()` to fail fast if `.auth()` was never called. */
+export function actionsRequiringAuth(permissions: ResourcePermissions): string[] {
+  return Object.entries(permissions)
+    .filter(([, permission]) => permission && permission !== "public" && typeof permission !== "function")
+    .map(([action]) => action);
+}
 
 // ── Zod schema derivation ──────────────────────────────────────────────────
 
-const SQL_TYPE_TO_ZOD: Record<string, z.ZodType> = {
+/**
+ * Output values for `timestamp`/`boolean` differ by dialect (postgres drivers
+ * return `Date`/`boolean`, sqlite returns ISO strings/`0`|`1`), so the output
+ * schema (validated against real DB rows) must accept both instead of the
+ * input-only `z.iso.datetime()` / `z.boolean()` shape.
+ */
+const OUTPUT_TYPE_TO_ZOD: Record<string, z.ZodType> = {
+  serial: z.number().int(),
+  text: z.string(),
+  varchar: z.string(),
+  integer: z.number().int(),
+  boolean: z.union([z.boolean(), z.number()]).transform((v) => Boolean(v)),
+  timestamp: z.union([z.string(), z.date()]),
+  jsonb: z.unknown(),
+  uuid: z.uuid(),
+};
+
+const INPUT_TYPE_TO_ZOD: Record<string, z.ZodType> = {
   serial: z.number().int(),
   text: z.string(),
   varchar: z.string(),
@@ -58,8 +84,8 @@ const SQL_TYPE_TO_ZOD: Record<string, z.ZodType> = {
   uuid: z.uuid(),
 };
 
-function colToZod(col: ColumnDef): z.ZodType {
-  const base = SQL_TYPE_TO_ZOD[col._type] ?? z.unknown();
+function colToZod(col: ColumnDef, map: Record<string, z.ZodType>): z.ZodType {
+  const base = map[col._type] ?? z.unknown();
   return col._nullable ? z.union([base, z.null()]).optional() : base;
 }
 
@@ -74,13 +100,15 @@ function buildSchemas({
 
   const rowShape: Record<string, z.ZodType> = {};
   for (const [name, col] of entries) {
-    rowShape[name] = colToZod(col);
+    rowShape[name] = colToZod(col, OUTPUT_TYPE_TO_ZOD);
   }
   const rowSchema = z.object(rowShape);
 
   const pkEntry = entries.find(([, col]) => col._primaryKey);
   const pkName = pkEntry?.[0] ?? "id";
-  const pkZod = pkEntry ? colToZod(pkEntry[1]) : z.union([z.string(), z.number()]);
+  const pkZod = pkEntry
+    ? colToZod(pkEntry[1], INPUT_TYPE_TO_ZOD)
+    : z.union([z.string(), z.number()]);
   const whereSchema = z.object({ [pkName]: pkZod });
 
   // Omit: serial PK (db-generated), columns with defaults, ownerColumn (auto-filled on create)
@@ -89,7 +117,7 @@ function buildSchemas({
     if (col._type === "serial" && col._primaryKey) continue;
     if (col._default !== null) continue;
     if (ownerColumn && name === ownerColumn) continue;
-    createShape[name] = colToZod(col);
+    createShape[name] = colToZod(col, INPUT_TYPE_TO_ZOD);
   }
   const createSchema = z.object(createShape);
 
@@ -222,16 +250,29 @@ export function buildResourceProcedures(
   options: ResourceOptions = {},
   kind: DialectKind = "postgres",
 ): Record<string, AnyProcedure> {
-  const { permissions = {}, ownerColumn } = options;
+  const { permissions = {}, ownerColumn, listLimit } = options;
+  const usesOwnerPermission = Object.values(permissions).some((p) => p === "owner");
+  if (usesOwnerPermission && !ownerColumn) {
+    throw new Error(
+      `resource("${tableName}"): "owner" permission requires \`ownerColumn\` to be set in ResourceOptions`,
+    );
+  }
+
   const { rowSchema, createSchema, updateSchema, whereSchema, pkName } = buildSchemas({
     cols,
     ...(ownerColumn !== undefined && { ownerColumn }),
   });
 
-  const list = base.output(z.array(rowSchema)).handler(async ({ context }: any) => {
-    await enforce(permissions.list, context);
-    return context.db.query[tableName].findMany();
-  });
+  const defaultLimit = listLimit?.default ?? 50;
+  const maxLimit = listLimit?.max ?? 100;
+
+  const list = base
+    .input(z.object({ take: z.number().int().positive().max(maxLimit).optional() }).optional())
+    .output(z.array(rowSchema))
+    .handler(async ({ context, input }: any) => {
+      await enforce(permissions.list, context);
+      return context.db.query[tableName].findMany({ take: input?.take ?? defaultLimit });
+    });
 
   const get = base
     .input(whereSchema)
@@ -283,6 +324,9 @@ export function buildResourceProcedures(
         input.where[pkName],
       );
       await enforce(permissions.update, context, row, ownerColumn);
+      if (Object.keys(input.data).length === 0) {
+        throw new ORPCError("BAD_REQUEST", { message: "update requires at least one field in `data`" });
+      }
       try {
         return await context.db
           .updateTable(tableName)
