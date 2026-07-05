@@ -63,11 +63,13 @@ new Outer({
 
 ## `.openapi(config?)`
 
-Toggles `GET /openapi.json`. Not mounted unless this is called — calling it with no args enables it. Must be called before `.build()`. Can appear anywhere in the chain.
+Toggles `GET /openapi.json` **and** the plain-JSON REST surface at `/rest/**`. Not mounted unless this is called — calling it with no args enables it. Must be called before `.build()`. Can appear anywhere in the chain.
 
-| Option    | Type      | Default | Description                      |
-| --------- | --------- | ------- | -------------------------------- |
-| `enabled` | `boolean` | `true`  | Whether to mount `/openapi.json` |
+The `/rpc/**` handler speaks oRPC's own wire protocol, which generic OpenAPI clients can't use — so when `.openapi()` is enabled, the same router is also served through oRPC's `OpenAPIHandler` under `/rest/**`, matching the generated spec exactly (the spec's `servers[0].url` points at `<baseUrl>/rest`).
+
+| Option    | Type      | Default | Description                                   |
+| --------- | --------- | ------- | --------------------------------------------- |
+| `enabled` | `boolean` | `true`  | Whether to mount `/openapi.json` + `/rest/**` |
 
 ```ts
 .openapi() // always enabled
@@ -140,7 +142,7 @@ Adds an oRPC middleware. The middleware receives `context` typed as the current 
 
 ## `.resource(name, options?)`
 
-Auto-generates five CRUD procedures for a schema table. `name` must match a table defined in the last `.schema()` call.
+Auto-generates six CRUD procedures for a schema table. `name` must match a table defined in the last `.schema()` call.
 
 ```ts
 .resource("post", {
@@ -153,20 +155,30 @@ Auto-generates five CRUD procedures for a schema table. `name` must match a tabl
   },
   ownerColumn: "userId",
 })
-// Registers: post.list, post.get, post.create, post.update, post.delete
+// Registers: post.list, post.get, post.create, post.createMany, post.update, post.delete
 ```
 
-| Procedure       | Input                                             | Output        | Description              |
-| --------------- | ------------------------------------------------- | ------------- | ------------------------ |
-| `{name}.list`   | `{ take?: number }`                               | `Row[]`       | `SELECT * LIMIT take`    |
-| `{name}.get`    | `{ <pk>: ... }`                                   | `Row \| null` | Fetch by primary key     |
-| `{name}.create` | Row minus serial PK, defaults, and `ownerColumn`  | `Row`         | `INSERT ... RETURNING *` |
-| `{name}.update` | `{ where: { <pk> }, data: Partial<createInput> }` | `Row`         | `UPDATE ... RETURNING *` |
-| `{name}.delete` | `{ <pk>: ... }`                                   | `Row`         | `DELETE ... RETURNING *` |
+| Procedure           | Input                                             | Output        | Description                    |
+| ------------------- | ------------------------------------------------- | ------------- | ------------------------------ |
+| `{name}.list`       | `{ where?, orderBy?, take?, skip?, include? }`    | `Row[]`       | Filtered/ordered `SELECT`      |
+| `{name}.get`        | `{ <pk>: ..., include? }`                         | `Row \| null` | Fetch by primary key           |
+| `{name}.create`     | Row minus serial PK, defaults, and `ownerColumn`  | `Row`         | `INSERT ... RETURNING *`       |
+| `{name}.createMany` | `{ data: createInput[] }` (1–1000 rows)           | `Row[]`       | Batch `INSERT ... RETURNING *` |
+| `{name}.update`     | `{ where: { <pk> }, data: Partial<createInput> }` | `Row`         | `UPDATE ... RETURNING *`       |
+| `{name}.delete`     | `{ <pk>: ... }`                                   | `Row`         | `DELETE ... RETURNING *`       |
 
 Input types are derived from column definitions at build time. `serial` primary key columns, columns with `.default()`, and `ownerColumn` are omitted from create input.
 
-`list` defaults to returning 50 rows and caps `take` at 100 — pass `listLimit: { default, max }` in `options` to change these. This prevents an unbounded `SELECT *` on large tables; use `.procedure()` with `context.db.query[table].paginate(...)` directly if you need real pagination metadata.
+`list` accepts the same Prisma-style query surface as Sola, validated per column type:
+
+- `where` — plain equality values or filter objects (`equals`/`not`/`in`/`notIn`/`isNull`, plus `lt`/`lte`/`gt`/`gte` on numeric/timestamp columns and `contains`/`startsWith`/`endsWith` on text columns), combinable with `AND`/`OR`/`NOT`.
+- `orderBy` — array of `{ column: "asc" | "desc" }`.
+- `skip` — offset.
+- `include` — see below.
+
+`list` defaults to returning 50 rows and caps `take` at 100 — pass `listLimit: { default, max }` in `options` to change these. This prevents an unbounded `SELECT *` on large tables; use `.procedure()` with `context.db.query[table].paginate(...)` directly if you need cursor pagination with metadata.
+
+`list` and `get` accept `include: { relatedTable: true }` for any relation declared on the table via `.relation()` in the schema — `hasMany`/`manyToMany` relations come back as arrays, `hasOne`/`belongsTo` as an object or `null`. Unknown relation names are rejected with a `400`. When the table has no relations, `include` is not part of the input schema.
 
 `create`/`update` map common Postgres constraint violations to clean errors instead of a raw 500: unique/foreign-key violations → `409 CONFLICT`, not-null/check violations → `400 BAD_REQUEST`. `update`/`delete` on a row that doesn't exist → `404 NOT_FOUND`. `update` with an empty `data` object → `400 BAD_REQUEST`. Unrecognized DB errors still surface as a generic `500` with no internal details leaked.
 
@@ -174,14 +186,16 @@ Input types are derived from column definitions at build time. `serial` primary 
 
 ### Permissions
 
-| Value             | Description                                                                      |
-| ----------------- | -------------------------------------------------------------------------------- |
-| `"public"`        | No restriction (default)                                                         |
-| `"authenticated"` | User must be signed in — calls `context.auth.api.getSession()` internally        |
-| `"admin"`         | User must have `role === "admin"` (requires Better Auth admin plugin)            |
-| `"owner"`         | User must own the row — requires `ownerColumn`; not valid for `list` or `create` |
+| Value             | Description                                                               |
+| ----------------- | ------------------------------------------------------------------------- |
+| `"public"`        | No restriction (default)                                                  |
+| `"authenticated"` | User must be signed in — calls `context.auth.api.getSession()` internally |
+| `"admin"`         | User must have `role === "admin"` (requires Better Auth admin plugin)     |
+| `"owner"`         | User must own the row — requires `ownerColumn`; not valid for `create`    |
 
-When `create` is `"authenticated"` and `ownerColumn` is set, the current user's ID is automatically injected into the insert — no need to pass it in the request.
+When `create` is `"authenticated"` and `ownerColumn` is set, the current user's ID is automatically injected into the insert (`createMany` injects it into every row) — no need to pass it in the request.
+
+When `list` is `"owner"`, results are implicitly scoped to the signed-in user's rows (`ownerColumn = user.id`), AND-composed with any caller-supplied `where` filter. Unauthenticated calls get a `401`.
 
 When `update` or `delete` is `"owner"`, the existing row is fetched first and `row[ownerColumn]` is compared to the session user's ID. Returns `403 FORBIDDEN` if they do not match.
 
@@ -242,6 +256,7 @@ Seals the router and constructs the HTTP server. Returns a `BuiltOuter` with:
 | `GET`  | `/openapi.json` | OpenAPI 3.x spec (only mounted when `.openapi({ enabled: true })` was called) |
 | `ALL`  | `/api/auth/**`  | Better Auth handler (only mounted when `.auth()` was called)                  |
 | `ALL`  | `/rpc/**`       | oRPC handler (prefix `/rpc`)                                                  |
+| `ALL`  | `/rest/**`      | Plain-JSON OpenAPI handler (only mounted when `.openapi()` was called)        |
 
 ---
 
@@ -301,6 +316,18 @@ Full Kysely instance typed to the latest schema. Use for raw queries and writes:
 ```ts
 context.db.insertInto("user").values({...}).execute()
 context.db.selectFrom("session").where("userId", "=", id).selectAll().execute()
+```
+
+### `context.db.transact(fn)`
+
+Runs `fn` inside a database transaction and returns its result. The `trx` argument is a full `context.db` — Kysely methods _and_ `trx.query` (Sola) both participate in the transaction. Throwing inside `fn` rolls everything back.
+
+```ts
+const result = await context.db.transact(async (trx) => {
+  const { id } = await trx.insertInto("order").values({...}).returning("id").executeTakeFirstOrThrow();
+  await trx.updateTable("inventory").set(...).execute();
+  return trx.query.order.findFirst({ where: { id } });
+});
 ```
 
 ### `context.db.query`
@@ -523,6 +550,8 @@ Outer's core has no CLI — write the file above by hand, or generate it with yo
 ## OpenAPI
 
 `GET /openapi.json` — enabled via `.openapi({ enabled: true })` — returns an OpenAPI 3.x document generated by `@orpc/openapi`. Title comes from `name` param, version from the last registered schema. Procedures with `.input(zodSchema)` / `.output(zodSchema)` are fully documented. Output schema is not inferred from handler return types — explicit `.output()` is required for response documentation.
+
+Enabling `.openapi()` also mounts the router at `/rest/**` via oRPC's `OpenAPIHandler`, so the spec is directly callable with plain JSON (e.g. `POST /rest/post/create` with `{"title": "..."}`), and the spec advertises `<baseUrl>/rest` as its server URL. `/rpc/**` remains the typed-SDK transport.
 
 ---
 

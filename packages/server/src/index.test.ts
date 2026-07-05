@@ -48,6 +48,96 @@ describe("openapi", () => {
   });
 });
 
+describe("rest (OpenAPI handler)", () => {
+  test("/rest/** serves plain-JSON requests matching the OpenAPI spec", async () => {
+    const app = makeOuter().openapi().resource("post").build();
+    await app.migrator.migrateToLatest();
+
+    const created = await app.handle(
+      new Request("http://localhost/rest/post/create", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "via rest" }),
+      }),
+    );
+    expect(created.status).toBe(200);
+    const row = (await created.json()) as any;
+    expect(row.title).toBe("via rest"); // plain JSON, no oRPC envelope
+  });
+
+  test("openapi.json advertises the /rest server URL", async () => {
+    const app = makeOuter().openapi().build();
+    const res = await app.handle(new Request("http://localhost/openapi.json"));
+    const body = (await res.json()) as any;
+    expect(body.servers[0].url).toBe("http://localhost/rest");
+  });
+
+  test("/rest/** is not mounted without .openapi()", async () => {
+    const app = makeOuter().resource("post").build();
+    const res = await app.handle(
+      new Request("http://localhost/rest/post/create", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "nope" }),
+      }),
+    );
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("db.transact", () => {
+  async function callRpc(app: { handle: (req: Request) => Promise<Response> }, name: string) {
+    const res = await app.handle(
+      new Request(`http://localhost/rpc/${name}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ json: {} }),
+      }),
+    );
+    return { status: res.status, output: ((await res.json()) as any).json };
+  }
+
+  test("commits writes and exposes Sola queries on the trx", async () => {
+    const app = makeOuter()
+      .resource("post")
+      .procedure("tx.commit", (base) =>
+        base.handler(async ({ context }) => {
+          return context.db.transact(async (trx) => {
+            await trx.insertInto("post").values({ title: "in tx" }).execute();
+            return { count: await trx.query.post.count() };
+          });
+        }),
+      )
+      .build();
+    await app.migrator.migrateToLatest();
+
+    const { status, output } = await callRpc(app, "tx/commit");
+    expect(status).toBe(200);
+    expect(output.count).toBe(1);
+  });
+
+  test("rolls back when the callback throws", async () => {
+    const app = makeOuter()
+      .resource("post")
+      .procedure("tx.rollback", (base) =>
+        base.handler(async ({ context }) => {
+          await context.db
+            .transact(async (trx) => {
+              await trx.insertInto("post").values({ title: "doomed" }).execute();
+              throw new Error("boom");
+            })
+            .catch(() => undefined);
+          return { count: await context.db.query.post.count() };
+        }),
+      )
+      .build();
+    await app.migrator.migrateToLatest();
+
+    const { output } = await callRpc(app, "tx/rollback");
+    expect(output.count).toBe(0);
+  });
+});
+
 describe("auth baseURL", () => {
   async function getAuthBaseURL(app: { handle: (req: Request) => Promise<Response> }) {
     const res = await app.handle(

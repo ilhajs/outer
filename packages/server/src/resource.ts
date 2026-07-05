@@ -4,7 +4,7 @@ import { NoResultError } from "kysely";
 import { z } from "zod/v4";
 
 import { DialectKind } from "./migrator";
-import { ColumnDef } from "./schema";
+import { ColumnDef, RelationDef, TablesDef } from "./schema";
 
 // ── Permission types ───────────────────────────────────────────────────────
 
@@ -23,7 +23,8 @@ export type PermissionFn = (args: {
 export type ResourcePermission = "public" | "authenticated" | "admin" | "owner" | PermissionFn;
 
 export type ResourcePermissions = {
-  list?: Exclude<ResourcePermission, "owner">;
+  /** `"owner"` on `list` scopes results to rows where `ownerColumn` equals the signed-in user's ID. */
+  list?: ResourcePermission;
   get?: ResourcePermission;
   create?: Exclude<ResourcePermission, "owner">;
   update?: ResourcePermission;
@@ -89,6 +90,90 @@ const INPUT_TYPE_TO_ZOD: Record<string, z.ZodType> = {
 function colToZod(col: ColumnDef, map: Record<string, z.ZodType>): z.ZodType {
   const base = map[col._type] ?? z.unknown();
   return col._nullable ? z.union([base, z.null()]).optional() : base;
+}
+
+/** Column types that support range operators (`lt`/`lte`/`gt`/`gte`). */
+const RANGE_TYPES = new Set(["serial", "integer", "timestamp"]);
+const TEXT_TYPES = new Set(["text", "varchar", "uuid"]);
+
+/** Per-column filter object mirroring Sola's `FieldFilter` operators. */
+function buildFieldFilterSchema(col: ColumnDef): z.ZodType {
+  const base = INPUT_TYPE_TO_ZOD[col._type] ?? z.unknown();
+  const shape: Record<string, z.ZodType> = {
+    equals: base,
+    not: base,
+    in: z.array(base),
+    notIn: z.array(base),
+    isNull: z.boolean(),
+  };
+  if (RANGE_TYPES.has(col._type)) {
+    shape["lt"] = base;
+    shape["lte"] = base;
+    shape["gt"] = base;
+    shape["gte"] = base;
+  }
+  if (TEXT_TYPES.has(col._type)) {
+    shape["contains"] = z.string();
+    shape["startsWith"] = z.string();
+    shape["endsWith"] = z.string();
+  }
+  return z.object(shape).partial();
+}
+
+/** Recursive `where` schema (per-column value/filter plus `AND`/`OR`/`NOT`) validating Sola's `WhereClause`. */
+function buildFilterSchema(cols: Record<string, ColumnDef>): z.ZodType {
+  const fieldShape: Record<string, z.ZodType> = {};
+  for (const [name, col] of Object.entries(cols)) {
+    const base = INPUT_TYPE_TO_ZOD[col._type] ?? z.unknown();
+    fieldShape[name] = z.union([base, z.null(), buildFieldFilterSchema(col)]).optional();
+  }
+  const filterSchema: z.ZodType = z.lazy(() =>
+    z.object({
+      ...fieldShape,
+      AND: z.array(filterSchema).optional(),
+      OR: z.array(filterSchema).optional(),
+      NOT: filterSchema.optional(),
+    }),
+  );
+  return filterSchema;
+}
+
+function buildOrderBySchema(cols: Record<string, ColumnDef>): z.ZodType {
+  const shape: Record<string, z.ZodType> = {};
+  for (const name of Object.keys(cols)) shape[name] = z.enum(["asc", "desc"]).optional();
+  return z.array(z.object(shape)).min(1);
+}
+
+/**
+ * `include` input (`{ relatedTable: true }`) and the matching optional output
+ * fields, derived from the schema's relations originating at this table.
+ */
+function buildIncludeSchemas(
+  relations: RelationDef[],
+  tables: TablesDef,
+): { includeSchema: z.ZodType | null; relationOutputShape: Record<string, z.ZodType> } {
+  const includeShape: Record<string, z.ZodType> = {};
+  const relationOutputShape: Record<string, z.ZodType> = {};
+  for (const rel of relations) {
+    const relCols = tables[rel.toTable];
+    if (!relCols) continue;
+    includeShape[rel.toTable] = z.boolean().optional();
+    const relRowShape: Record<string, z.ZodType> = {};
+    for (const [name, col] of Object.entries(relCols)) {
+      relRowShape[name] = colToZod(col, OUTPUT_TYPE_TO_ZOD);
+    }
+    const relRow = z.object(relRowShape);
+    const isArray = rel.kind === "hasMany" || rel.kind === "manyToMany";
+    relationOutputShape[rel.toTable] = (
+      isArray ? z.array(relRow) : z.union([relRow, z.null()])
+    ).optional();
+  }
+  const hasRelations = Object.keys(includeShape).length > 0;
+  return {
+    // strict so a typo'd relation name is a 400 instead of being silently ignored
+    includeSchema: hasRelations ? z.strictObject(includeShape) : null,
+    relationOutputShape,
+  };
 }
 
 function buildSchemas({
@@ -251,6 +336,7 @@ export function buildResourceProcedures(
   base: Builder<any, any>,
   options: ResourceOptions = {},
   kind: DialectKind = "postgres",
+  schemaInfo: { tables: TablesDef; relations: RelationDef[] } = { tables: {}, relations: [] },
 ): Record<string, AnyProcedure> {
   const { permissions = {}, ownerColumn, listLimit } = options;
   const usesOwnerPermission = Object.values(permissions).some((p) => p === "owner");
@@ -265,35 +351,65 @@ export function buildResourceProcedures(
     ...(ownerColumn !== undefined && { ownerColumn }),
   });
 
+  const tableRelations = schemaInfo.relations.filter((r) => r.fromTable === tableName);
+  const filterSchema = buildFilterSchema(cols);
+  const orderBySchema = buildOrderBySchema(cols);
+  const { includeSchema, relationOutputShape } = buildIncludeSchemas(
+    tableRelations,
+    schemaInfo.tables,
+  );
+  // Row shape that tolerates included relations in the output
+  const rowWithRelations =
+    Object.keys(relationOutputShape).length > 0 ? rowSchema.extend(relationOutputShape) : rowSchema;
+
   const defaultLimit = listLimit?.default ?? 50;
   const maxLimit = listLimit?.max ?? 100;
 
   const list = base
-    .input(z.object({ take: z.number().int().positive().max(maxLimit).optional() }).optional())
-    .output(z.array(rowSchema))
+    .input(
+      z
+        .object({
+          where: filterSchema.optional(),
+          orderBy: orderBySchema.optional(),
+          take: z.number().int().positive().max(maxLimit).optional(),
+          skip: z.number().int().nonnegative().optional(),
+          ...(includeSchema && { include: includeSchema.optional() }),
+        })
+        .optional(),
+    )
+    .output(z.array(rowWithRelations))
     .handler(async ({ context, input }: any) => {
-      await enforce(permissions.list, context);
-      return context.db.query[tableName].findMany({ take: input?.take ?? defaultLimit });
+      let where = input?.where;
+      if (permissions.list === "owner") {
+        // Owner-scoped list: restrict to the signed-in user's rows
+        const user = await getSession(context);
+        where = { AND: [...(where ? [where] : []), { [ownerColumn!]: user.id }] };
+      } else {
+        await enforce(permissions.list, context);
+      }
+      return context.db.query[tableName].findMany({
+        ...(where && { where }),
+        ...(input?.orderBy && { orderBy: input.orderBy }),
+        ...(input?.skip !== undefined && { skip: input.skip }),
+        ...(input?.include && { include: input.include }),
+        take: input?.take ?? defaultLimit,
+      });
     });
 
   const get = base
-    .input(whereSchema)
-    .output(rowSchema.nullable())
+    .input(
+      includeSchema
+        ? (whereSchema as z.ZodObject).extend({ include: includeSchema.optional() })
+        : whereSchema,
+    )
+    .output(rowWithRelations.nullable())
     .handler(async ({ context, input }: any) => {
-      const row = await fetchForPermission(
-        permissions.get,
-        context.db,
-        tableName,
-        pkName,
-        input[pkName],
-      );
-      await enforce(permissions.get, context, row, ownerColumn);
-      // If not pre-fetched, fetch now (permission was public/authenticated/admin)
-      return (
-        row ??
-        (await context.db.query[tableName].findFirst({ where: { [pkName]: input[pkName] } })) ??
-        null
-      );
+      const row = await context.db.query[tableName].findFirst({
+        where: { [pkName]: input[pkName] },
+        ...(input.include && { include: input.include }),
+      });
+      await enforce(permissions.get, context, row ?? undefined, ownerColumn);
+      return row ?? null;
     });
 
   const create = base
@@ -309,6 +425,21 @@ export function buildResourceProcedures(
           .values(values)
           .returningAll()
           .executeTakeFirstOrThrow();
+      } catch (error) {
+        mapDbError(error, kind);
+      }
+    });
+
+  const createMany = base
+    .input(z.object({ data: z.array(createSchema).min(1).max(1000) }))
+    .output(z.array(rowSchema))
+    .handler(async ({ context, input }: any) => {
+      const user = await enforce(permissions.create, context);
+      const rows = input.data.map((values: Record<string, unknown>) =>
+        ownerColumn && user ? { ...values, [ownerColumn]: user.id } : values,
+      );
+      try {
+        return await context.db.insertInto(tableName).values(rows).returningAll().execute();
       } catch (error) {
         mapDbError(error, kind);
       }
@@ -366,5 +497,5 @@ export function buildResourceProcedures(
       }
     });
 
-  return { list, get, create, update, delete: del };
+  return { list, get, create, createMany, update, delete: del };
 }

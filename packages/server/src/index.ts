@@ -1,5 +1,6 @@
 import { ORPCError } from "@orpc/client";
 import { OpenAPIGenerator } from "@orpc/openapi";
+import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { os, onError, Router, Builder, AnyProcedure, Middleware } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import { ZodToJsonSchemaConverter } from "@orpc/zod";
@@ -16,7 +17,15 @@ export { schema };
 export type { ResourceOptions, DialectKind };
 
 type OuterAuth = Auth<any>;
-type OuterDB<TDB> = Kysely<TDB> & { query: Sola<TDB> };
+type OuterDB<TDB> = Kysely<TDB> & {
+  query: Sola<TDB>;
+  /**
+   * Runs `fn` inside a database transaction. The `trx` passed to `fn` is a
+   * full `context.db` (Kysely + `query`), so Sola reads and Kysely writes both
+   * participate in the transaction. Rolls back if `fn` throws.
+   */
+  transact<R>(fn: (trx: OuterDB<TDB>) => Promise<R>): Promise<R>;
+};
 
 export type OuterRpcContext<TDB = any> = {
   headers: Headers;
@@ -275,10 +284,14 @@ export class Outer<
     TDB,
     MergeRouters<
       TRouter,
-      NestRoute<TName, Record<"list" | "get" | "create" | "update" | "delete", AnyProcedure>>
+      NestRoute<
+        TName,
+        Record<"list" | "get" | "create" | "createMany" | "update" | "delete", AnyProcedure>
+      >
     >
   > {
-    const cols = this.schemas.at(-1)?.tables[name] as Record<string, ColumnDef> | undefined;
+    const latestSchema = this.schemas.at(-1);
+    const cols = latestSchema?.tables[name] as Record<string, ColumnDef> | undefined;
     if (!cols) throw new Error(`Table "${name}" not found in schema`);
     for (const action of actionsRequiringAuth(options?.permissions ?? {})) {
       this.resources.authRequiredBy.push(`${name}.${action}`);
@@ -290,6 +303,7 @@ export class Outer<
         this.pendingBase as any,
         options,
         this.resources.dialectKind,
+        { tables: latestSchema?.tables ?? {}, relations: latestSchema?.relations ?? [] },
       ),
     )) {
       this.addToRouter(`${name}.${action}`, proc);
@@ -299,7 +313,10 @@ export class Outer<
       TDB,
       MergeRouters<
         TRouter,
-        NestRoute<TName, Record<"list" | "get" | "create" | "update" | "delete", AnyProcedure>>
+        NestRoute<
+          TName,
+          Record<"list" | "get" | "create" | "createMany" | "update" | "delete", AnyProcedure>
+        >
       >
     >;
   }
@@ -323,13 +340,17 @@ export class Outer<
     >;
 
     const latestSchema = this.schemas.at(-1);
-    const typedDb = Object.assign(db as Kysely<TDB>, {
-      query: createSola<TDB>({
-        db,
-        tables: latestSchema?.tables ?? {},
-        relations: latestSchema?.relations ?? [],
-      }),
-    }) as OuterDB<TDB>;
+    const solaConfig = {
+      tables: latestSchema?.tables ?? {},
+      relations: latestSchema?.relations ?? [],
+    };
+    const wrapDb = (k: Kysely<any>): OuterDB<TDB> =>
+      Object.assign(k as Kysely<TDB>, {
+        query: createSola<TDB>({ db: k, ...solaConfig }),
+        transact: <R>(fn: (trx: OuterDB<TDB>) => Promise<R>): Promise<R> =>
+          k.transaction().execute((trx) => fn(wrapDb(trx))),
+      }) as OuterDB<TDB>;
+    const typedDb = wrapDb(db);
 
     const rpc = new RPCHandler(router, {
       interceptors: [
@@ -368,6 +389,7 @@ export class Outer<
     }
 
     if (this.resources.openapiEnabled) {
+      const restBase = `${this.resources.baseUrl ?? ""}/rest`;
       server = server.get("/openapi.json", async () => {
         const generator = new OpenAPIGenerator({ converters: [new ZodToJsonSchemaConverter()] });
         return generator.generate(router, {
@@ -376,8 +398,26 @@ export class Outer<
               title: this.name ?? "Outer API",
               version: latestSchema?.version ?? "0.0.0",
             },
+            servers: [{ url: restBase }],
           },
         });
+      });
+
+      // Plain-JSON REST surface matching the OpenAPI spec (the /rpc/** handler
+      // speaks oRPC's own wire protocol, which spec-driven clients can't use).
+      const openapiHandler = new OpenAPIHandler(router, {
+        interceptors: [
+          onError((error) => {
+            if (!(error instanceof ORPCError)) console.error(error);
+          }),
+        ],
+      });
+      server = server.all("/rest/**", async (event) => {
+        const { response } = await openapiHandler.handle(event.req, {
+          prefix: "/rest",
+          context: { headers: event.req.headers, db: typedDb, ...(auth && { auth }) },
+        });
+        return response;
       });
     }
 

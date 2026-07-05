@@ -131,6 +131,149 @@ describe("resource — list pagination cap", () => {
   });
 });
 
+describe("resource — list filtering, ordering, pagination", () => {
+  let app: Awaited<ReturnType<typeof makeApp>>;
+
+  beforeAll(async () => {
+    app = makeApp();
+    await app.migrator.migrateToLatest();
+    await rpc(app, "create", { title: "Alpha" });
+    await rpc(app, "create", { title: "Beta" });
+    await rpc(app, "create", { title: "Alpine" });
+  });
+
+  test("where with a filter operator", async () => {
+    const { status, output } = await rpc(app, "list", {
+      where: { title: { startsWith: "Alp" } },
+    });
+    expect(status).toBe(200);
+    expect(output.map((r: any) => r.title).sort()).toEqual(["Alpha", "Alpine"]);
+  });
+
+  test("where with a plain equality value", async () => {
+    const { output } = await rpc(app, "list", { where: { title: "Beta" } });
+    expect(output.length).toBe(1);
+    expect(output[0].title).toBe("Beta");
+  });
+
+  test("where with OR", async () => {
+    const { output } = await rpc(app, "list", {
+      where: { OR: [{ title: "Beta" }, { title: "Alpha" }] },
+    });
+    expect(output.length).toBe(2);
+  });
+
+  test("orderBy desc", async () => {
+    const { output } = await rpc(app, "list", { orderBy: [{ id: "desc" }] });
+    const ids = output.map((r: any) => r.id);
+    expect(ids).toEqual([...ids].sort((a, b) => b - a));
+  });
+
+  test("skip offsets results", async () => {
+    const { output: all } = await rpc(app, "list", { orderBy: [{ id: "asc" }] });
+    const { output: skipped } = await rpc(app, "list", { orderBy: [{ id: "asc" }], skip: 1 });
+    expect(skipped.length).toBe(all.length - 1);
+    expect(skipped[0].id).toBe(all[1].id);
+  });
+
+  test("invalid orderBy direction returns 400", async () => {
+    const { status } = await rpc(app, "list", { orderBy: [{ id: "sideways" }] });
+    expect(status).toBe(400);
+  });
+});
+
+describe("resource — createMany", () => {
+  test("inserts multiple rows and returns them", async () => {
+    const app = makeApp();
+    await app.migrator.migrateToLatest();
+    const { status, output } = await rpc(app, "createMany", {
+      data: [{ title: "One" }, { title: "Two" }, { title: "Three" }],
+    });
+    expect(status).toBe(200);
+    expect(output.length).toBe(3);
+    expect((await rpc(app, "list")).output.length).toBe(3);
+  });
+
+  test("empty data array returns 400", async () => {
+    const app = makeApp();
+    await app.migrator.migrateToLatest();
+    const { status } = await rpc(app, "createMany", { data: [] });
+    expect(status).toBe(400);
+  });
+});
+
+// ── include (relations) ────────────────────────────────────────────────────
+
+const relSchema = schema("1.0.0")
+  .table("author", (t) => ({
+    id: t.serial().primaryKey(),
+    name: t.text(),
+  }))
+  .table("book", (t) => ({
+    id: t.serial().primaryKey(),
+    title: t.text(),
+    authorId: t.integer().nullable(),
+  }))
+  .relation("book", (rel) => rel.belongsTo("author", { from: "authorId", to: "id" }))
+  .relation("author", (rel) => rel.hasMany("book", { from: "id", to: "authorId" }))
+  .build();
+
+describe("resource — include", () => {
+  let app: any;
+  let authorId: number;
+  let bookId: number;
+
+  async function call(resource: string, action: string, input?: unknown) {
+    const res = await app.handle(
+      new Request(`http://localhost/rpc/${resource}/${action}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ json: input ?? {} }),
+      }),
+    );
+    const body = (await res.json()) as any;
+    return { status: res.status, output: body.json };
+  }
+
+  beforeAll(async () => {
+    app = new Outer({
+      name: "Test",
+      baseUrl: "http://localhost",
+      db: pglite({ dataDir: "memory://" }),
+    })
+      .schema(relSchema)
+      .resource("author")
+      .resource("book")
+      .build();
+    await app.migrator.migrateToLatest();
+    authorId = (await call("author", "create", { name: "Ryuz" })).output.id;
+    bookId = (await call("book", "create", { title: "Outer Guide", authorId })).output.id;
+  });
+
+  test("get with include returns the belongsTo relation", async () => {
+    const { status, output } = await call("book", "get", { id: bookId, include: { author: true } });
+    expect(status).toBe(200);
+    expect(output.author.name).toBe("Ryuz");
+  });
+
+  test("list with include returns hasMany relations as arrays", async () => {
+    const { status, output } = await call("author", "list", { include: { book: true } });
+    expect(status).toBe(200);
+    expect(output[0].book.length).toBe(1);
+    expect(output[0].book[0].title).toBe("Outer Guide");
+  });
+
+  test("get without include omits relation fields", async () => {
+    const { output } = await call("book", "get", { id: bookId });
+    expect(output.author).toBeUndefined();
+  });
+
+  test("include of an unknown relation returns 400", async () => {
+    const { status } = await call("book", "get", { id: bookId, include: { publisher: true } });
+    expect(status).toBe(400);
+  });
+});
+
 describe("resource — eager config validation", () => {
   test("'owner' permission without ownerColumn throws when .resource() is called", () => {
     expect(() => makeApp({ permissions: { update: "owner" } })).toThrow(/ownerColumn/);
@@ -413,6 +556,56 @@ describe("resource — owner permission (real sessions)", () => {
   test("owner can delete their own row", async () => {
     const { status } = await rpcAs(app, owner.cookie, "delete", { id: postId });
     expect(status).toBe(200);
+  });
+});
+
+describe("resource — owner-scoped list (real sessions)", () => {
+  let app: Awaited<ReturnType<typeof makeAuthApp>>;
+  let alice: { userId: string; cookie: string };
+  let bob: { userId: string; cookie: string };
+
+  beforeAll(async () => {
+    app = makeAuthApp({
+      permissions: { list: "owner", create: "authenticated" },
+      ownerColumn: "userId",
+    });
+    await app.migrator.migrateToLatest();
+    alice = await signUp(app, "alice@test.com");
+    bob = await signUp(app, "bob@test.com");
+    await rpcAs(app, alice.cookie, "create", { title: "Alice 1" });
+    await rpcAs(app, alice.cookie, "create", { title: "Alice 2" });
+    await rpcAs(app, bob.cookie, "create", { title: "Bob 1" });
+  });
+
+  test("each user only sees their own rows", async () => {
+    const { status, output } = await rpcAs(app, alice.cookie, "list");
+    expect(status).toBe(200);
+    expect(output.length).toBe(2);
+    expect(output.every((r: any) => r.userId === alice.userId)).toBe(true);
+
+    const { output: bobRows } = await rpcAs(app, bob.cookie, "list");
+    expect(bobRows.length).toBe(1);
+  });
+
+  test("owner scoping composes with a where filter", async () => {
+    const { output } = await rpcAs(app, alice.cookie, "list", {
+      where: { title: { contains: "2" } },
+    });
+    expect(output.length).toBe(1);
+    expect(output[0].title).toBe("Alice 2");
+  });
+
+  test("unauthenticated list is rejected", async () => {
+    const { status } = await rpc(app as any, "list");
+    expect(status).toBe(401);
+  });
+
+  test("createMany injects the owner column on every row", async () => {
+    const { status, output } = await rpcAs(app, bob.cookie, "createMany", {
+      data: [{ title: "Bob 2" }, { title: "Bob 3" }],
+    });
+    expect(status).toBe(200);
+    expect(output.every((r: any) => r.userId === bob.userId)).toBe(true);
   });
 });
 

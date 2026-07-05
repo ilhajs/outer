@@ -101,6 +101,7 @@ If your frontend is deployed on a different origin than the Outer server (a stat
 | `GET`  | `/openapi.json` | OpenAPI 3.x spec (only mounted when `.openapi({ enabled: true })` was called) |
 | `ALL`  | `/api/auth/**`  | Better Auth handler (only mounted when `.auth()` was called)                  |
 | `ALL`  | `/rpc/**`       | oRPC handler (prefix `/rpc`)                                                  |
+| `ALL`  | `/rest/**`      | Plain-JSON OpenAPI handler (only mounted when `.openapi()` was called)        |
 
 ## Roadmap
 
