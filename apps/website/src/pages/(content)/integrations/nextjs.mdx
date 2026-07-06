@@ -1,0 +1,168 @@
+---
+title: Next.js
+description: Mount Outer inside a Next.js app — route handlers for /rpc and /api/auth, a typed client with @outerjs/sdk, and calling procedures from Server Components.
+order: 1
+tags: [nextjs, integration, app-router, vercel, neon]
+---
+
+# Next.js
+
+Outer's `outer.handle(request)` is a plain Fetch handler, so it mounts into Next.js App Router route handlers with no adapter. You get your whole backend — database, auth, typed RPC, generated CRUD — inside the same Next.js deployment, with no second service to run.
+
+## Install
+
+```bash
+bun add @outerjs/server @outerjs/sdk
+bun add @electric-sql/pglite # for the embedded pglite() default (self-hosted deploys)
+```
+
+## Define the server
+
+Create the Outer instance in a shared module. Next.js re-evaluates modules on HMR in dev, and `pglite()` allows only one live instance per data directory — so cache the instance (and the migration run) on `globalThis`:
+
+```ts
+// src/lib/outer.ts
+import { Outer, schema } from "@outerjs/server";
+import { pglite } from "@outerjs/server/pglite";
+
+const v1_0 = schema("1.0.0")
+  .table("post", (t) => ({
+    id: t.serial().primaryKey(),
+    title: t.text(),
+    userId: t.text(),
+  }))
+  .build();
+
+function buildOuter() {
+  return new Outer({ name: "My API", baseUrl: process.env.NEXT_PUBLIC_APP_URL, db: pglite() })
+    .schema(v1_0)
+    .auth({ secret: process.env.AUTH_SECRET! })
+    .resource("post", {
+      permissions: { create: "authenticated", update: "owner", delete: "owner" },
+      ownerColumn: "userId",
+    })
+    .build();
+}
+
+const g = globalThis as unknown as { outer?: ReturnType<typeof buildOuter> };
+
+if (!g.outer) {
+  g.outer = buildOuter();
+  await g.outer.migrator.migrateToLatest();
+}
+
+export const outer = g.outer;
+```
+
+## Mount the routes
+
+Outer serves everything under `/rpc/**` and `/api/auth/**`, so two catch-all route handlers cover it. Both just delegate — Next.js passes the full request path through, and Outer routes on it:
+
+```ts
+// src/app/rpc/[[...rest]]/route.ts
+import { outer } from "@/lib/outer";
+
+const handler = (req: Request) => outer.handle(req);
+
+export {
+  handler as GET,
+  handler as POST,
+  handler as PUT,
+  handler as PATCH,
+  handler as DELETE,
+  handler as OPTIONS,
+};
+```
+
+```ts
+// src/app/api/auth/[...all]/route.ts
+import { outer } from "@/lib/outer";
+
+const handler = (req: Request) => outer.handle(req);
+
+export { handler as GET, handler as POST };
+```
+
+If you enable `.openapi()`, add the same delegating handler at `src/app/openapi.json/route.ts` (`GET`) and `src/app/rest/[[...rest]]/route.ts` (all methods) to expose the spec and the plain-JSON REST surface.
+
+## Client components
+
+`@outerjs/sdk` gives you a typed RPC + auth client. The `import type` of the server module is erased at build time, so nothing server-side leaks into the client bundle:
+
+```ts
+// src/lib/client.ts
+import { createClient } from "@outerjs/sdk";
+import type { InferRouter } from "@outerjs/server";
+import type { outer } from "./outer";
+
+type Router = InferRouter<typeof outer>;
+
+export const client = createClient<Router>({
+  baseUrl: process.env.NEXT_PUBLIC_APP_URL!,
+})
+  .auth()
+  .build();
+```
+
+```tsx
+// src/app/posts/new-post.tsx
+"use client";
+import { client } from "@/lib/client";
+
+export function NewPost() {
+  return (
+    <button onClick={() => client.post.create({ title: "Hello from Next.js" })}>Create post</button>
+  );
+}
+```
+
+`client.auth.*` is the full Better Auth client — `client.auth.signIn.email({ email, password })`, `client.auth.useSession()`, and so on.
+
+## Server Components
+
+Since Outer lives in the same process, Server Components can call it through `outer.handle()` directly — an in-process function call, no network hop. Use the plain-JSON `/rest` surface (enabled by `.openapi()`) and forward the incoming headers so permissions see the caller's session:
+
+```tsx
+// src/app/posts/page.tsx
+import { headers } from "next/headers";
+import { outer } from "@/lib/outer";
+
+export default async function PostsPage() {
+  const res = await outer.handle(
+    new Request("http://internal/rest/post/list", {
+      method: "POST",
+      headers: await headers(),
+      body: JSON.stringify({}),
+    }),
+  );
+  const posts = await res.json();
+
+  return (
+    <ul>
+      {posts.map((p: { id: number; title: string }) => (
+        <li key={p.id}>{p.title}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+## Deployment
+
+- **Self-hosted Next.js (VPS, Coolify, Docker)** — the `pglite()` default just works: it writes to local disk, so any long-lived `next start` process with a persistent filesystem is a zero-infra deploy. Mount the data directory (`.outer/pglite` by default) as a volume if you containerize.
+- **Vercel** — serverless functions have no persistent disk, so swap `pglite()` for a serverless Postgres dialect such as [Neon](https://neon.tech). Everything else stays the same:
+
+```ts
+import { neon } from "@neondatabase/serverless";
+import { NeonDialect } from "kysely-neon";
+
+new Outer({
+  name: "My API",
+  db: {
+    dialect: new NeonDialect({ neon: neon(process.env.DATABASE_URL!) }),
+    kind: "postgres", // Neon is real Postgres
+  },
+});
+```
+
+On serverless, run migrations from a script at deploy time instead of at cold start — see `templates/vercel-neon` for a working setup, including a `scripts/migrate.ts` you can copy.
