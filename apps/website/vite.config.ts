@@ -13,12 +13,12 @@ export default defineConfig({
         langs: ["typescript", "tsx", "mdx", "shell", "yaml", "json"],
       },
       head: {
-        title: "Outer — Agent-first tiny backend",
+        title: "Outer — Own your backend",
       },
       socials: [
         { service: "x", url: "https://x.com/ilha_js" },
         { service: "discord", url: "https://discord.gg/WnVTMCTz74" },
-        { service: "github", url: "https://github.com/ilhajs/imprensa" },
+        { service: "github", url: "https://github.com/ilhajs/outer" },
       ],
     }),
   ],
