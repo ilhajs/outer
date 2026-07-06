@@ -250,6 +250,14 @@ Seals the router and constructs the HTTP server. Returns a `BuiltOuter` with:
 
 - `handle(request: Request): Promise<Response>` — fetch-compatible handler
 - `migrator` — Kysely `Migrator` instance (see Migrations)
+- `client(headers?)` — in-process `RouterClient<TRouter>` (oRPC's `createRouterClient`) that calls procedures directly, skipping HTTP and the oRPC wire protocol. For SSR (Server Components, server functions) where Outer runs in the same process as the frontend. `headers` is a `Headers` or a `() => Headers | Promise<Headers>` (evaluated per call — pass the framework's request-headers accessor so permissions and `context.auth` see the caller's session); defaults to empty headers.
+
+```ts
+// e.g. Next.js Server Component
+import { headers } from "next/headers";
+const api = outer.client(() => headers());
+const posts = await api.post.list({});
+```
 
 ---
 

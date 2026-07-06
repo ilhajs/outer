@@ -118,24 +118,25 @@ export function NewPost() {
 
 `client.auth.*` is the full Better Auth client — `client.auth.signIn.email({ email, password })`, `client.auth.useSession()`, and so on.
 
-## Server Components
+## Optimize SSR
 
-Since Outer lives in the same process, Server Components can call it through `outer.handle()` directly — an in-process function call, no network hop. Use the plain-JSON `/rest` surface (enabled by `.openapi()`) and forward the incoming headers so permissions see the caller's session:
+Outer runs in the same process as your Server Components, so SSR should never pay HTTP overhead. `outer.client()` returns an in-process [router client](https://orpc.dev/docs/client/server-side) — the same typed surface as the SDK, but each call invokes the procedure directly, with no serialization, no fetch, no wire protocol. Pass `next/headers` so permissions and `context.auth` see the caller's session on every call:
+
+```ts
+// src/lib/api.server.ts
+import "server-only";
+import { headers } from "next/headers";
+import { outer } from "./outer";
+
+export const api = outer.client(() => headers());
+```
 
 ```tsx
 // src/app/posts/page.tsx
-import { headers } from "next/headers";
-import { outer } from "@/lib/outer";
+import { api } from "@/lib/api.server";
 
 export default async function PostsPage() {
-  const res = await outer.handle(
-    new Request("http://internal/rest/post/list", {
-      method: "POST",
-      headers: await headers(),
-      body: JSON.stringify({}),
-    }),
-  );
-  const posts = await res.json();
+  const posts = await api.post.list({});
 
   return (
     <ul>
@@ -146,6 +147,8 @@ export default async function PostsPage() {
   );
 }
 ```
+
+If you share components between server and client rendering, you can go one step further with [oRPC's optimized SSR pattern](https://orpc.dev/docs/adapters/next): assign `outer.client(() => headers())` to `globalThis.$client` in a `server-only` module (imported from `instrumentation.ts` and your root layout), and have `src/lib/client.ts` fall back to it — one `client` import that calls in-process during SSR and over HTTP in the browser. Auth flows (`client.auth.*`) stay browser-only either way.
 
 ## Deployment
 

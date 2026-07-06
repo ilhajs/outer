@@ -149,25 +149,25 @@ function Posts() {
 
 ## Server functions and loaders
 
-On the server, skip the network: Outer lives in the same process, so call it through `outer.handle()` directly. Use the plain-JSON `/rest` surface (enabled by `.openapi()`) and forward the incoming request's headers so permissions see the caller's session:
+On the server, skip the network: Outer lives in the same process, so `outer.client()` gives you an in-process [router client](https://orpc.dev/docs/client/server-side) — the same typed surface as the SDK, but each call invokes the procedure directly, with no serialization, no fetch, no wire protocol. Forward the incoming request's headers so permissions and `context.auth` see the caller's session:
+
+```ts
+// src/lib/api.server.ts
+import { getRequest } from "@tanstack/react-start/server";
+import { outer } from "@/lib/outer";
+
+export const api = outer.client(() => getRequest().headers);
+```
 
 ```ts
 // src/lib/server-posts.ts
 import { createServerFn } from "@tanstack/react-start";
-import { getRequest } from "@tanstack/react-start/server";
-import { outer } from "@/lib/outer";
+import { api } from "@/lib/api.server";
 
-export const listPosts = createServerFn().handler(async () => {
-  const res = await outer.handle(
-    new Request("http://internal/rest/post/list", {
-      method: "POST",
-      headers: getRequest().headers,
-      body: JSON.stringify({}),
-    }),
-  );
-  return res.json();
-});
+export const listPosts = createServerFn().handler(() => api.post.list({}));
 ```
+
+Route loaders call `listPosts()` and get the in-process path during SSR and an RPC back to the server function on client-side navigation — deduplication comes free with `createServerFn`.
 
 ## Deployment
 

@@ -1,6 +1,15 @@
 import { ORPCError } from "@orpc/client";
 import type { OpenAPIHandler } from "@orpc/openapi/fetch";
-import { os, onError, Router, Builder, AnyProcedure, Middleware } from "@orpc/server";
+import {
+  os,
+  onError,
+  createRouterClient,
+  Router,
+  RouterClient,
+  Builder,
+  AnyProcedure,
+  Middleware,
+} from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import { betterAuth, Auth, BetterAuthOptions } from "better-auth";
 import { H3, H3Event, HTTPMethod } from "h3";
@@ -466,7 +475,14 @@ export class Outer<
       return response;
     });
 
-    return new BuiltOuter(server, db, this.schemas, this.pendingRouter, this.resources.dialectKind);
+    return new BuiltOuter(
+      server,
+      typedDb,
+      this.schemas,
+      this.pendingRouter,
+      this.resources.dialectKind,
+      auth,
+    );
   }
 
   private addToRouter(dotName: string, proc: AnyProcedure): void {
@@ -497,6 +513,8 @@ export class BuiltOuter<TRouter extends Record<string, any> = Router<any>> {
   readonly migrator: ReturnType<typeof createMigrator>;
   readonly router: TRouter;
   private readonly server: H3;
+  private readonly db: Kysely<any>;
+  private readonly auth: OuterAuth | undefined;
 
   constructor(
     server: H3,
@@ -504,13 +522,35 @@ export class BuiltOuter<TRouter extends Record<string, any> = Router<any>> {
     schemas: SchemaResult<any>[],
     router: TRouter,
     dialectKind: DialectKind = "postgres",
+    auth?: OuterAuth,
   ) {
     this.server = server;
+    this.db = db;
+    this.auth = auth;
     this.migrator = createMigrator({ db, schemas, kind: dialectKind });
     this.router = router;
   }
 
   async handle(request: Request): Promise<Response> {
     return this.server.fetch(request);
+  }
+
+  /**
+   * In-process router client — calls procedures directly, skipping HTTP and
+   * the oRPC wire protocol entirely. Use it for SSR (Server Components,
+   * server functions) where the server owns the request: pass the incoming
+   * request's headers (or a function returning them, evaluated per call) so
+   * permissions and `context.auth` see the caller's session.
+   */
+  client(
+    headers: Headers | (() => Headers | Promise<Headers>) = new Headers(),
+  ): RouterClient<TRouter> {
+    return createRouterClient(this.router as Router<OuterRpcContext>, {
+      context: async (): Promise<OuterRpcContext> => ({
+        headers: typeof headers === "function" ? await headers() : headers,
+        db: this.db as OuterRpcContext["db"],
+        ...(this.auth && { auth: this.auth }),
+      }),
+    }) as RouterClient<TRouter>;
   }
 }

@@ -85,6 +85,42 @@ describe("rest (OpenAPI handler)", () => {
   });
 });
 
+describe("client (in-process router client)", () => {
+  test("calls procedures directly without HTTP", async () => {
+    const app = makeOuter()
+      .resource("post")
+      .procedure("post.shout", (base) =>
+        base.handler(async ({ context }) => {
+          const rows = await context.db.query.post.findMany();
+          return rows.map((r) => r.title.toUpperCase());
+        }),
+      )
+      .build();
+    await app.migrator.migrateToLatest();
+
+    const client = app.client();
+    const created = (await client.post.create({ title: "hello" })) as any;
+    expect(created.title).toBe("hello");
+    expect(await client.post.shout()).toEqual(["HELLO"]);
+  });
+
+  test("evaluates a headers function per call", async () => {
+    let calls = 0;
+    const app = makeOuter()
+      .procedure("echo.header", (base) =>
+        base.handler(({ context }) => context.headers.get("x-call")),
+      )
+      .build();
+
+    const client = app.client(() => {
+      calls += 1;
+      return new Headers({ "x-call": String(calls) });
+    });
+    expect(await client.echo.header()).toBe("1");
+    expect(await client.echo.header()).toBe("2");
+  });
+});
+
 describe("db.transact", () => {
   async function callRpc(app: { handle: (req: Request) => Promise<Response> }, name: string) {
     const res = await app.handle(
