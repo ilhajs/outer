@@ -12,6 +12,7 @@
     "@electric-sql/pglite": "0.5.3",
     "@ilha/router": "^0.6.8",
     "@ilha/store": "^0.5.10",
+    "@orpc/openapi": "2.0.0-beta.15",
     "@outerjs/sdk": "https://pkg.pr.new/ilhajs/outer/@outerjs/sdk@main",
     "@outerjs/server": "https://pkg.pr.new/ilhajs/outer/@outerjs/server@main",
     "areia": "^0.1.33",
