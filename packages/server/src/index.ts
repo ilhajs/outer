@@ -16,7 +16,12 @@ import { H3, H3Event, HTTPMethod } from "h3";
 import { Dialect, Kysely } from "kysely";
 
 import { createMigrator, DialectKind } from "./migrator";
-import { actionsRequiringAuth, buildResourceProcedures, ResourceOptions } from "./resource";
+import {
+  actionsRequiringAuth,
+  buildResourceProcedures,
+  ResourceOptions,
+  ResourceProcedures,
+} from "./resource";
 import { schema, SchemaResult, InferDB, TablesDef, ColumnDef } from "./schema";
 import { createSola, Sola } from "./sola";
 
@@ -62,6 +67,9 @@ type MergeRouters<A, B> = {
       ? A[K]
       : never;
 };
+
+/** Extracts the `ownerColumn` literal from resource options so create inputs can omit it (it's auto-filled from the session). */
+type OwnerColumnOf<TOptions> = TOptions extends { ownerColumn: infer O extends string } ? O : never;
 
 export type AuthConfig = Omit<BetterAuthOptions, "database"> & {
   /** Secret used by Better Auth to sign/encrypt sessions, cookies, and tokens. */
@@ -165,6 +173,7 @@ export class Outer<
   TContext extends OuterRpcContext<TDB> = OuterRpcContext,
   TDB = any,
   TRouter extends Record<string, any> = Record<never, never>,
+  TTables extends TablesDef = TablesDef,
 > {
   private pendingRouter: TRouter;
   private readonly resources: OuterResources;
@@ -235,7 +244,7 @@ export class Outer<
   }
 
   /** Enables Better Auth and mounts `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain. Narrows `context.auth` to non-null. */
-  auth(config: AuthConfig): Outer<TContext & { auth: OuterAuth }, TDB, TRouter> {
+  auth(config: AuthConfig): Outer<TContext & { auth: OuterAuth }, TDB, TRouter, TTables> {
     const corsOrigins = this.resources.cors?.origins ?? [];
     const existingTrustedOrigins = Array.isArray(config.trustedOrigins)
       ? config.trustedOrigins
@@ -248,7 +257,7 @@ export class Outer<
       }),
       database: { type: this.resources.dialectKind, dialect: this.resources.dialect },
     });
-    return new Outer<TContext & { auth: OuterAuth }, TDB, TRouter>(
+    return new Outer<TContext & { auth: OuterAuth }, TDB, TRouter, TTables>(
       { ...(this.name && { name: this.name }) },
       this.resources,
       this.pendingBase as unknown as Builder<
@@ -262,8 +271,8 @@ export class Outer<
 
   schema<T extends TablesDef>(
     s: SchemaResult<T>,
-  ): Outer<OuterRpcContext<InferDB<T>>, InferDB<T>, TRouter> {
-    return new Outer<OuterRpcContext<InferDB<T>>, InferDB<T>, TRouter>(
+  ): Outer<OuterRpcContext<InferDB<T>>, InferDB<T>, TRouter, T> {
+    return new Outer<OuterRpcContext<InferDB<T>>, InferDB<T>, TRouter, T>(
       { ...(this.name && { name: this.name }) },
       this.resources,
       os.$context<OuterRpcContext<InferDB<T>>>() as unknown as Builder<
@@ -277,8 +286,8 @@ export class Outer<
 
   middleware<TOutContext extends Record<string, unknown>>(
     mw: Middleware<TContext & object, TOutContext, unknown, unknown, Record<never, never>>,
-  ): Outer<TContext & TOutContext, TDB, TRouter> {
-    return new Outer<TContext & TOutContext, TDB, TRouter>(
+  ): Outer<TContext & TOutContext, TDB, TRouter, TTables> {
+    return new Outer<TContext & TOutContext, TDB, TRouter, TTables>(
       { ...(this.name && { name: this.name }) },
       this.resources,
       this.pendingBase.use(mw as any) as unknown as Builder<
@@ -293,9 +302,14 @@ export class Outer<
   procedure<TName extends string, TProc extends AnyProcedure>(
     name: TName,
     cb: (base: Builder<TContext & object, Record<never, never>>) => TProc,
-  ): Outer<TContext, TDB, MergeRouters<TRouter, NestRoute<TName, TProc>>> {
+  ): Outer<TContext, TDB, MergeRouters<TRouter, NestRoute<TName, TProc>>, TTables> {
     this.addToRouter(name, cb(this.pendingBase));
-    return this as unknown as Outer<TContext, TDB, MergeRouters<TRouter, NestRoute<TName, TProc>>>;
+    return this as unknown as Outer<
+      TContext,
+      TDB,
+      MergeRouters<TRouter, NestRoute<TName, TProc>>,
+      TTables
+    >;
   }
 
   /** Mounts a raw H3 route (e.g. for webhooks or custom REST endpoints) alongside `.procedure()`-defined RPC routes. Registered before `/rpc/**`, so it takes precedence on overlapping paths. */
@@ -308,19 +322,20 @@ export class Outer<
     return this;
   }
 
-  resource<TName extends keyof TDB & string>(
+  resource<
+    TName extends keyof TTables & keyof TDB & string,
+    const TOptions extends ResourceOptions = Record<never, never>,
+  >(
     name: TName,
-    options?: ResourceOptions,
+    options?: TOptions,
   ): Outer<
     TContext,
     TDB,
     MergeRouters<
       TRouter,
-      NestRoute<
-        TName,
-        Record<"list" | "get" | "create" | "createMany" | "update" | "delete", AnyProcedure>
-      >
-    >
+      NestRoute<TName, ResourceProcedures<TTables[TName], OwnerColumnOf<TOptions>>>
+    >,
+    TTables
   > {
     const latestSchema = this.schemas.at(-1);
     const cols = latestSchema?.tables[name] as Record<string, ColumnDef> | undefined;
@@ -345,11 +360,9 @@ export class Outer<
       TDB,
       MergeRouters<
         TRouter,
-        NestRoute<
-          TName,
-          Record<"list" | "get" | "create" | "createMany" | "update" | "delete", AnyProcedure>
-        >
-      >
+        NestRoute<TName, ResourceProcedures<TTables[TName], OwnerColumnOf<TOptions>>>
+      >,
+      TTables
     >;
   }
 

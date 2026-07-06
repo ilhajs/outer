@@ -137,7 +137,7 @@ function Posts() {
 
   return (
     <ul>
-      {posts?.map((p: { id: number; title: string }) => (
+      {posts?.map((p) => (
         <li key={p.id}>{p.title}</li>
       ))}
     </ul>

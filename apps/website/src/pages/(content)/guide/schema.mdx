@@ -149,6 +149,6 @@ When `update` or `delete` is `"owner"`, the existing row is fetched first and `r
 })
 ```
 
-`.resource()` currently registers its six CRUD procedures as loosely-typed `AnyProcedure` in the router type — their runtime behavior and validation are fully typed internally, but that derivation isn't yet mirrored at the type level. Use [`.procedure()`](/guide/procedures) directly if you need full type safety on a given endpoint.
+The six generated procedures are strictly typed from the table's columns: rows come back with each column's TS type, `create` inputs omit the serial primary key, defaulted columns, and the `ownerColumn` (auto-filled from the session), and `get`/`update`/`delete` take `{ <pk>: value }` typed from the declared primary key. Every client — `@outerjs/sdk` in the browser or `outer.client()` on the server — inherits these types.
 
 Next: wire up [Auth & Permissions](/guide/auth), or write custom [Procedures](/guide/procedures).

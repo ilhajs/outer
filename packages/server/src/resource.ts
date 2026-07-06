@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/client";
-import { Builder, AnyProcedure } from "@orpc/server";
+import { Builder, AnyProcedure, Context, Procedure, Schema } from "@orpc/server";
 import { NoResultError } from "kysely";
 import { z } from "zod/v4";
 
@@ -46,6 +46,148 @@ export type ResourceOptions = {
   ownerColumn?: string;
   /** Max rows `list` can return per call, and the default when `take` isn't passed. Defaults to 100/50. */
   listLimit?: { default?: number; max?: number };
+};
+
+// ── Type-level input/output derivation ─────────────────────────────────────
+// Mirrors the runtime zod schemas built below (`buildSchemas` and friends) so
+// the router — and every client derived from it — is strictly typed. Keep the
+// two in sync when changing either.
+
+/** TS-side twin of `OUTPUT_TYPE_TO_ZOD` (timestamp/boolean output values vary by dialect). */
+type OutputValueMap = {
+  serial: number;
+  text: string;
+  varchar: string;
+  integer: number;
+  boolean: boolean;
+  timestamp: Date | string;
+  jsonb: unknown;
+  uuid: string;
+};
+
+/** TS-side twin of `INPUT_TYPE_TO_ZOD` (timestamps go in as ISO strings). */
+type InputValueMap = {
+  serial: number;
+  text: string;
+  varchar: string;
+  integer: number;
+  boolean: boolean;
+  timestamp: string;
+  jsonb: unknown;
+  uuid: string;
+};
+
+// Both maps are indexed with `SQLType` keys (via `ColumnDef["_type"]`), so a
+// missing entry is a compile error at the `ColOut`/`ColIn` usage sites.
+type ColOut<C extends ColumnDef> = C["_nullable"] extends true
+  ? OutputValueMap[C["_type"]] | null
+  : OutputValueMap[C["_type"]];
+
+type ColIn<C extends ColumnDef> = InputValueMap[C["_type"]];
+
+/** A full row as returned by resource procedures. */
+export type ResourceRow<Cols extends Record<string, ColumnDef>> = {
+  [K in keyof Cols]: ColOut<Cols[K]>;
+};
+
+/** Columns the runtime `createSchema` omits: serial PKs (db-generated) and defaulted columns. The `ownerColumn` is excluded separately via `TOmit`. */
+type OmitOnCreate<C extends ColumnDef> = [C["_type"], C["_primaryKey"]] extends ["serial", true]
+  ? true
+  : C["_hasDefault"] extends true
+    ? true
+    : false;
+
+export type ResourceCreateInput<
+  Cols extends Record<string, ColumnDef>,
+  TOmit extends string = never,
+> = {
+  [K in keyof Cols as K extends TOmit
+    ? never
+    : OmitOnCreate<Cols[K]> extends true
+      ? never
+      : Cols[K]["_nullable"] extends true
+        ? never
+        : K]: ColIn<Cols[K]>;
+} & {
+  [K in keyof Cols as K extends TOmit
+    ? never
+    : OmitOnCreate<Cols[K]> extends true
+      ? never
+      : Cols[K]["_nullable"] extends true
+        ? K
+        : never]?: ColIn<Cols[K]> | null;
+};
+
+type PKName<Cols extends Record<string, ColumnDef>> = {
+  [K in keyof Cols]: Cols[K]["_primaryKey"] extends true ? K : never;
+}[keyof Cols];
+
+/** `{ <pk>: value }` — falls back to `{ id }` when no PK is declared, matching the runtime `whereSchema`. */
+type ResourceWhereKey<Cols extends Record<string, ColumnDef>> = [PKName<Cols>] extends [never]
+  ? { id: string | number }
+  : { [K in PKName<Cols>]: ColIn<Cols[K]> };
+
+/** TS-side twin of `buildFieldFilterSchema` — extra operators are stripped by the runtime schema, so a single permissive shape is safe. */
+type FieldFilter<V> = {
+  equals?: V;
+  not?: V;
+  in?: V[];
+  notIn?: V[];
+  isNull?: boolean;
+  lt?: V;
+  lte?: V;
+  gt?: V;
+  gte?: V;
+  contains?: string;
+  startsWith?: string;
+  endsWith?: string;
+};
+
+export type ResourceFilter<Cols extends Record<string, ColumnDef>> = {
+  [K in keyof Cols]?: ColIn<Cols[K]> | null | FieldFilter<ColIn<Cols[K]>>;
+} & {
+  AND?: ResourceFilter<Cols>[];
+  OR?: ResourceFilter<Cols>[];
+  NOT?: ResourceFilter<Cols>;
+};
+
+/** Relations aren't tracked at the type level, so `include` stays loose — the runtime schema rejects unknown relation names. */
+type IncludeInput = Record<string, boolean>;
+
+export type ResourceListInput<Cols extends Record<string, ColumnDef>> = {
+  where?: ResourceFilter<Cols>;
+  orderBy?: { [K in keyof Cols]?: "asc" | "desc" }[];
+  take?: number;
+  skip?: number;
+  include?: IncludeInput;
+};
+
+type TypedProcedure<TInput, TOutput> = Procedure<
+  Context,
+  Context,
+  Schema<TInput, TInput>,
+  Schema<TOutput, TOutput>,
+  Record<never, never>,
+  never
+>;
+
+/** The six procedures `.resource()` registers, strictly typed from the table's columns. */
+export type ResourceProcedures<
+  Cols extends Record<string, ColumnDef>,
+  TOmit extends string = never,
+> = {
+  list: TypedProcedure<ResourceListInput<Cols> | undefined, ResourceRow<Cols>[]>;
+  get: TypedProcedure<
+    ResourceWhereKey<Cols> & { include?: IncludeInput },
+    ResourceRow<Cols> | null
+  >;
+  create: TypedProcedure<ResourceCreateInput<Cols, TOmit>, ResourceRow<Cols>>;
+  createMany: TypedProcedure<{ data: ResourceCreateInput<Cols, TOmit>[] }, ResourceRow<Cols>[]>;
+  update: TypedProcedure<
+    { where: ResourceWhereKey<Cols>; data: Partial<ResourceCreateInput<Cols, TOmit>> },
+    ResourceRow<Cols>
+  >;
+  delete: TypedProcedure<ResourceWhereKey<Cols>, ResourceRow<Cols>>;
 };
 
 /** Actions (of a given resource) whose permission requires a signed-in session — used by `Outer.build()` to fail fast if `.auth()` was never called. */

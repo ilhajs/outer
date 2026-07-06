@@ -555,7 +555,16 @@ export type AppClient = RouterClient<Router>;
 
 Outer's core has no CLI — write the file above by hand, or generate it with your own script if you want automation.
 
-`.procedure()` fully infers each procedure's `.input()`/`.output()` types into the router, so `client.foo(...)`, `client.user.me(...)`, etc. are properly typed on `RouterClient<Router>`. `.resource()` currently registers its five CRUD procedures (`list`/`get`/`create`/`update`/`delete`) as loosely-typed `AnyProcedure` in the router type — their runtime behavior and validation are fully typed internally (via Zod schemas derived from the table's columns), but that derivation isn't yet mirrored at the type level, so client calls into resource-generated procedures aren't strongly typed. Use `.procedure()` directly if you need full type safety on a given endpoint.
+`.procedure()` fully infers each procedure's `.input()`/`.output()` types into the router, so `client.foo(...)`, `client.user.me(...)`, etc. are properly typed on `RouterClient<Router>`.
+
+`.resource()` is strictly typed too: the six generated procedures (`list`/`get`/`create`/`createMany`/`update`/`delete`) get their input and output types derived from the table's column definitions (`ResourceProcedures` in `resource.ts`, mirroring the runtime Zod schemas). Concretely:
+
+- Rows come back with each column's TS type (`serial`/`integer` → `number`, `timestamp` → `Date | string` since drivers differ, nullable columns → `T | null`).
+- `create`/`createMany` inputs omit serial primary keys, columns with `.default()`, and the resource's `ownerColumn` (auto-filled from the session); nullable columns are optional.
+- `get`/`update`/`delete` take `{ <pk>: value }` typed from the declared primary key column.
+- `list` accepts a typed `where` filter (per-column values or operator objects), `orderBy`, `take`, and `skip`.
+
+One gap: relation `include`s aren't tracked at the type level — `include` accepts any `Record<string, boolean>` (unknown relation names are rejected at runtime), and included relations don't appear on the row type.
 
 ---
 

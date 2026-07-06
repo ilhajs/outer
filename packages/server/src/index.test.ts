@@ -99,7 +99,8 @@ describe("client (in-process router client)", () => {
     await app.migrator.migrateToLatest();
 
     const client = app.client();
-    const created = (await client.post.create({ title: "hello" })) as any;
+    // no cast — resource procedures are strictly typed from the table's columns
+    const created = await client.post.create({ title: "hello" });
     expect(created.title).toBe("hello");
     expect(await client.post.shout()).toEqual(["HELLO"]);
   });

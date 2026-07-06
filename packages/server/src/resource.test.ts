@@ -26,7 +26,11 @@ function makeApp(opts?: Parameters<ReturnType<typeof Outer.prototype.schema>["re
     .build();
 }
 
-async function rpc(app: Awaited<ReturnType<typeof makeApp>>, action: string, input?: unknown) {
+async function rpc(
+  app: { handle: (req: Request) => Promise<Response> },
+  action: string,
+  input?: unknown,
+) {
   const res = await app.handle(
     new Request(`http://localhost/rpc/post/${action}`, {
       method: "POST",

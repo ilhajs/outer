@@ -1,6 +1,6 @@
 // ── Column ─────────────────────────────────────────────────────────────────
 
-type SQLTypeMap = {
+export type SQLTypeMap = {
   serial: number;
   text: string;
   varchar: string;
@@ -11,41 +11,56 @@ type SQLTypeMap = {
   uuid: string;
 };
 
-type SQLType = keyof SQLTypeMap;
+export type SQLType = keyof SQLTypeMap;
 
-export type ColumnDef<T extends SQLType = SQLType, Null extends boolean = boolean> = {
+// PK/HasDefault are tracked at the type level so `.resource()` can derive
+// exact input/output types (serial PKs and defaulted columns are omitted
+// from create inputs, the PK column drives get/update/delete `where` types).
+export type ColumnDef<
+  T extends SQLType = SQLType,
+  Null extends boolean = boolean,
+  PK extends boolean = boolean,
+  HasDefault extends boolean = boolean,
+> = {
   _type: T;
   _nullable: Null;
-  _primaryKey: boolean;
+  _primaryKey: PK;
+  _hasDefault: HasDefault;
   _unique: boolean;
   _default: string | null;
   _references: { table: string; column: string } | null;
-  nullable(): ColumnDef<T, true>;
-  primaryKey(): ColumnDef<T, Null>;
-  unique(): ColumnDef<T, Null>;
-  default(expr: string): ColumnDef<T, Null>;
-  references(table: string, column: string): ColumnDef<T, Null>;
+  nullable(): ColumnDef<T, true, PK, HasDefault>;
+  primaryKey(): ColumnDef<T, Null, true, HasDefault>;
+  unique(): ColumnDef<T, Null, PK, HasDefault>;
+  default(expr: string): ColumnDef<T, Null, PK, true>;
+  references(table: string, column: string): ColumnDef<T, Null, PK, HasDefault>;
 };
 
-function makeCol<T extends SQLType>(type: T): ColumnDef<T, false> {
-  const def: ColumnDef<T, false> = {
+function makeCol<T extends SQLType>(type: T): ColumnDef<T, false, false, false> {
+  const def: ColumnDef<T, false, false, false> = {
     _type: type,
     _nullable: false as const,
-    _primaryKey: false,
+    _primaryKey: false as const,
+    _hasDefault: false as const,
     _unique: false,
     _default: null,
     _references: null,
     nullable() {
-      return { ...this, _nullable: true as const } as unknown as ColumnDef<T, true>;
+      return { ...this, _nullable: true as const } as unknown as ColumnDef<T, true, false, false>;
     },
     primaryKey() {
-      return { ...this, _primaryKey: true };
+      return { ...this, _primaryKey: true as const } as unknown as ColumnDef<T, false, true, false>;
     },
     unique() {
       return { ...this, _unique: true };
     },
     default(expr: string) {
-      return { ...this, _default: expr };
+      return { ...this, _default: expr, _hasDefault: true as const } as unknown as ColumnDef<
+        T,
+        false,
+        false,
+        true
+      >;
     },
     references(table: string, column: string) {
       return { ...this, _references: { table, column } };
@@ -55,14 +70,14 @@ function makeCol<T extends SQLType>(type: T): ColumnDef<T, false> {
 }
 
 export type TableBuilder = {
-  serial(): ColumnDef<"serial", false>;
-  text(): ColumnDef<"text", false>;
-  varchar(): ColumnDef<"varchar", false>;
-  integer(): ColumnDef<"integer", false>;
-  boolean(): ColumnDef<"boolean", false>;
-  timestamp(): ColumnDef<"timestamp", false>;
-  jsonb(): ColumnDef<"jsonb", false>;
-  uuid(): ColumnDef<"uuid", false>;
+  serial(): ColumnDef<"serial", false, false, false>;
+  text(): ColumnDef<"text", false, false, false>;
+  varchar(): ColumnDef<"varchar", false, false, false>;
+  integer(): ColumnDef<"integer", false, false, false>;
+  boolean(): ColumnDef<"boolean", false, false, false>;
+  timestamp(): ColumnDef<"timestamp", false, false, false>;
+  jsonb(): ColumnDef<"jsonb", false, false, false>;
+  uuid(): ColumnDef<"uuid", false, false, false>;
 };
 
 const t: TableBuilder = {
