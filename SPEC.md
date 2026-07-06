@@ -45,6 +45,8 @@ new Outer({ db: pglite() }); // or pglite({ dataDir: "..." }), defaults to <cwd>
 
 This is the path to reach for first; it's what makes Outer deployable to a VPS/Coolify box with nothing else to provision. Splitting it into a subpath keeps PGlite's WASM out of deploy bundles for platforms where it's dead weight (Cloudflare Workers, Vercel Functions) — see `templates/cloudflare` and `templates/vercel-neon`.
 
+`@electric-sql/pglite` is an **optional peer dependency**: apps that use `pglite()` must install it themselves (`bun add @electric-sql/pglite`), and apps on other dialects (Durable Objects, Neon, network Postgres) never download its WASM at all.
+
 ### Custom dialects
 
 For platforms without a persistent filesystem (Vercel Functions, Cloudflare Workers), or to point at an existing database, pass any [Kysely `Dialect`](https://kysely.dev/docs/dialects) directly:
@@ -66,6 +68,8 @@ new Outer({
 Toggles `GET /openapi.json` **and** the plain-JSON REST surface at `/rest/**`. Not mounted unless this is called — calling it with no args enables it. Must be called before `.build()`. Can appear anywhere in the chain.
 
 The `/rpc/**` handler speaks oRPC's own wire protocol, which generic OpenAPI clients can't use — so when `.openapi()` is enabled, the same router is also served through oRPC's `OpenAPIHandler` under `/rest/**`, matching the generated spec exactly (the spec's `servers[0].url` points at `<baseUrl>/rest`).
+
+`@orpc/openapi` and `@orpc/zod` are **optional peer dependencies** — they're loaded lazily on the first request to `/openapi.json` or `/rest/**`, so apps that never call `.openapi()` don't need them installed. If `.openapi()` is enabled but they're missing, those routes fail with an error telling you to `bun add @orpc/openapi @orpc/zod`.
 
 | Option    | Type      | Default | Description                                   |
 | --------- | --------- | ------- | --------------------------------------------- |

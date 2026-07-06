@@ -1,9 +1,7 @@
 import { ORPCError } from "@orpc/client";
-import { OpenAPIGenerator } from "@orpc/openapi";
-import { OpenAPIHandler } from "@orpc/openapi/fetch";
+import type { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { os, onError, Router, Builder, AnyProcedure, Middleware } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
-import { ZodToJsonSchemaConverter } from "@orpc/zod";
 import { betterAuth, Auth, BetterAuthOptions } from "better-auth";
 import { H3, H3Event, HTTPMethod } from "h3";
 import { Dialect, Kysely } from "kysely";
@@ -110,6 +108,31 @@ export type CorsConfig = {
   origins: string[];
   credentials?: boolean;
 };
+
+/**
+ * `@orpc/openapi` and `@orpc/zod` are optional peer dependencies — only needed
+ * when `.openapi()` is enabled, so they're loaded lazily on the first request
+ * to an OpenAPI route rather than imported at module load.
+ */
+async function loadOpenApiModules() {
+  try {
+    const [openapi, openapiFetch, orpcZod] = await Promise.all([
+      import("@orpc/openapi"),
+      import("@orpc/openapi/fetch"),
+      import("@orpc/zod"),
+    ]);
+    return {
+      OpenAPIGenerator: openapi.OpenAPIGenerator,
+      OpenAPIHandler: openapiFetch.OpenAPIHandler,
+      ZodToJsonSchemaConverter: orpcZod.ZodToJsonSchemaConverter,
+    };
+  } catch (cause) {
+    throw new Error(
+      "`.openapi()` requires the optional peer dependencies `@orpc/openapi` and `@orpc/zod`. Install them with: bun add @orpc/openapi @orpc/zod",
+      { cause },
+    );
+  }
+}
 
 function deepMerge({
   a,
@@ -389,8 +412,11 @@ export class Outer<
     }
 
     if (this.resources.openapiEnabled) {
+      let modulesPromise: ReturnType<typeof loadOpenApiModules> | undefined;
+      const modules = () => (modulesPromise ??= loadOpenApiModules());
       const restBase = `${this.resources.baseUrl ?? ""}/rest`;
       server = server.get("/openapi.json", async () => {
+        const { OpenAPIGenerator, ZodToJsonSchemaConverter } = await modules();
         const generator = new OpenAPIGenerator({ converters: [new ZodToJsonSchemaConverter()] });
         return generator.generate(router, {
           base: {
@@ -405,14 +431,15 @@ export class Outer<
 
       // Plain-JSON REST surface matching the OpenAPI spec (the /rpc/** handler
       // speaks oRPC's own wire protocol, which spec-driven clients can't use).
-      const openapiHandler = new OpenAPIHandler(router, {
-        interceptors: [
-          onError((error) => {
-            if (!(error instanceof ORPCError)) console.error(error);
-          }),
-        ],
-      });
+      let openapiHandler: OpenAPIHandler<OuterRpcContext<TDB>> | undefined;
       server = server.all("/rest/**", async (event) => {
+        openapiHandler ??= new (await modules()).OpenAPIHandler(router, {
+          interceptors: [
+            onError((error) => {
+              if (!(error instanceof ORPCError)) console.error(error);
+            }),
+          ],
+        });
         const { response } = await openapiHandler.handle(event.req, {
           prefix: "/rest",
           context: { headers: event.req.headers, db: typedDb, ...(auth && { auth }) },

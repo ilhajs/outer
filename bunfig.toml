@@ -1,0 +1,5 @@
+[install]
+# Supply-chain hardening: refuse to install package versions published less
+# than 3 days ago, so compromised releases are likely yanked before we pick
+# them up.
+minimumReleaseAge = 259200

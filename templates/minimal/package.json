@@ -9,6 +9,7 @@
     "start": "node dist/index.mjs"
   },
   "dependencies": {
+    "@electric-sql/pglite": "0.5.3",
     "@outerjs/server": "https://pkg.pr.new/ilhajs/outer/@outerjs/server@main",
     "srvx": "^0.11.18",
     "zod": "^4.4.3"

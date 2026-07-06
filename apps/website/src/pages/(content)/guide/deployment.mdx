@@ -11,7 +11,7 @@ tags: [deploy, pglite, dialects, vps, serverless]
 
 ## The zero-infra default: `pglite()`
 
-For persistent-hosting deployments (VPS, Coolify), import the `pglite()` helper from the `/pglite` subpath:
+For persistent-hosting deployments (VPS, Coolify), install the optional `@electric-sql/pglite` peer dependency (`bun add @electric-sql/pglite` — templates that use it already declare it) and import the `pglite()` helper from the `/pglite` subpath:
 
 ```ts
 import { Outer } from "@outerjs/server";

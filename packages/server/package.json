@@ -46,19 +46,33 @@
     "test:e2e": "bun test/index.ts"
   },
   "dependencies": {
-    "@electric-sql/pglite": "0.5.3",
     "@orpc/client": "2.0.0-beta.11",
-    "@orpc/openapi": "2.0.0-beta.11",
     "@orpc/server": "2.0.0-beta.11",
-    "@orpc/zod": "2.0.0-beta.11",
     "better-auth": "1.6.23",
     "kysely": "0.29.2",
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.3",
+    "@orpc/openapi": "2.0.0-beta.11",
+    "@orpc/zod": "2.0.0-beta.11",
     "srvx": "^0.11.18"
   },
   "peerDependencies": {
+    "@electric-sql/pglite": "0.5.3",
+    "@orpc/openapi": "2.0.0-beta.11",
+    "@orpc/zod": "2.0.0-beta.11",
     "h3": "^2.0.1-rc.22"
+  },
+  "peerDependenciesMeta": {
+    "@electric-sql/pglite": {
+      "optional": true
+    },
+    "@orpc/openapi": {
+      "optional": true
+    },
+    "@orpc/zod": {
+      "optional": true
+    }
   }
 }
