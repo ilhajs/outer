@@ -43,23 +43,14 @@ export const v1_0_0 = schema("1.0.0")
     id: t.text().primaryKey(),
     title: t.text(),
     description: t.text().nullable(),
+    completed: t.boolean().default("false"),
     userId: t.text().references("user", "id"),
     ...timestamps(t),
   }))
-  .relation("user", (rel) =>
-    rel.hasMany("session", { from: "id", to: "userId" }),
-  )
-  .relation("user", (rel) =>
-    rel.hasMany("account", { from: "id", to: "userId" }),
-  )
+  .relation("user", (rel) => rel.hasMany("session", { from: "id", to: "userId" }))
+  .relation("user", (rel) => rel.hasMany("account", { from: "id", to: "userId" }))
   .relation("user", (rel) => rel.hasMany("todo", { from: "id", to: "userId" }))
-  .relation("session", (rel) =>
-    rel.belongsTo("user", { from: "userId", to: "id" }),
-  )
-  .relation("account", (rel) =>
-    rel.belongsTo("user", { from: "userId", to: "id" }),
-  )
-  .relation("todo", (rel) =>
-    rel.belongsTo("user", { from: "userId", to: "id" }),
-  )
+  .relation("session", (rel) => rel.belongsTo("user", { from: "userId", to: "id" }))
+  .relation("account", (rel) => rel.belongsTo("user", { from: "userId", to: "id" }))
+  .relation("todo", (rel) => rel.belongsTo("user", { from: "userId", to: "id" }))
   .build();

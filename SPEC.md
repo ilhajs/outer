@@ -162,16 +162,16 @@ Auto-generates six CRUD procedures for a schema table. `name` must match a table
 // Registers: post.list, post.get, post.create, post.createMany, post.update, post.delete
 ```
 
-| Procedure           | Input                                             | Output        | Description                    |
-| ------------------- | ------------------------------------------------- | ------------- | ------------------------------ |
-| `{name}.list`       | `{ where?, orderBy?, take?, skip?, include? }`    | `Row[]`       | Filtered/ordered `SELECT`      |
-| `{name}.get`        | `{ <pk>: ..., include? }`                         | `Row \| null` | Fetch by primary key           |
-| `{name}.create`     | Row minus serial PK, defaults, and `ownerColumn`  | `Row`         | `INSERT ... RETURNING *`       |
-| `{name}.createMany` | `{ data: createInput[] }` (1–1000 rows)           | `Row[]`       | Batch `INSERT ... RETURNING *` |
-| `{name}.update`     | `{ where: { <pk> }, data: Partial<createInput> }` | `Row`         | `UPDATE ... RETURNING *`       |
-| `{name}.delete`     | `{ <pk>: ... }`                                   | `Row`         | `DELETE ... RETURNING *`       |
+| Procedure           | Input                                            | Output        | Description                    |
+| ------------------- | ------------------------------------------------ | ------------- | ------------------------------ |
+| `{name}.list`       | `{ where?, orderBy?, take?, skip?, include? }`   | `Row[]`       | Filtered/ordered `SELECT`      |
+| `{name}.get`        | `{ <pk>: ..., include? }`                        | `Row \| null` | Fetch by primary key           |
+| `{name}.create`     | Row minus serial PK, defaults, and `ownerColumn` | `Row`         | `INSERT ... RETURNING *`       |
+| `{name}.createMany` | `{ data: createInput[] }` (1–1000 rows)          | `Row[]`       | Batch `INSERT ... RETURNING *` |
+| `{name}.update`     | `{ where: { <pk> }, data: partialUpdateInput }`  | `Row`         | `UPDATE ... RETURNING *`       |
+| `{name}.delete`     | `{ <pk>: ... }`                                  | `Row`         | `DELETE ... RETURNING *`       |
 
-Input types are derived from column definitions at build time. `serial` primary key columns, columns with `.default()`, and `ownerColumn` are omitted from create input.
+Input types are derived from column definitions at build time. `serial` primary key columns, columns with `.default()`, and `ownerColumn` are omitted from create input. Update `data` accepts any non–serial-PK column (including columns with `.default()`, such as boolean flags); `ownerColumn` is still omitted from update input.
 
 `list` accepts the same Prisma-style query surface as Sola, validated per column type:
 
@@ -573,6 +573,7 @@ Outer's core has no CLI — write the file above by hand, or generate it with yo
 
 - Rows come back with each column's TS type (`serial`/`integer` → `number`, `timestamp` → `Date | string` since drivers differ, nullable columns → `T | null`).
 - `create`/`createMany` inputs omit serial primary keys, columns with `.default()`, and the resource's `ownerColumn` (auto-filled from the session); nullable columns are optional.
+- `update` `data` is a partial of all updatable columns (serial PK and `ownerColumn` omitted; defaulted columns such as booleans are included so `false` is valid).
 - `get`/`update`/`delete` take `{ <pk>: value }` typed from the declared primary key column.
 - `list` accepts a typed `where` filter (per-column values or operator objects), `orderBy`, `take`, and `skip`.
 

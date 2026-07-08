@@ -117,6 +117,88 @@ describe("resource — CRUD", () => {
     const { status } = await rpc(app, "update", { where: { id: created.id }, data: {} });
     expect(status).toBe(400);
   });
+
+  test("update can change a defaulted text column", async () => {
+    const { output: created } = await rpc(app, "create", { title: "Post" });
+    expect(created.status).toBe("draft");
+    const { status, output } = await rpc(app, "update", {
+      where: { id: created.id },
+      data: { status: "published" },
+    });
+    expect(status).toBe(200);
+    expect(output.status).toBe("published");
+  });
+});
+
+const todoSchema = schema("1.0.0")
+  .table("todo", (t) => ({
+    id: t.serial().primaryKey(),
+    title: t.text(),
+    completed: t.boolean().default("false"),
+  }))
+  .build();
+
+function makeTodoApp() {
+  return new Outer({
+    name: "Test",
+    baseUrl: "http://localhost",
+    db: pglite({ dataDir: "memory://" }),
+  })
+    .schema(todoSchema)
+    .resource("todo")
+    .build();
+}
+
+async function todoRpc(
+  app: Awaited<ReturnType<typeof makeTodoApp>>,
+  action: string,
+  input?: unknown,
+) {
+  const res = await app.handle(
+    new Request(`http://localhost/rpc/todo/${action}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ json: input ?? {} }),
+    }),
+  );
+  const body = (await res.json()) as any;
+  return { status: res.status, output: body.json };
+}
+
+describe("resource — update boolean columns with defaults", () => {
+  let app: Awaited<ReturnType<typeof makeTodoApp>>;
+
+  beforeAll(async () => {
+    app = makeTodoApp();
+    await app.migrator.migrateToLatest();
+  });
+
+  test("create applies boolean default", async () => {
+    const { status, output } = await todoRpc(app, "create", { title: "Task" });
+    expect(status).toBe(200);
+    expect(output.completed).toBe(false);
+  });
+
+  test("update sets completed to true", async () => {
+    const { output: created } = await todoRpc(app, "create", { title: "Done me" });
+    const { status, output } = await todoRpc(app, "update", {
+      where: { id: created.id },
+      data: { completed: true },
+    });
+    expect(status).toBe(200);
+    expect(output.completed).toBe(true);
+  });
+
+  test("update sets completed to false", async () => {
+    const { output: created } = await todoRpc(app, "create", { title: "Undo me" });
+    await todoRpc(app, "update", { where: { id: created.id }, data: { completed: true } });
+    const { status, output } = await todoRpc(app, "update", {
+      where: { id: created.id },
+      data: { completed: false },
+    });
+    expect(status).toBe(200);
+    expect(output.completed).toBe(false);
+  });
 });
 
 describe("resource — list pagination cap", () => {

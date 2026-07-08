@@ -118,6 +118,32 @@ export type ResourceCreateInput<
         : never]?: ColIn<Cols[K]> | null;
 };
 
+/** Columns omitted from update input: serial PKs only. Defaulted and nullable columns are updatable. */
+type OmitOnUpdate<C extends ColumnDef> = [C["_type"], C["_primaryKey"]] extends ["serial", true]
+  ? true
+  : false;
+
+export type ResourceUpdateInput<
+  Cols extends Record<string, ColumnDef>,
+  TOmit extends string = never,
+> = {
+  [K in keyof Cols as K extends TOmit
+    ? never
+    : OmitOnUpdate<Cols[K]> extends true
+      ? never
+      : Cols[K]["_nullable"] extends true
+        ? never
+        : K]?: ColIn<Cols[K]>;
+} & {
+  [K in keyof Cols as K extends TOmit
+    ? never
+    : OmitOnUpdate<Cols[K]> extends true
+      ? never
+      : Cols[K]["_nullable"] extends true
+        ? K
+        : never]?: ColIn<Cols[K]> | null;
+};
+
 type PKName<Cols extends Record<string, ColumnDef>> = {
   [K in keyof Cols]: Cols[K]["_primaryKey"] extends true ? K : never;
 }[keyof Cols];
@@ -184,7 +210,7 @@ export type ResourceProcedures<
   create: TypedProcedure<ResourceCreateInput<Cols, TOmit>, ResourceRow<Cols>>;
   createMany: TypedProcedure<{ data: ResourceCreateInput<Cols, TOmit>[] }, ResourceRow<Cols>[]>;
   update: TypedProcedure<
-    { where: ResourceWhereKey<Cols>; data: Partial<ResourceCreateInput<Cols, TOmit>> },
+    { where: ResourceWhereKey<Cols>; data: ResourceUpdateInput<Cols, TOmit> },
     ResourceRow<Cols>
   >;
   delete: TypedProcedure<ResourceWhereKey<Cols>, ResourceRow<Cols>>;
@@ -340,7 +366,7 @@ function buildSchemas({
     : z.union([z.string(), z.number()]);
   const whereSchema = z.object({ [pkName]: pkZod });
 
-  // Omit: serial PK (db-generated), columns with defaults, ownerColumn (auto-filled on create)
+  // Create omits: serial PK (db-generated), columns with defaults, ownerColumn (auto-filled on create)
   const createShape: Record<string, z.ZodType> = {};
   for (const [name, col] of entries) {
     if (col._type === "serial" && col._primaryKey) continue;
@@ -350,7 +376,16 @@ function buildSchemas({
   }
   const createSchema = z.object(createShape);
 
-  return { rowSchema, createSchema, updateSchema: createSchema.partial(), whereSchema, pkName };
+  // Update allows defaulted columns (e.g. boolean flags) but still omits serial PK and ownerColumn
+  const updateShape: Record<string, z.ZodType> = {};
+  for (const [name, col] of entries) {
+    if (col._type === "serial" && col._primaryKey) continue;
+    if (ownerColumn && name === ownerColumn) continue;
+    updateShape[name] = colToZod(col, INPUT_TYPE_TO_ZOD);
+  }
+  const updateSchema = z.object(updateShape).partial();
+
+  return { rowSchema, createSchema, updateSchema, whereSchema, pkName };
 }
 
 // ── Permission enforcement ─────────────────────────────────────────────────

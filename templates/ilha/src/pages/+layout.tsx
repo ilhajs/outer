@@ -4,10 +4,11 @@ import { defineLayout, type InferLoader, loader } from "@ilha/router";
 import { Toaster } from "areia/sonner";
 import ilha from "ilha";
 
-export const clientLoad = loader(async ({ signal }) => {
+export const clientLoad = loader(async ({ signal, head }) => {
   const authSession = await client.auth.getSession({
     fetchOptions: { signal },
   });
+  head({ titleTemplate: (title) => `${title} - Outer` });
   return { authSession: authSession.data };
 });
 

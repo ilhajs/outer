@@ -29,10 +29,28 @@ const outer = new Outer({
   .middleware(async ({ context, next }) => {
     const kv = useStorage();
     const fs = useStorage("fs");
-    const authSession = await context.auth.api.getSession({ headers: context.headers });
-    return next({
-      context: { session: authSession?.session, user: authSession?.user, kv, fs, runTask },
+    const authSession = await context.auth.api.getSession({
+      headers: context.headers,
     });
+    return next({
+      context: {
+        session: authSession?.session,
+        user: authSession?.user,
+        kv,
+        fs,
+        runTask,
+      },
+    });
+  })
+  .resource("todo", {
+    permissions: {
+      list: "owner",
+      get: "owner",
+      create: "authenticated",
+      update: "owner",
+      delete: "owner",
+    },
+    ownerColumn: "userId",
   })
   .procedure("foo", (base) =>
     base.handler(async ({ context }) => {

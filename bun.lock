@@ -20,7 +20,7 @@
       "dependencies": {
         "@fontsource-variable/geist": "^5.2.9",
         "@fontsource-variable/geist-mono": "^5.2.8",
-        "@ilha/router": "^0.8.2",
+        "@ilha/router": "^0.8.3",
         "@ilha/store": "^0.7.1",
         "areia": "^0.1.36",
         "ilha": "^0.9.1",
@@ -120,7 +120,7 @@
 
     "@hey-api/types": ["@hey-api/types@0.1.4", "", {}, "sha512-thWfawrDIP7wSI9ioT13I5soaaqB5vAPIiZmgD8PbeEVKNrkonc0N/Sjj97ezl7oQgusZmaNphGdMKipPO6IBg=="],
 
-    "@ilha/router": ["@ilha/router@0.8.2", "", { "dependencies": { "rou3": "0.9.0", "unplugin": "3.3.0" }, "peerDependencies": { "ilha": ">=0.9.1" } }, "sha512-fPMp/PTuTmigQWQfj4VvMCYoQXqq7EJUIbQJroMWzUOqshgFMJlUwB4fulMGgPHjN+fkw+VrLc9QAEdVl+yXEw=="],
+    "@ilha/router": ["@ilha/router@0.8.3", "", { "dependencies": { "rou3": "0.9.0", "unplugin": "3.3.0" }, "peerDependencies": { "ilha": ">=0.9.1" } }, "sha512-bB1JHdCpHryEEfYwfuIdgjttLWFinP8/TFEtKH47p28iyKOlKoMuuqAVI4e6HSl7frtHstb75TbNApPbdL7Rww=="],
 
     "@ilha/store": ["@ilha/store@0.7.1", "", { "peerDependencies": { "alien-signals": "^3.2.1", "ilha": ">=0.9.1" }, "optionalPeers": ["ilha"] }, "sha512-w6A1K5VQ3vT8koZDDmd9KGYQDD5+1IJVGjr9b3rt2xBo9BYOTMtJcagqfJF12DXUcPiFJRR3f6lkMEAFIpq0AA=="],
 
@@ -958,6 +958,10 @@
 
     "h3/rou3": ["rou3@0.9.0", "", {}, "sha512-kccB4DcJaSBDjH+ihIjTk9x6FYC8tlrdjL3up/aPZ0msR04zcncfuytynAcvjqFytRHgM3la5O6VtYmTsC/lug=="],
 
+    "imprensa/@ilha/router": ["@ilha/router@0.8.2", "", { "dependencies": { "rou3": "0.9.0", "unplugin": "3.3.0" }, "peerDependencies": { "ilha": ">=0.9.1" } }, "sha512-fPMp/PTuTmigQWQfj4VvMCYoQXqq7EJUIbQJroMWzUOqshgFMJlUwB4fulMGgPHjN+fkw+VrLc9QAEdVl+yXEw=="],
+
     "parse-entities/@types/unist": ["@types/unist@2.0.11", "", {}, "sha512-CmBKiL6NNo/OqgmMn95Fk9Whlp2mtvIv+KNpQKN2F4SjvrEesubTRWGYSg+BnWZOnlCaSTU1sMpsBOzgbYhnsA=="],
+
+    "imprensa/@ilha/router/rou3": ["rou3@0.9.0", "", {}, "sha512-kccB4DcJaSBDjH+ihIjTk9x6FYC8tlrdjL3up/aPZ0msR04zcncfuytynAcvjqFytRHgM3la5O6VtYmTsC/lug=="],
   }
 }

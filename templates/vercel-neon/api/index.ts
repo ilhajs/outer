@@ -22,15 +22,13 @@ const outer = new Outer({
   .openapi()
   .resource("post")
   .procedure("post.count", (base) =>
-    base
-      .output(z.object({ count: z.number() }))
-      .handler(async ({ context }) => {
-        const rows = await context.db
-          .selectFrom("post")
-          .select(context.db.fn.countAll().as("count"))
-          .execute();
-        return { count: Number(rows[0]?.count ?? 0) };
-      }),
+    base.output(z.object({ count: z.number() })).handler(async ({ context }) => {
+      const rows = await context.db
+        .selectFrom("post")
+        .select(context.db.fn.countAll().as("count"))
+        .execute();
+      return { count: Number(rows[0]?.count ?? 0) };
+    }),
   )
   .build();
 
