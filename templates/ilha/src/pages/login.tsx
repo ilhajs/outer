@@ -1,6 +1,5 @@
 import { client } from "$lib/outer";
-import type { AuthSession } from "$lib/types";
-import { head, loader, navigate } from "@ilha/router";
+import { loader, navigate, redirect } from "@ilha/router";
 import { store } from "@ilha/store";
 import { preventDefault } from "@ilha/store/form";
 import { Input, LayerCard, Button } from "areia";
@@ -8,7 +7,9 @@ import { toast } from "areia/sonner";
 import ilha from "ilha";
 import { z } from "zod";
 
-export const clientLoad = loader(({ head }) => {
+export const clientLoad = loader(async ({ signal, head }) => {
+  const authSession = await client.auth.getSession({ fetchOptions: { signal } });
+  if (authSession.data) redirect("/");
   head({ title: "Login" });
 });
 
@@ -48,33 +49,21 @@ const form = store(LoginSchema)
   })
   .build();
 
-export default ilha
-  .input<{ authSession: AuthSession }>()
-  .on("#login-form@submit", preventDefault(form.submit))
-  .onMount(({ input }) => {
-    if (!input.authSession) return;
-    navigate("/");
-  })
-  .render(() => (
-    <div class="flex flex-1 flex-col items-center justify-center">
-      <LayerCard class="max-w-xl">
-        <LayerCard.Title>Sign In</LayerCard.Title>
-        <LayerCard.Content>
-          <form id="login-form">
-            <Input
-              type="email"
-              label="Email"
-              placeholder="your@email.com"
-              bind:value={form.email}
-            />
-            {form.step() === STEP.VERIFY_OTP && (
-              <Input type="text" label="OTP" placeholder="123456" bind:value={form.otp} />
-            )}
-            <Button type="submit" variant="primary" class="w-full justify-center">
-              {form.step() === STEP.VERIFY_OTP ? "Verify code" : "Send verification code"}
-            </Button>
-          </form>
-        </LayerCard.Content>
-      </LayerCard>
-    </div>
-  ));
+export default ilha.on("#login-form@submit", preventDefault(form.submit)).render(() => (
+  <div class="flex flex-1 flex-col items-center justify-center">
+    <LayerCard class="max-w-xl">
+      <LayerCard.Title>Sign In</LayerCard.Title>
+      <LayerCard.Content>
+        <form id="login-form">
+          <Input type="email" label="Email" placeholder="your@email.com" bind:value={form.email} />
+          {form.step() === STEP.VERIFY_OTP && (
+            <Input type="text" label="OTP" placeholder="123456" bind:value={form.otp} />
+          )}
+          <Button type="submit" variant="primary" class="w-full justify-center">
+            {form.step() === STEP.VERIFY_OTP ? "Verify code" : "Send verification code"}
+          </Button>
+        </form>
+      </LayerCard.Content>
+    </LayerCard>
+  </div>
+));

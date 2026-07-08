@@ -120,6 +120,8 @@ Allows browser clients on other origins to call `/rpc/**` and `/api/auth/**`. Mu
 
 Without `.cors()`, no `Access-Control-Allow-Origin` header is set — same-origin requests (and non-browser clients) are unaffected, but cross-origin browser requests will be blocked by the browser.
 
+With `.cors()`, every response carries `Vary: Origin` (so shared caches never serve an origin-specific response to a different origin), allowed origins get `Access-Control-Max-Age: 600` on preflights, and only real preflights (OPTIONS with `Access-Control-Request-Method`) are short-circuited with `204` — custom `.route("OPTIONS", ...)` handlers still receive plain OPTIONS requests.
+
 ---
 
 ## `.schema(s: SchemaResult<T>)`
@@ -180,9 +182,11 @@ Input types are derived from column definitions at build time. `serial` primary 
 - `skip` — offset.
 - `include` — see below.
 
-`list` defaults to returning 50 rows and caps `take` at 100 — pass `listLimit: { default, max }` in `options` to change these. This prevents an unbounded `SELECT *` on large tables; use `.procedure()` with `context.db.query[table].paginate(...)` directly if you need cursor pagination with metadata.
+`list` defaults to returning 50 rows and caps `take` at 100, and caps `skip` at 10000 so deep offsets can't force full table scans — pass `listLimit: { default, max, maxSkip }` in `options` to change these. This prevents an unbounded `SELECT *` on large tables; use `.procedure()` with `context.db.query[table].paginate(...)` directly if you need cursor pagination with metadata.
 
-`list` and `get` accept `include: { relatedTable: true }` for any relation declared on the table via `.relation()` in the schema — `hasMany`/`manyToMany` relations come back as arrays, `hasOne`/`belongsTo` as an object or `null`. Unknown relation names are rejected with a `400`. When the table has no relations, `include` is not part of the input schema.
+`list` and `get` accept `include: { relatedTable: true }` for relations declared on the table via `.relation()` in the schema **and** opted in via `includable: ["relatedTable"]` in the resource options — `hasMany`/`manyToMany` relations come back as arrays, `hasOne`/`belongsTo` as an object or `null`. Relations are not includable by default because included rows are returned as-is, without being checked against the related resource's own permission rules — only opt in relations whose rows are safe to expose alongside this one. Unknown or non-includable relation names are rejected with a `400`; naming a nonexistent relation in `includable` throws at `.resource()` time. When nothing is includable, `include` is not part of the input schema.
+
+`contains`/`startsWith`/`endsWith` match their input literally: LIKE wildcards (`%`, `_`) in the value are escaped, so callers can't turn a substring filter into match-everything.
 
 `create`/`update` map common Postgres constraint violations to clean errors instead of a raw 500: unique/foreign-key violations → `409 CONFLICT`, not-null/check violations → `400 BAD_REQUEST`. `update`/`delete` on a row that doesn't exist → `404 NOT_FOUND`. `update` with an empty `data` object → `400 BAD_REQUEST`. Unrecognized DB errors still surface as a generic `500` with no internal details leaked.
 
@@ -197,7 +201,7 @@ Input types are derived from column definitions at build time. `serial` primary 
 | `"admin"`         | User must have `role === "admin"` (requires Better Auth admin plugin)     |
 | `"owner"`         | User must own the row — requires `ownerColumn`; not valid for `create`    |
 
-When `create` is `"authenticated"` and `ownerColumn` is set, the current user's ID is automatically injected into the insert (`createMany` injects it into every row) — no need to pass it in the request.
+When `ownerColumn` is set, the current user's ID is automatically injected into `create` inserts (`createMany` injects it into every row) — no need to pass it in the request. This works for any `create` permission: `"authenticated"`/`"admin"` use the session the permission check already resolved, while `"public"` and custom-function permissions do a best-effort session lookup and inject the ID when the caller is signed in.
 
 When `list` is `"owner"`, results are implicitly scoped to the signed-in user's rows (`ownerColumn = user.id`), AND-composed with any caller-supplied `where` filter. Unauthenticated calls get a `401`.
 
@@ -391,6 +395,8 @@ Returns `createdAt` and `updatedAt` (`timestamp`, default `CURRENT_TIMESTAMP`) t
 }))
 ```
 
+Resource `update` procedures automatically touch `updatedAt` (any table with a `timestamp` column of that name) unless the caller sets it explicitly. Writes made directly via `context.db` do not — set it yourself there.
+
 ### Relation kinds
 
 `hasMany` · `hasOne` · `belongsTo` · `manyToMany`
@@ -517,6 +523,8 @@ Cursors are opaque base64-encoded strings derived from `orderBy` column values. 
 | `AND`                       | —            | implicit (multiple fields) or explicit array |
 | `OR`                        | —            | `OR(...)`                                    |
 | `NOT`                       | —            | `NOT(...)`                                   |
+
+`AND`/`OR`/`NOT` nest arbitrarily (e.g. an `AND` array inside an `OR` clause). `contains`/`startsWith`/`endsWith` escape LIKE wildcards (`%`, `_`) in the value, so user input always matches literally.
 
 ### `include`
 

@@ -212,6 +212,31 @@ describe("sola — where operators", () => {
     expect(rows).toHaveLength(3);
   });
 
+  test("AND nested inside OR", async () => {
+    const rows = await find({
+      OR: [{ AND: [{ name: "Alice" }, { email: { contains: "acme" } }] }, { name: "Bob" }],
+    });
+    expect(rows).toHaveLength(2);
+  });
+
+  test("NOT nested inside OR", async () => {
+    const rows = await find({ OR: [{ NOT: { email: { contains: "acme.com" } } }] });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.name).toBe("Bob");
+  });
+
+  test("OR nested inside NOT", async () => {
+    const rows = await find({ NOT: { OR: [{ name: "Alice" }, { name: "Bob" }] } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.name).toBe("Carol");
+  });
+
+  test("LIKE wildcards in contains are matched literally", async () => {
+    expect(await find({ email: { contains: "%" } })).toHaveLength(0);
+    expect(await find({ name: { contains: "_" } })).toHaveLength(0);
+    expect(await find({ email: { startsWith: "a%" } })).toHaveLength(0);
+  });
+
   test("isNull / isNull:false on nullable column", async () => {
     const [a] = await db
       .insertInto("author")

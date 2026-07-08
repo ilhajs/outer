@@ -328,8 +328,8 @@ describe("resource — include", () => {
       db: pglite({ dataDir: "memory://" }),
     })
       .schema(relSchema)
-      .resource("author")
-      .resource("book")
+      .resource("author", { includable: ["book"] })
+      .resource("book", { includable: ["author"] })
       .build();
     await app.migrator.migrateToLatest();
     authorId = (await call("author", "create", { name: "Ryuz" })).output.id;
@@ -363,6 +363,19 @@ describe("resource — include", () => {
 describe("resource — eager config validation", () => {
   test("'owner' permission without ownerColumn throws when .resource() is called", () => {
     expect(() => makeApp({ permissions: { update: "owner" } })).toThrow(/ownerColumn/);
+  });
+
+  test("includable naming a nonexistent relation throws when .resource() is called", () => {
+    expect(() => makeApp({ includable: ["comment"] })).toThrow(/includable/);
+  });
+});
+
+describe("resource — list skip cap", () => {
+  test("skip beyond maxSkip returns 400", async () => {
+    const app = makeApp();
+    await app.migrator.migrateToLatest();
+    const { status } = await rpc(app, "list", { skip: 10_001 });
+    expect(status).toBe(400);
   });
 });
 

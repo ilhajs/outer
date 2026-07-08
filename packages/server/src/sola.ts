@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/client";
-import { Kysely } from "kysely";
+import { Kysely, sql } from "kysely";
 
 import { RelationDef, TablesDef } from "./schema";
 
@@ -123,6 +123,19 @@ export type Sola<TDB> = { [K in keyof TDB]: SolaModel<TDB[K]> };
 
 // ── Where builder ──────────────────────────────────────────────────────────
 
+/** Escapes LIKE wildcards (`%`, `_`) and the escape char itself so user input matches literally. */
+function escapeLike(val: unknown): string {
+  return String(val).replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+/**
+ * LIKE with an explicit `ESCAPE '\'` clause — Postgres defaults to backslash
+ * escaping but SQLite has no default escape character, so it must be spelled out.
+ */
+function likeExpr(field: string, pattern: string): any {
+  return sql`${sql.ref(field)} like ${pattern} escape '\\'`;
+}
+
 function applyWhere({ qb, where }: { qb: any; where: Record<string, any> }): any {
   for (const [field, filter] of Object.entries(where)) {
     if (filter === undefined) continue;
@@ -136,10 +149,7 @@ function applyWhere({ qb, where }: { qb: any; where: Record<string, any> }): any
       qb = qb.where((eb: any) =>
         eb.or(
           filter.map((clause: any) => {
-            const conditions: any[] = [];
-            for (const [f, v] of Object.entries(clause as Record<string, any>)) {
-              conditions.push(...fieldToExprs({ eb, field: f, filter: v }));
-            }
+            const conditions = clauseToExprs({ eb, clause });
             return conditions.length > 0 ? eb.and(conditions) : eb.lit(1);
           }),
         ),
@@ -149,10 +159,7 @@ function applyWhere({ qb, where }: { qb: any; where: Record<string, any> }): any
 
     if (field === "NOT") {
       qb = qb.where((eb: any) => {
-        const conditions: any[] = [];
-        for (const [f, v] of Object.entries(filter as Record<string, any>)) {
-          conditions.push(...fieldToExprs({ eb, field: f, filter: v }));
-        }
+        const conditions = clauseToExprs({ eb, clause: filter });
         return eb.not(conditions.length > 0 ? eb.and(conditions) : eb.lit(1));
       });
       continue;
@@ -174,6 +181,37 @@ function applyWhere({ qb, where }: { qb: any; where: Record<string, any> }): any
   return qb;
 }
 
+/**
+ * Expression-builder twin of `applyWhere` for full clauses — handles the
+ * `AND`/`OR`/`NOT` combinators at the clause level (so they nest arbitrarily
+ * inside `OR`/`NOT`) and delegates plain fields to `fieldToExprs`.
+ */
+function clauseToExprs({ eb, clause }: { eb: any; clause: Record<string, any> }): any[] {
+  const exprs: any[] = [];
+  for (const [field, filter] of Object.entries(clause)) {
+    if (filter === undefined) continue;
+    if (field === "AND" && Array.isArray(filter)) {
+      const inner = filter.flatMap((c: any) => clauseToExprs({ eb, clause: c }));
+      exprs.push(inner.length > 0 ? eb.and(inner) : eb.lit(1));
+    } else if (field === "OR" && Array.isArray(filter)) {
+      exprs.push(
+        eb.or(
+          filter.map((c: any) => {
+            const cs = clauseToExprs({ eb, clause: c });
+            return cs.length > 0 ? eb.and(cs) : eb.lit(1);
+          }),
+        ),
+      );
+    } else if (field === "NOT") {
+      const cs = clauseToExprs({ eb, clause: filter });
+      exprs.push(eb.not(cs.length > 0 ? eb.and(cs) : eb.lit(1)));
+    } else {
+      exprs.push(...fieldToExprs({ eb, field, filter }));
+    }
+  }
+  return exprs;
+}
+
 function fieldToExprs({ eb, field, filter }: { eb: any; field: string; filter: any }): any[] {
   if (filter === null || filter === undefined) return [];
   if (typeof filter !== "object" || filter instanceof Date || Array.isArray(filter)) {
@@ -181,32 +219,7 @@ function fieldToExprs({ eb, field, filter }: { eb: any; field: string; filter: a
   }
   const exprs: any[] = [];
   for (const [op, val] of Object.entries(filter as Record<string, any>)) {
-    if (op === "AND" && Array.isArray(val)) {
-      const inner = val.flatMap((clause: any) =>
-        Object.entries(clause as Record<string, any>).flatMap(([f, v]) =>
-          fieldToExprs({ eb, field: f, filter: v }),
-        ),
-      );
-      exprs.push(eb.and(inner));
-    } else if (op === "OR" && Array.isArray(val)) {
-      exprs.push(
-        eb.or(
-          val.map((clause: any) => {
-            const cs = Object.entries(clause as Record<string, any>).flatMap(([f, v]) =>
-              fieldToExprs({ eb, field: f, filter: v }),
-            );
-            return cs.length > 0 ? eb.and(cs) : eb.lit(1);
-          }),
-        ),
-      );
-    } else if (op === "NOT") {
-      const cs = Object.entries(val as Record<string, any>).flatMap(([f, v]) =>
-        fieldToExprs({ eb, field: f, filter: v }),
-      );
-      exprs.push(eb.not(cs.length > 0 ? eb.and(cs) : eb.lit(1)));
-    } else {
-      exprs.push(opToExpr({ eb, field, op, val }));
-    }
+    exprs.push(opToExpr({ eb, field, op, val }));
   }
   return exprs;
 }
@@ -230,11 +243,11 @@ function opToExpr({ eb, field, op, val }: { eb: any; field: string; op: string; 
     case "gte":
       return eb(field, ">=", val);
     case "contains":
-      return eb(field, "like", `%${val}%`);
+      return likeExpr(field, `%${escapeLike(val)}%`);
     case "startsWith":
-      return eb(field, "like", `${val}%`);
+      return likeExpr(field, `${escapeLike(val)}%`);
     case "endsWith":
-      return eb(field, "like", `%${val}`);
+      return likeExpr(field, `%${escapeLike(val)}`);
     case "isNull":
       return val ? eb(field, "is", null) : eb(field, "is not", null);
     default:
@@ -261,11 +274,11 @@ function applyOp({ qb, field, op, val }: { qb: any; field: string; op: string; v
     case "gte":
       return qb.where(field, ">=", val);
     case "contains":
-      return qb.where(field, "like", `%${val}%`);
+      return qb.where(likeExpr(field, `%${escapeLike(val)}%`));
     case "startsWith":
-      return qb.where(field, "like", `${val}%`);
+      return qb.where(likeExpr(field, `${escapeLike(val)}%`));
     case "endsWith":
-      return qb.where(field, "like", `%${val}`);
+      return qb.where(likeExpr(field, `%${escapeLike(val)}`));
     case "isNull":
       return val ? qb.where(field, "is", null) : qb.where(field, "is not", null);
     default:

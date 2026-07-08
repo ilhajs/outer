@@ -311,7 +311,10 @@ describe("cors", () => {
     const res = await app.handle(
       new Request("http://localhost/rpc/ping", {
         method: "OPTIONS",
-        headers: { origin: "https://allowed.test" },
+        headers: {
+          origin: "https://allowed.test",
+          "access-control-request-method": "POST",
+        },
       }),
     );
     expect(res.status).toBe(204);

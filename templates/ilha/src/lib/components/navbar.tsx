@@ -10,7 +10,7 @@ export const Navbar = ilha
     await client.auth.signOut();
     return navigate("/login");
   })
-  .render(({ derived, input }) => (
+  .render(({ input }) => (
     <div class="border-areia-border bg-areia-background flex items-center justify-between border-b p-2">
       <LinkButton href="/" class="font-semibold">
         Outer
@@ -21,7 +21,7 @@ export const Navbar = ilha
           <LinkButton data-action="logout">Sign Out</LinkButton>
         </div>
       ) : (
-        <LinkButton data-action="logout">Sign In</LinkButton>
+        <LinkButton href="/login">Sign In</LinkButton>
       )}
     </div>
   ));

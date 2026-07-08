@@ -44,8 +44,15 @@ export type ResourceOptions = {
    * the current user's ID is automatically injected into the insert.
    */
   ownerColumn?: string;
-  /** Max rows `list` can return per call, and the default when `take` isn't passed. Defaults to 100/50. */
-  listLimit?: { default?: number; max?: number };
+  /** Max rows `list` can return per call, and the default when `take` isn't passed. Defaults to 100/50. `maxSkip` caps the `list` offset (default 10000) so deep offsets can't force full scans. */
+  listLimit?: { default?: number; max?: number; maxSkip?: number };
+  /**
+   * Relations callers may `include` on `list`/`get`. Included rows are returned
+   * as-is and are NOT checked against the related resource's own permissions,
+   * so only allow relations whose rows are safe to expose alongside this one.
+   * Defaults to `[]` (no relations includable).
+   */
+  includable?: string[];
 };
 
 // ── Type-level input/output derivation ─────────────────────────────────────
@@ -404,6 +411,17 @@ async function getSession(context: any) {
 }
 
 /**
+ * Best-effort session lookup that never throws — used to auto-fill
+ * `ownerColumn` on create when the permission itself (public / custom
+ * function) didn't already resolve the session.
+ */
+async function optionalUser(context: any): Promise<{ id: string; [key: string]: unknown } | null> {
+  if (!context.auth) return null;
+  const result = await context.auth.api.getSession({ headers: context.headers });
+  return result?.user ?? null;
+}
+
+/**
  * Enforces a permission rule. Returns the session user when a session was
  * required (useful for auto-filling ownerColumn), or null for public access.
  */
@@ -515,7 +533,7 @@ export function buildResourceProcedures(
   kind: DialectKind = "postgres",
   schemaInfo: { tables: TablesDef; relations: RelationDef[] } = { tables: {}, relations: [] },
 ): Record<string, AnyProcedure> {
-  const { permissions = {}, ownerColumn, listLimit } = options;
+  const { permissions = {}, ownerColumn, listLimit, includable = [] } = options;
   const usesOwnerPermission = Object.values(permissions).some((p) => p === "owner");
   if (usesOwnerPermission && !ownerColumn) {
     throw new Error(
@@ -528,7 +546,18 @@ export function buildResourceProcedures(
     ...(ownerColumn !== undefined && { ownerColumn }),
   });
 
-  const tableRelations = schemaInfo.relations.filter((r) => r.fromTable === tableName);
+  for (const relName of includable) {
+    if (!schemaInfo.relations.some((r) => r.fromTable === tableName && r.toTable === relName)) {
+      throw new Error(
+        `resource("${tableName}"): \`includable\` names relation "${relName}" but the schema has no relation from "${tableName}" to "${relName}"`,
+      );
+    }
+  }
+  // Only relations explicitly opted into via `includable` are exposed —
+  // included rows bypass the related resource's own permission rules.
+  const tableRelations = schemaInfo.relations.filter(
+    (r) => r.fromTable === tableName && includable.includes(r.toTable),
+  );
   const filterSchema = buildFilterSchema(cols);
   const orderBySchema = buildOrderBySchema(cols);
   const { includeSchema, relationOutputShape } = buildIncludeSchemas(
@@ -541,6 +570,7 @@ export function buildResourceProcedures(
 
   const defaultLimit = listLimit?.default ?? 50;
   const maxLimit = listLimit?.max ?? 100;
+  const maxSkip = listLimit?.maxSkip ?? 10_000;
 
   const list = base
     .input(
@@ -549,7 +579,7 @@ export function buildResourceProcedures(
           where: filterSchema.optional(),
           orderBy: orderBySchema.optional(),
           take: z.number().int().positive().max(maxLimit).optional(),
-          skip: z.number().int().nonnegative().optional(),
+          skip: z.number().int().nonnegative().max(maxSkip).optional(),
           ...(includeSchema && { include: includeSchema.optional() }),
         })
         .optional(),
@@ -593,7 +623,9 @@ export function buildResourceProcedures(
     .input(createSchema)
     .output(rowSchema)
     .handler(async ({ context, input }: any) => {
-      const user = await enforce(permissions.create, context);
+      const user =
+        (await enforce(permissions.create, context)) ??
+        (ownerColumn ? await optionalUser(context) : null);
       const values: Record<string, unknown> = { ...input };
       if (ownerColumn && user) values[ownerColumn] = user.id;
       try {
@@ -611,7 +643,9 @@ export function buildResourceProcedures(
     .input(z.object({ data: z.array(createSchema).min(1).max(1000) }))
     .output(z.array(rowSchema))
     .handler(async ({ context, input }: any) => {
-      const user = await enforce(permissions.create, context);
+      const user =
+        (await enforce(permissions.create, context)) ??
+        (ownerColumn ? await optionalUser(context) : null);
       const rows = input.data.map((values: Record<string, unknown>) =>
         ownerColumn && user ? { ...values, [ownerColumn]: user.id } : values,
       );
@@ -639,10 +673,15 @@ export function buildResourceProcedures(
           message: "update requires at least one field in `data`",
         });
       }
+      const data: Record<string, unknown> = { ...input.data };
+      // Touch updatedAt (when the table has one) unless the caller set it explicitly
+      if (cols["updatedAt"]?._type === "timestamp" && data["updatedAt"] === undefined) {
+        data["updatedAt"] = kind === "sqlite" ? new Date().toISOString() : new Date();
+      }
       try {
         return await context.db
           .updateTable(tableName)
-          .set(input.data)
+          .set(data)
           .where(pkName as any, "=", input.where[pkName])
           .returningAll()
           .executeTakeFirstOrThrow();

@@ -411,10 +411,12 @@ export class Outer<
 
     if (cors) {
       server = server.use((event, next) => {
+        // Vary on every response (not just allowed origins) so shared caches
+        // never serve an ACAO-bearing response to a different origin.
+        event.res.headers.set("Vary", "Origin");
         const origin = event.req.headers.get("origin");
         if (origin && cors.origins.includes(origin)) {
           event.res.headers.set("Access-Control-Allow-Origin", origin);
-          event.res.headers.set("Vary", "Origin");
           if (cors.credentials) event.res.headers.set("Access-Control-Allow-Credentials", "true");
           event.res.headers.set(
             "Access-Control-Allow-Methods",
@@ -424,8 +426,13 @@ export class Outer<
             "Access-Control-Allow-Headers",
             event.req.headers.get("access-control-request-headers") ?? "content-type",
           );
+          event.res.headers.set("Access-Control-Max-Age", "600");
         }
-        if (event.req.method === "OPTIONS") {
+        // Short-circuit only real preflights, so custom OPTIONS routes still work
+        if (
+          event.req.method === "OPTIONS" &&
+          event.req.headers.has("access-control-request-method")
+        ) {
           event.res.status = 204;
           return "";
         }

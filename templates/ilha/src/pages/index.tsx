@@ -1,24 +1,22 @@
 import { client } from "$lib/outer";
-import type { AuthSession } from "$lib/types";
-import { type InferLoader, loader, navigate } from "@ilha/router";
+import { type InferLoader, loader, redirect } from "@ilha/router";
 import { extractFormData, preventDefault } from "@ilha/store/form";
 import { Button, Checkbox, Input, LayerCard, Link } from "areia";
+import { toast } from "areia/sonner";
 import ilha from "ilha";
 
 export const clientLoad = loader(async ({ signal, head }) => {
-  try {
-    const todos = await client.todo.list({ orderBy: [{ createdAt: "desc" }] }, { signal });
-    head({ title: "Home" });
-    return { todos };
-  } catch (error) {
-    console.error(error);
-  }
+  const authSession = await client.auth.getSession({ fetchOptions: { signal } });
+  if (!authSession.data) redirect("/login");
+  const todos = await client.todo.list({ orderBy: [{ createdAt: "desc" }] }, { signal });
+  head({ title: "Home" });
+  return { todos };
 });
 
 const codeClass = "bg-areia-background rounded-lg p-3 text-sm overflow-x-auto";
 
 export default ilha
-  .input<InferLoader<typeof clientLoad> & { authSession: AuthSession }>()
+  .input<InferLoader<typeof clientLoad>>()
   .derived("todos", ({ input }) => input.todos ?? [])
   .on(
     "#create-todo@submit",
@@ -27,41 +25,53 @@ export default ilha
       const data = extractFormData(form);
       if (typeof data.title !== "string") return;
       const todoData = { id: crypto.randomUUID(), title: data.title };
-      derived.todos([
-        {
-          ...todoData,
-          description: "",
-          userId: "",
-          completed: false,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        ...(derived.todos() ?? []),
-      ]);
-      const todo = await client.todo.create(todoData);
+      const placeholder = {
+        ...todoData,
+        description: "",
+        userId: "",
+        completed: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const previous = derived.todos() ?? [];
+      derived.todos([placeholder, ...previous]);
       form.reset();
+      try {
+        const todo = await client.todo.create(todoData);
+        derived.todos((derived.todos() ?? []).map((t) => (t.id === todoData.id ? todo : t)));
+      } catch {
+        derived.todos(previous);
+        toast.error("Could not create the todo");
+      }
     }),
   )
-  .on("[data-todo-id]@change", async ({ target, derived }) => {
+  .on("[data-todo-id]@change", async ({ target }) => {
     if (!(target instanceof HTMLInputElement)) return;
     const todoId = target.dataset.todoId;
     if (!todoId) return;
     const completed = target.checked;
-    await client.todo.update({
-      where: { id: todoId },
-      data: { completed },
-    });
+    try {
+      await client.todo.update({
+        where: { id: todoId },
+        data: { completed },
+      });
+    } catch {
+      target.checked = !completed;
+      toast.error("Could not update the todo");
+    }
   })
   .on("[data-delete-todo]@click", async ({ target, derived }) => {
     if (!(target instanceof HTMLButtonElement)) return;
     const todoId = target.dataset.deleteTodo;
     if (!todoId) return;
-    derived.todos(derived.todos()?.filter((todo) => todo.id !== todoId) ?? []);
-    await client.todo.delete({ id: todoId });
-  })
-  .onMount(({ input }) => {
-    if (input.authSession) return;
-    navigate("/login");
+    const previous = derived.todos() ?? [];
+    derived.todos(previous.filter((todo) => todo.id !== todoId));
+    try {
+      await client.todo.delete({ id: todoId });
+    } catch {
+      derived.todos(previous);
+      toast.error("Could not delete the todo");
+    }
   })
   .render(({ derived }) => (
     <div class="flex flex-col items-start gap-4 lg:flex-row">
@@ -69,7 +79,7 @@ export default ilha
         <LayerCard.Title>Todos</LayerCard.Title>
         <LayerCard.Content class="flex flex-col gap-4">
           <form id="create-todo" class="flex items-center gap-2">
-            <Input name="title" placeholder="Task title" class="flex-1" />
+            <Input name="title" placeholder="Task title" class="flex-1" required />
             <Button type="submit">Create</Button>
           </form>
           <div class="flex flex-col gap-2">
