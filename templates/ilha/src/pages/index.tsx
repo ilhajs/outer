@@ -26,11 +26,20 @@ export default ilha
       const form = target as HTMLFormElement;
       const data = extractFormData(form);
       if (typeof data.title !== "string") return;
-      const todo = await client.todo.create({
-        id: crypto.randomUUID(),
-        title: data.title,
-      });
-      derived.todos([todo, ...(derived.todos() ?? [])]);
+      const todoData = { id: crypto.randomUUID(), title: data.title };
+      derived.todos([
+        {
+          ...todoData,
+          description: "",
+          userId: "",
+          completed: false,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        ...(derived.todos() ?? []),
+      ]);
+      const todo = await client.todo.create(todoData);
+      form.reset();
     }),
   )
   .on("[data-todo-id]@change", async ({ target, derived }) => {
@@ -42,6 +51,13 @@ export default ilha
       where: { id: todoId },
       data: { completed },
     });
+  })
+  .on("[data-delete-todo]@click", async ({ target, derived }) => {
+    if (!(target instanceof HTMLButtonElement)) return;
+    const todoId = target.dataset.deleteTodo;
+    if (!todoId) return;
+    derived.todos(derived.todos()?.filter((todo) => todo.id !== todoId) ?? []);
+    await client.todo.delete({ id: todoId });
   })
   .onMount(({ input }) => {
     if (input.authSession) return;
@@ -58,7 +74,10 @@ export default ilha
           </form>
           <div class="flex flex-col gap-2">
             {derived.todos()?.map((todo) => (
-              <Checkbox key={todo.id} label={todo.title} data-todo-id={todo.id} />
+              <div key={todo.id} class="flex items-center justify-between">
+                <Checkbox label={todo.title} data-todo-id={todo.id} checked={todo.completed} />
+                <Button data-delete-todo={todo.id}>Delete</Button>
+              </div>
             ))}
           </div>
         </LayerCard.Content>
