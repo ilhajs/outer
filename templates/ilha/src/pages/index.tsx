@@ -6,9 +6,9 @@ import ilha from "ilha";
 const codeClass = "bg-areia-background rounded-lg p-3 text-sm overflow-x-auto";
 
 export default ilha
-  .input<{ session: AuthSession }>()
+  .input<{ authSession: AuthSession }>()
   .onMount(({ input }) => {
-    if (input.session) return;
+    if (input.authSession) return;
     navigate("/login");
   })
   .render(() => {

@@ -30,7 +30,10 @@ const form = store(LoginSchema)
   .action("submit", async (_, { get }) => {
     const { step, email, otp } = get();
     if (step === STEP.REQUEST_OTP) {
-      const { error } = await client.auth.emailOtp.sendVerificationOtp({ email, type: "sign-in" });
+      const { error } = await client.auth.emailOtp.sendVerificationOtp({
+        email,
+        type: "sign-in",
+      });
       if (error) return void toast.error(error.message);
       return { step: STEP.VERIFY_OTP };
     }
@@ -42,10 +45,10 @@ const form = store(LoginSchema)
   .build();
 
 export default ilha
-  .input<{ session: AuthSession }>()
+  .input<{ authSession: AuthSession }>()
   .on("#login-form@submit", preventDefault(form.submit))
   .onMount(({ input }) => {
-    if (!input.session) return;
+    if (!input.authSession) return;
     navigate("/");
   })
   .render(() => {

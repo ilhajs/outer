@@ -379,6 +379,18 @@ const v1_0 = schema("1.0.0")
 
 `timestamp` maps to `timestamptz` in DDL.
 
+### `timestamps(t)`
+
+Returns `createdAt` and `updatedAt` (`timestamp`, default `CURRENT_TIMESTAMP`) to spread into a table definition:
+
+```ts
+.table("todo", (t) => ({
+  id: t.text().primaryKey(),
+  title: t.text(),
+  ...timestamps(t),
+}))
+```
+
 ### Relation kinds
 
 `hasMany` · `hasOne` · `belongsTo` · `manyToMany`

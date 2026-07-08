@@ -22,10 +22,10 @@ import {
   ResourceOptions,
   ResourceProcedures,
 } from "./resource";
-import { schema, SchemaResult, InferDB, TablesDef, ColumnDef } from "./schema";
+import { schema, timestamps, SchemaResult, InferDB, TablesDef, ColumnDef } from "./schema";
 import { createSola, Sola } from "./sola";
 
-export { schema };
+export { schema, timestamps };
 export type { ResourceOptions, DialectKind };
 
 type OuterAuth = Auth<any>;

@@ -5,7 +5,7 @@ import { LinkButton } from "areia";
 import ilha from "ilha";
 
 export const Navbar = ilha
-  .input<{ session: AuthSession }>()
+  .input<{ authSession: AuthSession }>()
   .on("[data-action=logout]@click", async () => {
     await client.auth.signOut();
     return navigate("/login");
@@ -15,9 +15,9 @@ export const Navbar = ilha
       <LinkButton href="/" class="font-semibold">
         Outer
       </LinkButton>
-      {input.session ? (
+      {input.authSession ? (
         <div class="flex items-center">
-          <LinkButton>{input.session.user.email}</LinkButton>
+          <LinkButton>{input.authSession.user.email}</LinkButton>
           <LinkButton data-action="logout">Sign Out</LinkButton>
         </div>
       ) : (

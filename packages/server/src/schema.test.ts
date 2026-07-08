@@ -1,6 +1,6 @@
 import { test, describe, expect } from "bun:test";
 
-import { schema } from "./schema";
+import { schema, timestamps } from "./schema";
 
 describe("schema builder", () => {
   test("build() returns version, tables, and relations", () => {
@@ -118,5 +118,24 @@ describe("schema builder", () => {
       .table("t", (t) => ({ bio: t.text().nullable() }))
       .build();
     expect(s.tables["t"]!["bio"]!._nullable).toBe(true);
+  });
+
+  test("timestamps(t) adds createdAt and updatedAt", () => {
+    const s = schema("1.0.0")
+      .table("todo", (t) => ({
+        id: t.text().primaryKey(),
+        title: t.text(),
+        description: t.text().nullable(),
+        userId: t.text().references("user", "id"),
+        ...timestamps(t),
+      }))
+      .build();
+
+    const cols = s.tables["todo"]!;
+    expect(cols["id"]!._primaryKey).toBe(true);
+    expect(cols["createdAt"]!._type).toBe("timestamp");
+    expect(cols["createdAt"]!._default).toBe("CURRENT_TIMESTAMP");
+    expect(cols["updatedAt"]!._type).toBe("timestamp");
+    expect(cols["updatedAt"]!._default).toBe("CURRENT_TIMESTAMP");
   });
 });

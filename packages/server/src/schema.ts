@@ -178,6 +178,19 @@ export type InferDB<T extends TablesDef> = {
   [Table in keyof T]: InferRow<T[Table]>;
 };
 
+type TimestampCols = {
+  createdAt: ColumnDef<"timestamp", false, false, true>;
+  updatedAt: ColumnDef<"timestamp", false, false, true>;
+};
+
+/** `createdAt` / `updatedAt` with `CURRENT_TIMESTAMP` defaults — spread into a `.table()` column object. */
+export function timestamps(t: TableBuilder): TimestampCols {
+  return {
+    createdAt: t.timestamp().default("CURRENT_TIMESTAMP"),
+    updatedAt: t.timestamp().default("CURRENT_TIMESTAMP"),
+  };
+}
+
 // ── Builder ────────────────────────────────────────────────────────────────
 
 export type SchemaResult<T extends TablesDef> = {
