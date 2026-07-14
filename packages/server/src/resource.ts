@@ -195,7 +195,7 @@ export type ResourceListInput<Cols extends Record<string, ColumnDef>> = {
   include?: IncludeInput;
 };
 
-type TypedProcedure<TInput, TOutput> = Procedure<
+export type TypedProcedure<TInput, TOutput> = Procedure<
   Context,
   Context,
   Schema<TInput, TInput>,
@@ -397,7 +397,7 @@ function buildSchemas({
 
 // ── Permission enforcement ─────────────────────────────────────────────────
 
-async function getSession(context: any) {
+export async function getSession(context: any) {
   if (!context.auth) {
     throw new Error(
       "This resource permission requires auth — call `.auth()` on the Outer instance before `.build()`",
@@ -496,7 +496,7 @@ const CONSTRAINT_CODES_BY_KIND: Record<DialectKind, Record<string, ConstraintMap
  * is rethrown as-is — oRPC already sanitizes uncaught errors to a generic
  * "Internal Server Error" before they reach the client, so nothing leaks.
  */
-function mapDbError(error: unknown, kind: DialectKind): never {
+export function mapDbError(error: unknown, kind: DialectKind): never {
   if (error instanceof NoResultError) {
     throw new ORPCError("NOT_FOUND", { message: "Record not found", cause: error });
   }

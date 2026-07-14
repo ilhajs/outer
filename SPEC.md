@@ -33,6 +33,7 @@ Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`
 | `baseUrl`    | `string`                 | —             | Default `baseURL` passed to Better Auth when `.auth()` is called (override per-call via `.auth({ baseURL })`) |
 | `db.dialect` | `Dialect`                | —             | Required. A Kysely `Dialect` — see below                                                                      |
 | `db.kind`    | `"postgres" \| "sqlite"` | —             | Required. Drives DDL generation, Better Auth's schema, and DB error mapping — must match `db.dialect`         |
+| `cors`       | `CorsConfig`             | —             | Cross-origin browser callers allowed to reach `/rpc/**`, `/api/auth/**`, and the admin API — see CORS below   |
 
 `db` is required — `@outerjs/server`'s core has no database opinion baked in. For the zero-infra default (embedded [PGlite](https://pglite.dev), real Postgres, writes to local disk, no external infra to run), import the helper from the `/pglite` subpath rather than the framework's dependency tree pulling it in unconditionally:
 
@@ -110,17 +111,61 @@ Outer's core does not set any Better Auth defaults (no default plugins, no defau
 
 ---
 
-## `.cors(config)`
+## CORS (`new Outer({ cors })`)
 
-Allows browser clients on other origins to call `/rpc/**` and `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain — if used before `.auth()`, its `origins` are also merged into Better Auth's `trustedOrigins` automatically.
+Allows browser clients on other origins to call `/rpc/**` and `/api/auth/**`. Configured on the constructor — not a chain method — so it's the single source of truth for allowed origins: `.auth()` always folds them into Better Auth's `trustedOrigins`, with no call-order caveats.
 
 ```ts
-.cors({ origins: ["https://app.example.com"], credentials: true })
+new Outer({
+  db: pglite(),
+  cors: { origins: ["https://app.example.com"], credentials: true },
+});
 ```
 
-Without `.cors()`, no `Access-Control-Allow-Origin` header is set — same-origin requests (and non-browser clients) are unaffected, but cross-origin browser requests will be blocked by the browser.
+Without `cors`, no `Access-Control-Allow-Origin` header is set — same-origin requests (and non-browser clients) are unaffected, but cross-origin browser requests will be blocked by the browser.
 
-With `.cors()`, every response carries `Vary: Origin` (so shared caches never serve an origin-specific response to a different origin), allowed origins get `Access-Control-Max-Age: 600` on preflights, and only real preflights (OPTIONS with `Access-Control-Request-Method`) are short-circuited with `204` — custom `.route("OPTIONS", ...)` handlers still receive plain OPTIONS requests.
+With `cors`, every response carries `Vary: Origin` (so shared caches never serve an origin-specific response to a different origin), allowed origins get `Access-Control-Max-Age: 600` on preflights, and only real preflights (OPTIONS with `Access-Control-Request-Method`) are short-circuited with `204` — custom `.route("OPTIONS", ...)` handlers still receive plain OPTIONS requests.
+
+---
+
+## `.admin(config?)`
+
+Enables the admin API — schema introspection, migration status, and generic table CRUD — under the reserved `_admin` namespace, served through the existing oRPC handler at `/rpc/_admin/**` (and `/rest/_admin/**` when `.openapi()` is enabled). Designed to be consumed by an admin dashboard (hosted anywhere — the dashboard only needs the instance's URL and an admin session); nothing is stored outside the instance and no UI is bundled.
+
+Must be called before `.build()`; can appear anywhere in the chain. Requires `.auth()` somewhere in the chain — `.build()` throws otherwise. Every admin procedure requires a signed-in session with `role === "admin"` (Better Auth admin plugin, or an equivalent `role` field on `user`) — same semantics as the `"admin"` resource permission. Unauthenticated calls get `401`, non-admin sessions `403`.
+
+```ts
+new Outer({ db: pglite(), cors: { origins: ["https://admin.example.com"] } })
+  .schema(v1_0)
+  .auth({ secret, plugins: [admin(), bearer()] }) // Better Auth plugins
+  .admin();
+```
+
+| Option      | Type                                 | Default  | Description                                   |
+| ----------- | ------------------------------------ | -------- | --------------------------------------------- |
+| `listLimit` | `{ default?: number; max?: number }` | `50/200` | Default and max `take` for `_admin.data.list` |
+
+For a dashboard hosted on another origin, list that origin in `new Outer({ cors: { origins } })` (see CORS above), and prefer the Better Auth `bearer` plugin over cookies — cross-site cookies (`SameSite=None`) are fragile and force credentialed CORS.
+
+### Procedures
+
+The `_admin` namespace is reserved — `.procedure("_admin.x", ...)` throws. Rows are untyped (`Record<string, unknown>`); a UI is expected to drive itself from `_admin.meta`. The target table is a runtime input: unknown tables, unknown columns (in `where`/`orderBy`/`data`), and unknown filter operators are rejected with `400` (column names are checked against the schema since they're SQL identifiers; values stay parameterized).
+
+| Procedure            | Input                                       | Output                   | Description                                                                                                                 |
+| -------------------- | ------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `_admin.meta`        | —                                           | `AdminMeta`              | API name, dialect kind, all schema versions, tables/columns (type, nullability, PK, unique, default, references), relations |
+| `_admin.migrations`  | —                                           | `AdminMigrationStatus[]` | Each migration's name and `executedAt` ISO timestamp (`null` if pending)                                                    |
+| `_admin.data.list`   | `{ table, where?, orderBy?, take?, skip? }` | `{ data: Row[], count }` | Sola-style filtered `SELECT` plus total matching count (for pagination UIs)                                                 |
+| `_admin.data.get`    | `{ table, where }`                          | `Row \| null`            | First matching row                                                                                                          |
+| `_admin.data.create` | `{ table, data }`                           | `Row`                    | `INSERT ... RETURNING *`                                                                                                    |
+| `_admin.data.update` | `{ table, where, data }`                    | `Row[]`                  | Updates all matching rows, returns them; `404` if none match; touches `updatedAt` like `.resource()` does                   |
+| `_admin.data.delete` | `{ table, where }`                          | `Row[]`                  | Deletes all matching rows, returns them; `404` if none match                                                                |
+
+`where` on writes (`update`/`delete`) accepts plain column equality only — operator objects are rejected so a filter can't silently widen a write. Constraint violations map to the same clean errors as `.resource()` (`409`/`400`).
+
+Admin CRUD deliberately bypasses per-resource permissions (the admin role is the gate) and can browse the Better Auth tables (`user`, `session`, …). For user management actions (ban, impersonate, revoke sessions), use the Better Auth admin plugin's own endpoints at `/api/auth/admin/*` rather than raw row edits.
+
+`.admin()` adds `_admin` to the router type, so `InferRouter`/SDK clients get typed `client._admin.meta()`, `client._admin.data.list({...})`, etc.
 
 ---
 
@@ -671,6 +716,6 @@ Use `withEventMeta` to attach an event `id` to each yield. On reconnect, oRPC pa
 
 Alpha focuses on persistent-hosting deployments (VPS, Coolify) with `pglite()` as the recommended default. One thing is planned next:
 
-- **Admin dashboard/UI** — comparable to PocketBase's dashboard or Supabase Studio. Should expose: table data browser with CRUD, user/session management, and migration status. Planned as a separate `outer-admin` package served at `/admin` when enabled.
+- **Admin dashboard/UI** — comparable to PocketBase's dashboard or Supabase Studio. The server side is done: `.admin()` (see above) exposes schema introspection, migration status, and table CRUD under `/rpc/_admin/**`, guarded by the admin role. What remains is the dashboard app itself — a static SPA that takes an Outer instance URL and authenticates against it (hosted centrally, run locally, or later mountable at `/admin` via a separate `outer-admin` package).
 
 Serverless/edge support (Vercel Functions, Cloudflare Workers) is no longer blocked — `db: { dialect, kind }` (see "Custom dialects" above) lets you swap PGlite for a network-attached Postgres or a `"sqlite"`-family dialect, with working, verified templates for both (`templates/cloudflare`, Durable Objects; `templates/vercel-neon`, Neon Postgres). `mysql`/`mssql` `kind`s still aren't implemented (Kysely ships dialects for both, but Outer's DDL generation and error mapping don't cover them).

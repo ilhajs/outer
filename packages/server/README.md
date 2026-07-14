@@ -51,7 +51,9 @@ That's a complete backend: email/password + social auth at `/api/auth/**`, six t
 | `.middleware(m)` | Context enrichment shared by every procedure after it                                                                         |
 | `.route(...)`    | Raw escape hatch for webhooks and custom REST                                                                                 |
 | `.openapi()`     | `GET /openapi.json` + a spec-accurate plain-JSON surface at `/rest/**`                                                        |
-| `.cors(config)`  | CORS for `/rpc/**` and `/api/auth/**`                                                                                         |
+| `.admin()`       | Admin API under `/rpc/_admin/**` — schema introspection, migration status, table CRUD (requires the admin role)               |
+
+CORS is configured on the constructor — `new Outer({ cors: { origins } })` — and applies to `/rpc/**`, `/api/auth/**`, and the admin API; the origins are also folded into Better Auth's `trustedOrigins`.
 
 Inside every handler, `context.db` is a typed Kysely instance with extras: `context.db.query` for Prisma-style reads (`findMany`, `where` operators, `include`, cursor `paginate`) and `context.db.transact(fn)` for transactions that span both APIs.
 

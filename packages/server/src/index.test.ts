@@ -272,8 +272,13 @@ describe("build-time validation", () => {
 
 describe("cors", () => {
   test("adds Access-Control-Allow-Origin for a listed origin", async () => {
-    const app = makeOuter()
-      .cors({ origins: ["https://allowed.test"] })
+    const app = new Outer({
+      name: "Test",
+      baseUrl: "http://localhost",
+      db: pglite({ dataDir: "memory://" }),
+      cors: { origins: ["https://allowed.test"] },
+    })
+      .schema(s)
       .procedure("ping", (base) => base.handler(async () => "pong"))
       .build();
 
@@ -288,8 +293,13 @@ describe("cors", () => {
   });
 
   test("does not add CORS headers for an origin not in the allow-list", async () => {
-    const app = makeOuter()
-      .cors({ origins: ["https://allowed.test"] })
+    const app = new Outer({
+      name: "Test",
+      baseUrl: "http://localhost",
+      db: pglite({ dataDir: "memory://" }),
+      cors: { origins: ["https://allowed.test"] },
+    })
+      .schema(s)
       .procedure("ping", (base) => base.handler(async () => "pong"))
       .build();
 
@@ -304,8 +314,13 @@ describe("cors", () => {
   });
 
   test("responds to a preflight OPTIONS request", async () => {
-    const app = makeOuter()
-      .cors({ origins: ["https://allowed.test"] })
+    const app = new Outer({
+      name: "Test",
+      baseUrl: "http://localhost",
+      db: pglite({ dataDir: "memory://" }),
+      cors: { origins: ["https://allowed.test"] },
+    })
+      .schema(s)
       .build();
 
     const res = await app.handle(

@@ -15,6 +15,7 @@ import { betterAuth, Auth, BetterAuthOptions } from "better-auth";
 import { H3, H3Event, HTTPMethod } from "h3";
 import { Dialect, Kysely } from "kysely";
 
+import { AdminConfig, AdminRouter, buildAdminProcedures } from "./admin";
 import { createMigrator, DialectKind } from "./migrator";
 import {
   actionsRequiringAuth,
@@ -27,6 +28,7 @@ import { createSola, Sola } from "./sola";
 
 export { schema, timestamps };
 export type { ResourceOptions, DialectKind };
+export type { AdminConfig, AdminRouter, AdminMeta, AdminMigrationStatus } from "./admin";
 
 type OuterAuth = Auth<any>;
 type OuterDB<TDB> = Kysely<TDB> & {
@@ -94,6 +96,15 @@ export type OuterParams = {
    * Cloudflare D1/Durable Objects, etc.) construct the `Dialect` yourself.
    */
   db: { dialect: Dialect; kind: DialectKind };
+  /**
+   * Cross-origin browser callers allowed to reach `/rpc/**`, `/api/auth/**`,
+   * and the admin API. Lives on the constructor (not a chain method) so it's
+   * the single source of truth: `.auth()` always folds these origins into
+   * Better Auth's `trustedOrigins` regardless of call order. Without it, no
+   * `Access-Control-Allow-Origin` header is set — same-origin requests and
+   * non-browser clients are unaffected.
+   */
+  cors?: CorsConfig;
 };
 
 type OuterRoute<TContext> = {
@@ -113,6 +124,8 @@ type OuterResources = {
   /** `"resource.action"` entries whose permission requires a session — checked against `auth` at `.build()`. */
   authRequiredBy: string[];
   cors: CorsConfig | undefined;
+  /** Set by `.admin()` — the `_admin.*` procedures are built at `.build()` so they see the final schema and migrator. */
+  admin: AdminConfig | undefined;
 };
 
 export type OpenApiConfig = {
@@ -208,7 +221,7 @@ export class Outer<
       this.pendingRouter = _router ?? ({} as TRouter);
       this.schemas = _schemas ?? [];
     } else {
-      const { db: dbConfig, baseUrl } = params as OuterParams;
+      const { db: dbConfig, baseUrl, cors } = params as OuterParams;
       const { dialect, kind: dialectKind } = dbConfig;
       const db = new Kysely<any>({ dialect });
       this.resources = {
@@ -220,7 +233,8 @@ export class Outer<
         openapiEnabled: false,
         routes: [],
         authRequiredBy: [],
-        cors: undefined,
+        cors,
+        admin: undefined,
       };
       this.pendingBase = os.$context<OuterRpcContext>() as unknown as Builder<
         TContext & object,
@@ -237,10 +251,25 @@ export class Outer<
     return this;
   }
 
-  /** Sets the allowed cross-origin callers for `/rpc/**` and `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain. */
-  cors(config: CorsConfig): this {
-    this.resources.cors = config;
-    return this;
+  /**
+   * Enables the admin API — meta/schema introspection, migration status, and
+   * table CRUD — under the reserved `_admin` namespace (`/rpc/_admin/**`).
+   * Every admin procedure requires a signed-in session with `role === "admin"`
+   * (Better Auth admin plugin, or an equivalent `role` field on `user`), so
+   * `.auth()` must be called somewhere in the chain — `.build()` throws otherwise.
+   * For a dashboard hosted on another origin, list that origin in
+   * `new Outer({ cors: { origins } })` so browsers can reach the API.
+   */
+  admin(
+    config: AdminConfig = {},
+  ): Outer<TContext, TDB, MergeRouters<TRouter, { _admin: AdminRouter }>, TTables> {
+    this.resources.admin = config;
+    return this as unknown as Outer<
+      TContext,
+      TDB,
+      MergeRouters<TRouter, { _admin: AdminRouter }>,
+      TTables
+    >;
   }
 
   /** Enables Better Auth and mounts `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain. Narrows `context.auth` to non-null. */
@@ -372,12 +401,37 @@ export class Outer<
   }
 
   build(): BuiltOuter<TRouter> {
-    const { db, auth, authRequiredBy, cors } = this.resources;
+    const { db, auth, authRequiredBy, admin, cors } = this.resources;
 
     if (authRequiredBy.length > 0 && !auth) {
       throw new Error(
         `The following resource actions require a signed-in session but \`.auth()\` was never called: ${authRequiredBy.join(", ")}. Call \`.auth({ secret, ... })\` before \`.build()\`.`,
       );
+    }
+    if (admin && !auth) {
+      throw new Error(
+        "`.admin()` requires a signed-in admin session to guard the admin API, but `.auth()` was never called. Call `.auth({ secret, ... })` before `.build()`.",
+      );
+    }
+
+    const migrator = createMigrator({
+      db,
+      schemas: this.schemas,
+      kind: this.resources.dialectKind,
+    });
+
+    if (admin) {
+      const adminProcedures = buildAdminProcedures({
+        base: this.pendingBase as any,
+        name: this.name,
+        schemas: this.schemas,
+        kind: this.resources.dialectKind,
+        migrator,
+        config: admin,
+      });
+      for (const [procName, proc] of Object.entries(adminProcedures)) {
+        this.addToRouter(`_admin.${procName}`, proc, { internal: true });
+      }
     }
 
     const router: Router<OuterRpcContext<TDB>> = this.pendingRouter as unknown as Router<
@@ -495,17 +549,15 @@ export class Outer<
       return response;
     });
 
-    return new BuiltOuter(
-      server,
-      typedDb,
-      this.schemas,
-      this.pendingRouter,
-      this.resources.dialectKind,
-      auth,
-    );
+    return new BuiltOuter(server, typedDb, migrator, this.pendingRouter, auth);
   }
 
-  private addToRouter(dotName: string, proc: AnyProcedure): void {
+  private addToRouter(dotName: string, proc: AnyProcedure, opts?: { internal?: boolean }): void {
+    if (!opts?.internal && (dotName === "_admin" || dotName.startsWith("_admin."))) {
+      throw new Error(
+        `The "_admin" namespace is reserved for the admin API (\`.admin()\`). Choose a different name than "${dotName}".`,
+      );
+    }
     const keys = dotName.split(".");
     let cursor: any = this.pendingRouter;
     for (const key of keys) {
@@ -539,15 +591,14 @@ export class BuiltOuter<TRouter extends Record<string, any> = Router<any>> {
   constructor(
     server: H3,
     db: Kysely<any>,
-    schemas: SchemaResult<any>[],
+    migrator: ReturnType<typeof createMigrator>,
     router: TRouter,
-    dialectKind: DialectKind = "postgres",
     auth?: OuterAuth,
   ) {
     this.server = server;
     this.db = db;
     this.auth = auth;
-    this.migrator = createMigrator({ db, schemas, kind: dialectKind });
+    this.migrator = migrator;
     this.router = router;
   }
 
