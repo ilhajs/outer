@@ -92,7 +92,7 @@ const outer = new Outer(...)
 
 This is the same pattern regardless of host — swap `nitro/storage`/`nitro/task` for whatever the framework provides (Cloudflare bindings, Next.js `headers()`, etc.).
 
-If your frontend is deployed on a different origin than the Outer server (a static frontend calling a separately-hosted API, or `templates/cloudflare`/`templates/vercel-neon` split from their frontend), add [`.cors({ origins })`](/guide/auth#corsconfig) — without it, browsers block cross-origin calls to `/rpc/**` and `/api/auth/**`.
+If your frontend is deployed on a different origin than the Outer server (a static frontend calling a separately-hosted API, or `templates/cloudflare`/`templates/vercel-neon` split from their frontend), add [`new Outer({ cors: { origins } })`](/guide/auth#cors) — without it, browsers block cross-origin calls to `/rpc/**` and `/api/auth/**`.
 
 ## HTTP routes
 
@@ -107,6 +107,6 @@ If your frontend is deployed on a different origin than the Outer server (a stat
 
 Alpha focuses on persistent-hosting deployments (VPS, Coolify) with `pglite()` as the recommended default. One thing is planned next:
 
-- **Admin dashboard/UI** — comparable to PocketBase's dashboard or Supabase Studio. Should expose: table data browser with CRUD, user/session management, and migration status. Planned as a separate `outer-admin` package served at `/admin` when enabled.
+- **Admin dashboard/UI** — comparable to PocketBase's dashboard or Supabase Studio. The server side is done: [`.admin()`](/guide/auth#admin-api) exposes schema introspection, migration status, and table CRUD under `/rpc/_admin/**`, guarded by the admin role. What remains is the dashboard app itself — a static SPA that takes an Outer instance URL and authenticates against it.
 
 Serverless/edge support is no longer blocked — `db: { dialect, kind }` lets you swap PGlite for a network-attached Postgres or a `"sqlite"`-family dialect, with working, verified templates for both. `mysql`/`mssql` `kind`s still aren't implemented (Kysely ships dialects for both, but Outer's DDL generation and error mapping don't cover them).

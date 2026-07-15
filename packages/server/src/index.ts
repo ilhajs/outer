@@ -27,6 +27,7 @@ import { schema, timestamps, SchemaResult, InferDB, TablesDef, ColumnDef } from 
 import { createSola, Sola } from "./sola";
 
 export { schema, timestamps };
+export type { AuthTables } from "./schema";
 export type { ResourceOptions, DialectKind };
 export type { AdminConfig, AdminRouter, AdminMeta, AdminMigrationStatus } from "./admin";
 

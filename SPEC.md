@@ -132,7 +132,7 @@ With `cors`, every response carries `Vary: Origin` (so shared caches never serve
 
 Enables the admin API — schema introspection, migration status, and generic table CRUD — under the reserved `_admin` namespace, served through the existing oRPC handler at `/rpc/_admin/**` (and `/rest/_admin/**` when `.openapi()` is enabled). Designed to be consumed by an admin dashboard (hosted anywhere — the dashboard only needs the instance's URL and an admin session); nothing is stored outside the instance and no UI is bundled.
 
-Must be called before `.build()`; can appear anywhere in the chain. Requires `.auth()` somewhere in the chain — `.build()` throws otherwise. Every admin procedure requires a signed-in session with `role === "admin"` (Better Auth admin plugin, or an equivalent `role` field on `user`) — same semantics as the `"admin"` resource permission. Unauthenticated calls get `401`, non-admin sessions `403`.
+Must be called before `.build()`; can appear anywhere in the chain. Requires `.auth()` somewhere in the chain — `.build()` throws otherwise. Every admin procedure requires a signed-in session whose `user.role` includes an admin role (Better Auth admin plugin, or an equivalent `role` field on `user`). The `role` value may be a comma-separated list (as the admin plugin stores it, e.g. `"admin,support"`); access is granted when any of its roles is in `roles` (default `["admin"]`). Unauthenticated calls get `401`, non-admin sessions `403`.
 
 ```ts
 new Outer({ db: pglite(), cors: { origins: ["https://admin.example.com"] } })
@@ -141,9 +141,10 @@ new Outer({ db: pglite(), cors: { origins: ["https://admin.example.com"] } })
   .admin();
 ```
 
-| Option      | Type                                 | Default  | Description                                   |
-| ----------- | ------------------------------------ | -------- | --------------------------------------------- |
-| `listLimit` | `{ default?: number; max?: number }` | `50/200` | Default and max `take` for `_admin.data.list` |
+| Option      | Type                                 | Default     | Description                                                                           |
+| ----------- | ------------------------------------ | ----------- | ------------------------------------------------------------------------------------- |
+| `listLimit` | `{ default?: number; max?: number }` | `50/200`    | Default and max `take` for `_admin.data.list`                                         |
+| `roles`     | `string[]`                           | `["admin"]` | Roles granted admin access — match Better Auth's admin plugin `adminRoles` if changed |
 
 For a dashboard hosted on another origin, list that origin in `new Outer({ cors: { origins } })` (see CORS above), and prefer the Better Auth `bearer` plugin over cookies — cross-site cookies (`SameSite=None`) are fragile and force credentialed CORS.
 
@@ -441,6 +442,27 @@ Returns `createdAt` and `updatedAt` (`timestamp`, default `CURRENT_TIMESTAMP`) t
 ```
 
 Resource `update` procedures automatically touch `updatedAt` (any table with a `timestamp` column of that name) unless the caller sets it explicitly. Writes made directly via `context.db` do not — set it yourself there.
+
+### `.auth()` (auth tables)
+
+Registers the Better Auth core schema — `user`, `session`, `account`, `verification` (per [Better Auth's database docs](https://better-auth.com/docs/concepts/database)) — with the admin plugin's fields included by default: `user.role` (default `'user'`), `user.banned`, `user.banReason`, `user.banExpires`, and `session.impersonatedBy`. Email OTP needs no extra columns (it uses the `verification` table). Also registers the relations: `user` `hasMany` `session`/`account` and the inverse `belongsTo`s.
+
+```ts
+const v1_0 = schema("1.0.0")
+  .auth()
+  .table("todo", (t) => ({ id: t.text().primaryKey(), title: t.text(), ...timestamps(t) }))
+  .build();
+```
+
+Re-declaring a table merges columns (later definition wins on name collisions), so auth tables can be extended:
+
+```ts
+schema("1.0.0")
+  .auth()
+  .table("user", (t) => ({ plan: t.text().default("'free'") })); // adds to the auth user table
+```
+
+The tables are typed like hand-written ones (exported as `AuthTables`), so `context.db.query.user` etc. stay fully typed. Pairs with the Better Auth `admin()` plugin and `.admin()` on the `Outer` chain, which both expect these fields.
 
 ### Relation kinds
 

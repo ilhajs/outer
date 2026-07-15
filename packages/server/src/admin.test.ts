@@ -5,47 +5,9 @@ import { z } from "zod/v4";
 import { Outer, schema, timestamps } from "./index";
 import { pglite } from "./pglite";
 
-// Better Auth core tables plus an app table, mirroring resource.test.ts
+// Better Auth core tables (via schema().auth()) plus an app table
 const adminSchema = schema("1.0.0")
-  .table("user", (t) => ({
-    id: t.text().primaryKey(),
-    name: t.text(),
-    email: t.text().unique(),
-    emailVerified: t.boolean().default("false"),
-    image: t.text().nullable(),
-    role: t.text().default("'user'"),
-    ...timestamps(t),
-  }))
-  .table("session", (t) => ({
-    id: t.text().primaryKey(),
-    expiresAt: t.timestamp(),
-    token: t.text().unique(),
-    ipAddress: t.text().nullable(),
-    userAgent: t.text().nullable(),
-    userId: t.text().references("user", "id"),
-    ...timestamps(t),
-  }))
-  .table("account", (t) => ({
-    id: t.text().primaryKey(),
-    accountId: t.text(),
-    providerId: t.text(),
-    userId: t.text().references("user", "id"),
-    accessToken: t.text().nullable(),
-    refreshToken: t.text().nullable(),
-    idToken: t.text().nullable(),
-    accessTokenExpiresAt: t.timestamp().nullable(),
-    refreshTokenExpiresAt: t.timestamp().nullable(),
-    scope: t.text().nullable(),
-    password: t.text().nullable(),
-    ...timestamps(t),
-  }))
-  .table("verification", (t) => ({
-    id: t.text().primaryKey(),
-    identifier: t.text(),
-    value: t.text(),
-    expiresAt: t.timestamp(),
-    ...timestamps(t),
-  }))
+  .auth()
   .table("post", (t) => ({
     id: t.serial().primaryKey(),
     title: t.text(),
@@ -75,14 +37,16 @@ function makeAdminApp() {
       .admin()
       // test-only helper to promote a user to admin without wiring up the admin plugin
       .procedure("test.promote", (base) =>
-        base.input(z.object({ userId: z.string() })).handler(async ({ context, input }) => {
-          await context.db
-            .updateTable("user")
-            .set({ role: "admin" })
-            .where("id", "=", input.userId)
-            .execute();
-          return { ok: true };
-        }),
+        base
+          .input(z.object({ userId: z.string(), role: z.string().default("admin") }))
+          .handler(async ({ context, input }) => {
+            await context.db
+              .updateTable("user")
+              .set({ role: input.role })
+              .where("id", "=", input.userId)
+              .execute();
+            return { ok: true };
+          }),
       )
       .build()
   );
@@ -178,6 +142,13 @@ describe("admin — API", () => {
     expect(status).toBe(401);
   });
 
+  test("comma-separated roles from Better Auth's admin plugin are recognized", async () => {
+    const multi = await signUp(app, "multi@test.com");
+    await rpc(app, "test/promote", { userId: multi.userId, role: "support,admin" });
+    const { status } = await rpc(app, "_admin/meta", {}, multi.cookie);
+    expect(status).toBe(200);
+  }, 30_000);
+
   test("non-admin users get 403", async () => {
     const { status } = await rpc(app, "_admin/meta", {}, regular.cookie);
     expect(status).toBe(403);
@@ -256,7 +227,7 @@ describe("admin — API", () => {
 
   test("data.list can browse auth tables", async () => {
     const { output } = await rpc(app, "_admin/data/list", { table: "user" }, admin.cookie);
-    expect(output.count).toBe(2);
+    expect(output.count).toBeGreaterThanOrEqual(2);
   });
 
   test("data.get returns a single row or null", async () => {

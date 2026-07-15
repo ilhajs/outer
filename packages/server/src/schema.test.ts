@@ -120,6 +120,48 @@ describe("schema builder", () => {
     expect(s.tables["t"]!["bio"]!._nullable).toBe(true);
   });
 
+  test(".auth() registers the Better Auth tables with admin plugin fields", () => {
+    const s = schema("1.0.0").auth().build();
+
+    expect(Object.keys(s.tables).sort()).toEqual(["account", "session", "user", "verification"]);
+
+    const user = s.tables["user"]!;
+    expect(user["id"]!._primaryKey).toBe(true);
+    expect(user["email"]!._unique).toBe(true);
+    expect(user["role"]!._default).toBe("'user'");
+    expect(user["banned"]!._default).toBe("false");
+    expect(user["banReason"]!._nullable).toBe(true);
+    expect(user["banExpires"]!._nullable).toBe(true);
+    expect(user["createdAt"]!._default).toBe("CURRENT_TIMESTAMP");
+
+    const session = s.tables["session"]!;
+    expect(session["token"]!._unique).toBe(true);
+    expect(session["userId"]!._references).toEqual({ table: "user", column: "id" });
+    expect(session["impersonatedBy"]!._nullable).toBe(true);
+
+    expect(s.tables["account"]!["password"]!._nullable).toBe(true);
+    expect(s.tables["verification"]!["identifier"]!._type).toBe("text");
+
+    expect(s.relations).toContainEqual(
+      expect.objectContaining({ kind: "hasMany", fromTable: "user", toTable: "session" }),
+    );
+    expect(s.relations).toContainEqual(
+      expect.objectContaining({ kind: "belongsTo", fromTable: "account", toTable: "user" }),
+    );
+    expect(s.relations).toHaveLength(4);
+  });
+
+  test(".auth() tables can be extended by re-declaring with extra columns", () => {
+    const s = schema("1.0.0")
+      .auth()
+      .table("user", (t) => ({ plan: t.text().default("'free'") }))
+      .build();
+
+    const user = s.tables["user"]!;
+    expect(user["plan"]!._default).toBe("'free'");
+    expect(user["email"]!._unique).toBe(true); // auth columns survive the merge
+  });
+
   test("timestamps(t) adds createdAt and updatedAt", () => {
     const s = schema("1.0.0")
       .table("todo", (t) => ({

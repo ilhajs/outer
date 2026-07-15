@@ -32,6 +32,27 @@ const v1_0 = schema("1.0.0")
   .build();
 ```
 
+### Auth tables
+
+`.auth()` on the schema builder registers the [Better Auth core schema](https://better-auth.com/docs/concepts/database) — `user`, `session`, `account`, `verification` — with the admin plugin's fields included by default (`user.role`/`banned`/`banReason`/`banExpires`, `session.impersonatedBy`), plus the `user` ↔ `session`/`account` relations. Email OTP needs no extra columns (it uses the `verification` table).
+
+```ts
+const v1_0 = schema("1.0.0")
+  .auth()
+  .table("todo", (t) => ({ id: t.text().primaryKey(), title: t.text() }))
+  .build();
+```
+
+Re-declaring a table merges columns (later definition wins on name collisions), so auth tables can be extended:
+
+```ts
+schema("1.0.0")
+  .auth()
+  .table("user", (t) => ({ plan: t.text().default("'free'") })); // adds to the auth user table
+```
+
+The tables are typed like hand-written ones (exported as `AuthTables`), so `context.db.query.user` etc. stay fully typed.
+
 ### Column types
 
 `text` · `varchar` · `integer` · `serial` · `boolean` · `timestamp` · `jsonb` · `uuid`
@@ -126,7 +147,7 @@ Input types are derived from column definitions at build time. `serial` primary 
 | ----------------- | ------------------------------------------------------------------------- |
 | `"public"`        | No restriction (default)                                                  |
 | `"authenticated"` | User must be signed in — calls `context.auth.api.getSession()` internally |
-| `"admin"`         | User must have `role === "admin"` (requires the Better Auth admin plugin) |
+| `"admin"`         | User must have an admin role — `user.role` may be a comma-separated list  |
 | `"owner"`         | User must own the row — requires `ownerColumn`; not valid for `create`    |
 
 When `create` is `"authenticated"` and `ownerColumn` is set, the current user's ID is automatically injected into the insert (`createMany` injects it into every row) — no need to pass it in the request.

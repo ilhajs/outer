@@ -191,6 +191,64 @@ export function timestamps(t: TableBuilder): TimestampCols {
   };
 }
 
+// ── Auth tables ────────────────────────────────────────────────────────────
+
+/**
+ * The Better Auth core schema (`user`, `session`, `account`, `verification`)
+ * plus the admin plugin's fields (`user.role/banned/banReason/banExpires`,
+ * `session.impersonatedBy`). Email OTP needs no extra columns — it uses the
+ * `verification` table. Registered via `schema().auth()`.
+ */
+function authTableDefs(t: TableBuilder) {
+  return {
+    user: {
+      id: t.text().primaryKey(),
+      name: t.text(),
+      email: t.text().unique(),
+      emailVerified: t.boolean().default("false"),
+      image: t.text().nullable(),
+      role: t.text().default("'user'"),
+      banned: t.boolean().default("false"),
+      banReason: t.text().nullable(),
+      banExpires: t.timestamp().nullable(),
+      ...timestamps(t),
+    },
+    session: {
+      id: t.text().primaryKey(),
+      expiresAt: t.timestamp(),
+      token: t.text().unique(),
+      ipAddress: t.text().nullable(),
+      userAgent: t.text().nullable(),
+      userId: t.text().references("user", "id"),
+      impersonatedBy: t.text().nullable(),
+      ...timestamps(t),
+    },
+    account: {
+      id: t.text().primaryKey(),
+      accountId: t.text(),
+      providerId: t.text(),
+      userId: t.text().references("user", "id"),
+      accessToken: t.text().nullable(),
+      refreshToken: t.text().nullable(),
+      idToken: t.text().nullable(),
+      accessTokenExpiresAt: t.timestamp().nullable(),
+      refreshTokenExpiresAt: t.timestamp().nullable(),
+      scope: t.text().nullable(),
+      password: t.text().nullable(),
+      ...timestamps(t),
+    },
+    verification: {
+      id: t.text().primaryKey(),
+      identifier: t.text(),
+      value: t.text(),
+      expiresAt: t.timestamp(),
+      ...timestamps(t),
+    },
+  };
+}
+
+export type AuthTables = ReturnType<typeof authTableDefs>;
+
 // ── Builder ────────────────────────────────────────────────────────────────
 
 export type SchemaResult<T extends TablesDef> = {
@@ -201,6 +259,15 @@ export type SchemaResult<T extends TablesDef> = {
 };
 
 type SchemaBuilder<T extends TablesDef> = {
+  /**
+   * Registers the Better Auth core tables (`user`, `session`, `account`,
+   * `verification`) with the admin plugin's fields included, plus their
+   * relations — see `AuthTables`. Extend `user` (or any auth table) by
+   * re-declaring extra columns via `.table("user", ...)` after this call:
+   * columns merge, with yours winning on name collisions.
+   */
+  auth(): SchemaBuilder<T & AuthTables>;
+
   table<Name extends string, Cols extends Record<string, ColumnDef>>(
     name: Name,
     define: (t: TableBuilder) => Cols,
@@ -219,8 +286,21 @@ export function schema(version: string): SchemaBuilder<Record<never, never>> {
   const relations: RelationDef[] = [];
 
   const builder: SchemaBuilder<any> = {
+    auth() {
+      for (const [name, cols] of Object.entries(authTableDefs(t))) {
+        tables[name] = { ...tables[name], ...cols };
+      }
+      relations.push(
+        makeRelChain("user").hasMany("session", { from: "id", to: "userId" }),
+        makeRelChain("user").hasMany("account", { from: "id", to: "userId" }),
+        makeRelChain("session").belongsTo("user", { from: "userId", to: "id" }),
+        makeRelChain("account").belongsTo("user", { from: "userId", to: "id" }),
+      );
+      return builder;
+    },
+    // re-declaring a table merges columns (later wins), so auth tables can be extended
     table(name, define) {
-      tables[name] = define(t);
+      tables[name] = { ...tables[name], ...define(t) };
       return builder;
     },
     relation(fromTable, define) {

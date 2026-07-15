@@ -15,6 +15,8 @@ Outer wraps [Better Auth](https://www.better-auth.com) directly — `.auth(confi
 new Outer({ db: pglite() }).schema(v1_0).auth({ secret: process.env.AUTH_SECRET! }).build();
 ```
 
+Better Auth needs its core tables (`user`, `session`, `account`, `verification`) in your schema — register them with [`schema().auth()`](/guide/schema#auth-tables), which includes the admin plugin's fields by default.
+
 `.auth()` can appear anywhere in the builder chain, and must be called before `.build()`. Its `config` is `Omit<BetterAuthOptions, "database"> & { secret: string }` — every Better Auth option (`plugins`, `emailAndPassword`, `trustedOrigins`, etc.) is accepted directly, with `secret` made required. `database` is owned by Outer and cannot be overridden here.
 
 Calling `.auth()` returns a new `Outer` whose `context.auth` type is narrowed to required (non-optional) for everything chained after it. When `.auth()` is **not** called, `context.auth` is `undefined` and `/api/auth/**` is not mounted. If any `.resource()` permission still requires a session (`"authenticated"`, `"admin"`, or `"owner"`), `.build()` throws immediately — naming the offending `resource.action` entries — rather than letting the first real request fail with a confusing error.
@@ -63,14 +65,30 @@ Fields added via `next({ context: { ... } })` are merged into every subsequent `
 
 `.resource()` accepts a `permissions` map per CRUD action — see [Schema & Migrations](/guide/schema#permissions) for the full table of `"public"`, `"authenticated"`, `"admin"`, and `"owner"` behavior, including automatic owner-column injection and 403 handling.
 
-## `.cors(config)`
+## CORS
 
-Allows browser clients on other origins to call `/rpc/**` and `/api/auth/**`. Must be called before `.build()`, and can appear anywhere in the chain — if placed before `.auth()`, its `origins` are merged into Better Auth's `trustedOrigins` automatically.
+Allows browser clients on other origins to call `/rpc/**`, `/api/auth/**`, and the admin API. Configured on the constructor — the origins are also folded into Better Auth's `trustedOrigins` automatically:
 
 ```ts
-.cors({ origins: ["https://app.example.com"], credentials: true })
+new Outer({
+  db: pglite(),
+  cors: { origins: ["https://app.example.com"], credentials: true },
+});
 ```
 
-Without `.cors()`, no `Access-Control-Allow-Origin` header is set. Same-origin requests and non-browser clients are unaffected either way — this only matters when your frontend and Outer server are deployed on different origins (e.g. a static frontend calling a separately-hosted API).
+Without `cors`, no `Access-Control-Allow-Origin` header is set. Same-origin requests and non-browser clients are unaffected either way — this only matters when your frontend and Outer server are deployed on different origins (e.g. a static frontend calling a separately-hosted API).
+
+## Admin API
+
+`.admin()` mounts an introspection + table-CRUD API under `/rpc/_admin/**` for building admin dashboards: `_admin.meta` (schema introspection), `_admin.migrations` (migration status), and `_admin.data.list/get/create/update/delete`. It requires `.auth()`, and every procedure requires a signed-in user with an admin role (`user.role` may be comma-separated, as the Better Auth admin plugin stores it; configure accepted roles via `.admin({ roles })`).
+
+```ts
+new Outer({ db: pglite(), cors: { origins: ["https://admin.example.com"] } })
+  .schema(v1_0) // built with schema().auth(), so the admin fields exist
+  .auth({ secret, plugins: [admin(), bearer()] })
+  .admin();
+```
+
+For a dashboard hosted on another origin, list its origin in `cors` and prefer the Better Auth `bearer` plugin over cross-site cookies. See [SPEC.md](https://github.com/ilhajs/outer/blob/main/SPEC.md) for the full procedure reference.
 
 Next: register custom [Procedures](/guide/procedures), or stream updates with [Realtime](/guide/realtime).

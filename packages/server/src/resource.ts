@@ -11,7 +11,7 @@ import { ColumnDef, RelationDef, TablesDef } from "./schema";
 /**
  * - `"public"`        — no restriction
  * - `"authenticated"` — user must be signed in
- * - `"admin"`         — user must have `role === "admin"` (requires Better Auth admin plugin)
+ * - `"admin"`         — user must have the `admin` role (`user.role` may be comma-separated)
  * - `"owner"`         — user must own the row; requires `ownerColumn`; not valid for `list`/`create`
  * - function          — custom check: `({ context, row? }) => boolean | Promise<boolean>`
  */
@@ -411,6 +411,15 @@ export async function getSession(context: any) {
 }
 
 /**
+ * Better Auth's admin plugin stores roles as a comma-separated string
+ * (e.g. `"admin,user"`), so membership is checked per role, not by equality.
+ */
+export function hasRole(user: { role?: unknown }, allowed: string[]): boolean {
+  const roles = typeof user.role === "string" ? user.role.split(",").map((r) => r.trim()) : [];
+  return roles.some((r) => allowed.includes(r));
+}
+
+/**
  * Best-effort session lookup that never throws — used to auto-fill
  * `ownerColumn` on create when the permission itself (public / custom
  * function) didn't already resolve the session.
@@ -441,7 +450,7 @@ async function enforce(
 
   const user = await getSession(context);
 
-  if (permission === "admin" && user.role !== "admin") {
+  if (permission === "admin" && !hasRole(user, ["admin"])) {
     throw new ORPCError("FORBIDDEN", { message: "Admin access required" });
   }
 

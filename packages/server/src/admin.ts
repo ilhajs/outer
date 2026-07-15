@@ -3,7 +3,7 @@ import { AnyProcedure, Builder } from "@orpc/server";
 import { z } from "zod/v4";
 
 import { DialectKind } from "./migrator";
-import { getSession, mapDbError, TypedProcedure } from "./resource";
+import { getSession, hasRole, mapDbError, TypedProcedure } from "./resource";
 import { ColumnDef, RelationDef, SchemaResult } from "./schema";
 
 // ── Config ──────────────────────────────────────────────────────────────────
@@ -11,6 +11,8 @@ import { ColumnDef, RelationDef, SchemaResult } from "./schema";
 export type AdminConfig = {
   /** Max rows `_admin.data.list` can return per call, and the default when `take` isn't passed. Defaults to 200/50. */
   listLimit?: { default?: number; max?: number };
+  /** Roles granted admin access. Match Better Auth's admin plugin `adminRoles` if you customize it. Defaults to `["admin"]`. */
+  roles?: string[];
 };
 
 // ── Output shapes ───────────────────────────────────────────────────────────
@@ -73,13 +75,15 @@ export type AdminRouter = {
 
 // ── Guard ───────────────────────────────────────────────────────────────────
 
-/** Every admin procedure requires a signed-in session with `role === "admin"` — same semantics as the `"admin"` resource permission. */
-async function requireAdmin(context: any) {
-  const user = await getSession(context);
-  if (user.role !== "admin") {
-    throw new ORPCError("FORBIDDEN", { message: "Admin access required" });
-  }
-  return user;
+/** Every admin procedure requires a signed-in session with an admin role — same semantics as the `"admin"` resource permission. */
+function makeRequireAdmin(adminRoles: string[]) {
+  return async function requireAdmin(context: any) {
+    const user = await getSession(context);
+    if (!hasRole(user, adminRoles)) {
+      throw new ORPCError("FORBIDDEN", { message: "Admin access required" });
+    }
+    return user;
+  };
 }
 
 // ── Input validation ────────────────────────────────────────────────────────
@@ -186,6 +190,7 @@ export function buildAdminProcedures(params: {
 
   const defaultTake = config.listLimit?.default ?? 50;
   const maxTake = config.listLimit?.max ?? 200;
+  const requireAdmin = makeRequireAdmin(config.roles ?? ["admin"]);
 
   const tableSchema = z.string().min(1);
   const rowInputSchema = z.record(z.string(), z.unknown());

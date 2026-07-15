@@ -36,10 +36,11 @@ import { Outer, schema } from "@outerjs/server";
 import { pglite } from "@outerjs/server/pglite";
 
 const v1_0 = schema("1.0.0")
-  .table("user", (t) => ({
-    id: t.text().primaryKey(),
-    email: t.text().unique(),
-    name: t.text(),
+  .auth() // Better Auth tables (user, session, account, verification) + admin plugin fields
+  .table("post", (t) => ({
+    id: t.serial().primaryKey(),
+    title: t.text(),
+    userId: t.text().references("user", "id"),
   }))
   .build();
 

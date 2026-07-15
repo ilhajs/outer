@@ -1,7 +1,7 @@
 import { v1_0_0 } from "$lib/schemas/v1-0-0";
 import { Outer, type InferRouter } from "@outerjs/server";
 import { pglite } from "@outerjs/server/pglite";
-import { emailOTP } from "better-auth/plugins";
+import { admin, emailOTP } from "better-auth/plugins";
 import { useRuntimeConfig } from "nitro/runtime-config";
 import { useStorage } from "nitro/storage";
 import { runTask } from "nitro/task";
@@ -17,6 +17,7 @@ const outer = new Outer({
   .auth({
     secret: runtimeConfig.authSecret,
     plugins: [
+      admin(),
       emailOTP({
         sendVerificationOTP: async ({ email, otp }) => {
           // HINT: Use Resend or Cloudflare Email to send the OTP
@@ -26,6 +27,7 @@ const outer = new Outer({
     ],
   })
   .openapi()
+  .admin()
   .middleware(async ({ context, next }) => {
     const kv = useStorage();
     const fs = useStorage("fs");

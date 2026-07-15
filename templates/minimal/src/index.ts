@@ -7,7 +7,13 @@ import { v1_0_0 } from "./schema";
 
 const outer = new Outer({ name: "Outer", db: pglite() })
   .schema(v1_0_0)
+  .auth({
+    // set AUTH_SECRET in production — the fallback is for local development only
+    secret: process.env["AUTH_SECRET"] ?? "dev-only-secret",
+    emailAndPassword: { enabled: true },
+  })
   .openapi()
+  .admin()
   .resource("post")
   .procedure("post.count", (base) =>
     base.output(z.object({ count: z.number() })).handler(async ({ context }) => {
