@@ -18,11 +18,12 @@ import { pglite } from "@outerjs/server/pglite";
 import { serve } from "srvx";
 
 const v1_0 = schema("1.0.0")
+  .auth() // Better Auth tables (user, session, account, verification) + admin plugin fields
   .table("post", (t) => ({
     id: t.serial().primaryKey(),
     title: t.text(),
     body: t.text().nullable(),
-    userId: t.text(),
+    userId: t.text().references("user", "id"),
   }))
   .build();
 
@@ -30,6 +31,7 @@ const outer = new Outer({ name: "My API", baseUrl: "http://localhost:3000", db: 
   .schema(v1_0)
   .auth({ secret: process.env.AUTH_SECRET! })
   .openapi()
+  .admin()
   .resource("post", {
     permissions: { create: "authenticated", update: "owner", delete: "owner" },
     ownerColumn: "userId",
@@ -44,10 +46,13 @@ serve({ fetch: (req) => outer.handle(req) });
 With zero extra setup, that's:
 
 - A local **Postgres database** ([PGlite](https://pglite.dev) — real embedded Postgres, not SQLite pretending), schema-driven **migrations**, and a typed `context.db` (Kysely + a Prisma-style read API)
-- **Auth** — sign-up, sign-in, sessions, social providers — via Better Auth at `/api/auth/**`
+- **Auth** — sign-up, sign-in, sessions, social providers — via Better Auth at `/api/auth/**`, with the auth tables registered in one call (`schema().auth()`)
 - Auto-generated **CRUD procedures** per table via `.resource()`, with per-action permissions: `public` / `authenticated` / `admin` / `owner` / your own function
 - **Type-safe RPC** at `/rpc/**`, plus opt-in **OpenAPI** (`/openapi.json`) with a spec-accurate plain-JSON surface at `/rest/**`
+- An **admin API** via `.admin()` — schema introspection, migration status, and table CRUD under `/rpc/_admin/**`, guarded by the admin role, ready for a dashboard to consume
 - **Realtime streaming** (SSE) via oRPC event iterators — no extra infrastructure
+
+Serving a browser frontend from another origin? Pass `cors` to the constructor: `new Outer({ cors: { origins: [...] } })` — it covers `/rpc/**`, `/api/auth/**`, and the admin API, and feeds Better Auth's `trustedOrigins`.
 
 And because `outer.handle(request)` is a plain Fetch handler, it mounts unchanged into Bun, Node, srvx, Nitro, Hono, H3, or Next.js API Routes.
 
