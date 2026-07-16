@@ -152,6 +152,8 @@ For a dashboard hosted on another origin, list that origin in `new Outer({ cors:
 
 The `_admin` namespace is reserved — `.procedure("_admin.x", ...)` throws. Rows are untyped (`Record<string, unknown>`); a UI is expected to drive itself from `_admin.meta`. The target table is a runtime input: unknown tables, unknown columns (in `where`/`orderBy`/`data`), and unknown filter operators are rejected with `400` (column names are checked against the schema since they're SQL identifiers; values stay parameterized).
 
+The exported `OuterAdminRouter` type (`{ _admin: AdminRouter }`) is the router shape for a type-safe admin-only client — `createClient<OuterAdminRouter>({ baseUrl })` from `@outerjs/sdk` covers every `_admin.*` procedure without importing the app's server code.
+
 | Procedure            | Input                                       | Output                   | Description                                                                                                                 |
 | -------------------- | ------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
 | `_admin.meta`        | —                                           | `AdminMeta`              | API name, dialect kind, all schema versions, tables/columns (type, nullability, PK, unique, default, references), relations |

@@ -73,6 +73,22 @@ export type AdminRouter = {
   };
 };
 
+/**
+ * Router shape containing only the `_admin.*` procedures, as mounted by
+ * `.admin()`. Pass it to a client factory to build a type-safe admin-only
+ * client for any Outer instance without importing the app's server code:
+ *
+ * ```ts
+ * import { createClient } from "@outerjs/sdk";
+ * import type { OuterAdminRouter } from "@outerjs/server";
+ *
+ * const client = createClient<OuterAdminRouter>({ baseUrl }).auth().build();
+ * const meta = await client._admin.meta();       // AdminMeta
+ * const rows = await client._admin.data.list({ table: "post", take: 20 });
+ * ```
+ */
+export type OuterAdminRouter = { _admin: AdminRouter };
+
 // ── Guard ───────────────────────────────────────────────────────────────────
 
 /** Every admin procedure requires a signed-in session with an admin role — same semantics as the `"admin"` resource permission. */

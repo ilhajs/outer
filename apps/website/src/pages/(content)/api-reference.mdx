@@ -209,6 +209,7 @@ Freezes and returns the `SchemaResult` to pass into `.schema()`.
 | Export                 | Description                                                                                                                           |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `InferRouter<T>`       | Extracts the oRPC router type from an `Outer` or `BuiltOuter` instance — the input to oRPC client creation.                           |
+| `OuterAdminRouter`     | `{ _admin: AdminRouter }` — the router shape for a type-safe admin-only client: `createClient<OuterAdminRouter>({ baseUrl })`.        |
 | `InferDB<T>`           | Maps a schema's tables to Kysely row types.                                                                                           |
 | `AuthTables`           | The table shape `.auth()` registers on the schema builder.                                                                            |
 | `OuterRpcContext<TDB>` | The base procedure context: `{ headers, db, auth? }`. `context.db` is Kysely plus `query` (Sola) and `transact(fn)` for transactions. |

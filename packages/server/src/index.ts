@@ -29,7 +29,13 @@ import { createSola, Sola } from "./sola";
 export { schema, timestamps };
 export type { AuthTables } from "./schema";
 export type { ResourceOptions, DialectKind };
-export type { AdminConfig, AdminRouter, AdminMeta, AdminMigrationStatus } from "./admin";
+export type {
+  AdminConfig,
+  AdminRouter,
+  AdminMeta,
+  AdminMigrationStatus,
+  OuterAdminRouter,
+} from "./admin";
 
 type OuterAuth = Auth<any>;
 type OuterDB<TDB> = Kysely<TDB> & {
