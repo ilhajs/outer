@@ -5,17 +5,30 @@ import { admin, emailOTP } from "better-auth/plugins";
 import { useRuntimeConfig } from "nitro/runtime-config";
 import { useStorage } from "nitro/storage";
 import { runTask } from "nitro/task";
+import { z } from "zod";
 
 const runtimeConfig = useRuntimeConfig();
 
+// TODO: Set NITRO_AUTH_SECRET and VITE_APP_URL in production — the fallbacks are for local development only
+const env = z
+  .object({
+    VITE_APP_URL: z.string().default("http://localhost:3000"),
+    authSecret: z.string().min(1).default("dev-only-secret"),
+  })
+  .parse({
+    VITE_APP_URL: import.meta.env.VITE_APP_URL,
+    // vite.config's runtimeConfig default is "" — treat empty as unset so the default applies
+    authSecret: runtimeConfig.authSecret || undefined,
+  });
+
 const outer = new Outer({
   name: "Outer",
-  baseUrl: import.meta.env.VITE_APP_URL,
+  baseUrl: env.VITE_APP_URL,
   db: pglite(),
 })
   .schema(v1_0_0)
   .auth({
-    secret: runtimeConfig.authSecret,
+    secret: env.authSecret,
     plugins: [
       admin(),
       emailOTP({

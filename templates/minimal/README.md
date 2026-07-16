@@ -20,6 +20,7 @@ serve({ fetch: (req) => outer.handle(req) });
 ## Getting started
 
 ```bash
+cp .env.example .env # copy and adjust as needed
 npm install
 npm run dev
 ```

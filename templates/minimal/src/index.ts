@@ -5,11 +5,19 @@ import { z } from "zod";
 
 import { v1_0_0 } from "./schema";
 
-const outer = new Outer({ name: "Outer", db: pglite() })
+// TODO: Copy .env.example to .env and set AUTH_SECRET in production
+const env = z
+  .object({
+    PORT: z.coerce.number().default(3000),
+    BASE_URL: z.string().default("http://localhost:3000"),
+    AUTH_SECRET: z.string().default("dev-only-secret"),
+  })
+  .parse(process.env);
+
+const outer = new Outer({ name: "Outer", db: pglite(), baseUrl: env.BASE_URL })
   .schema(v1_0_0)
   .auth({
-    // set AUTH_SECRET in production — the fallback is for local development only
-    secret: process.env["AUTH_SECRET"] ?? "dev-only-secret",
+    secret: env.AUTH_SECRET,
     emailAndPassword: { enabled: true },
   })
   .openapi()
@@ -43,5 +51,5 @@ export type Router = InferRouter<typeof outer>;
 // swap for Bun.serve/Deno.serve/etc — outer.handle is a plain Fetch handler
 serve({
   fetch: (req) => outer.handle(req),
-  port: Number(process.env["PORT"] ?? 3000),
+  port: env.PORT,
 });

@@ -5,6 +5,12 @@ import { z } from "zod";
 
 import { v1_0_0 } from "./schema";
 
+// TODO: Set AUTH_SECRET via `wrangler secret put AUTH_SECRET` (or .dev.vars locally) — the fallback is for local development only
+const envSchema = z.object({
+  BASE_URL: z.string().default("http://localhost:8787"),
+  AUTH_SECRET: z.string().default("dev-only-secret"),
+});
+
 // one DO instance (see idFromName below) = one SQLite DB, like PGlite's local file
 export class OuterDO extends DurableObject<Env> {
   readonly outer;
@@ -13,8 +19,11 @@ export class OuterDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
 
+    const vars = envSchema.parse(env);
+
     this.outer = new Outer({
       name: "Outer",
+      baseUrl: vars.BASE_URL,
       db: {
         dialect: new DurableObjectSqliteDialect(ctx.storage.sql as any),
         kind: "sqlite",
@@ -22,8 +31,7 @@ export class OuterDO extends DurableObject<Env> {
     })
       .schema(v1_0_0)
       .auth({
-        // set AUTH_SECRET via `wrangler secret put` in production
-        secret: env.AUTH_SECRET ?? "dev-only-secret",
+        secret: vars.AUTH_SECRET,
         emailAndPassword: { enabled: true },
       })
       .openapi()
