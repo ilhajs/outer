@@ -471,7 +471,7 @@ export class Outer<
     let server = new H3();
 
     if (cors) {
-      server = server.use((event, next) => {
+      server = server.use(async (event, next) => {
         // Vary on every response (not just allowed origins) so shared caches
         // never serve an ACAO-bearing response to a different origin.
         event.res.headers.set("Vary", "Origin");
@@ -497,7 +497,31 @@ export class Outer<
           event.res.status = 204;
           return "";
         }
-        return next();
+        const result = await next();
+        // H3 merges `event.res` headers into a returned `Response` only when it's
+        // 2xx — re-apply them onto error responses (oRPC 4xx, auth 401s, ...) so
+        // browsers can read the error instead of failing the whole fetch on CORS.
+        if (result instanceof Response && !result.ok) {
+          const merge = (target: Headers) => {
+            for (const [name, value] of event.res.headers) {
+              if (name === "set-cookie") target.append(name, value);
+              else target.set(name, value);
+            }
+          };
+          try {
+            merge(result.headers);
+          } catch {
+            // immutable headers — rebuild the response
+            const headers = new Headers(result.headers);
+            merge(headers);
+            return new Response(result.body, {
+              status: result.status,
+              statusText: result.statusText,
+              headers,
+            });
+          }
+        }
+        return result;
       });
     }
 

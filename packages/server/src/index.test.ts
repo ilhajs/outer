@@ -1,6 +1,7 @@
 import { test, describe, expect } from "bun:test";
 
 import { PGlite } from "@electric-sql/pglite";
+import { ORPCError } from "@orpc/client";
 import { PGliteDialect } from "kysely";
 
 import { Outer, schema } from "./index";
@@ -311,6 +312,33 @@ describe("cors", () => {
       }),
     );
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  test("keeps CORS headers on error responses", async () => {
+    const app = new Outer({
+      name: "Test",
+      baseUrl: "http://localhost",
+      db: pglite({ dataDir: "memory://" }),
+      cors: { origins: ["https://allowed.test"], credentials: true },
+    })
+      .schema(s)
+      .procedure("boom", (base) =>
+        base.handler(async () => {
+          throw new ORPCError("UNAUTHORIZED", { message: "You must be signed in" });
+        }),
+      )
+      .build();
+
+    const res = await app.handle(
+      new Request("http://localhost/rpc/boom", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://allowed.test" },
+        body: JSON.stringify({ json: {} }),
+      }),
+    );
+    expect(res.status).toBe(401);
+    expect(res.headers.get("access-control-allow-origin")).toBe("https://allowed.test");
+    expect(res.headers.get("access-control-allow-credentials")).toBe("true");
   });
 
   test("responds to a preflight OPTIONS request", async () => {

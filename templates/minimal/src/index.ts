@@ -11,10 +11,26 @@ const env = z
     PORT: z.coerce.number().default(3000),
     BASE_URL: z.string().default("http://localhost:3000"),
     AUTH_SECRET: z.string().default("dev-only-secret"),
+    // comma-separated browser origins allowed cross-origin (e.g. an admin dashboard); the default is Vite's dev origin
+    CORS_ORIGINS: z
+      .string()
+      .default("http://localhost:5173")
+      .transform((s) =>
+        s
+          .split(",")
+          .map((o) => o.trim())
+          .filter(Boolean),
+      ),
   })
   .parse(process.env);
 
-const outer = new Outer({ name: "Outer", db: pglite(), baseUrl: env.BASE_URL })
+const outer = new Outer({
+  name: "Outer",
+  db: pglite(),
+  baseUrl: env.BASE_URL,
+  // credentials lets browsers send the session cookie cross-origin — pair with `credentials: "include"` on the client
+  cors: { origins: env.CORS_ORIGINS, credentials: true },
+})
   .schema(v1_0_0)
   .auth({
     secret: env.AUTH_SECRET,

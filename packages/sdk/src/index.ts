@@ -8,6 +8,13 @@ export type CreateClientParams = {
   baseUrl: string;
   /** Path the oRPC handler is mounted at. Defaults to `/rpc` (Outer's default). */
   rpcPath?: `/${string}`;
+  /**
+   * `RequestCredentials` for RPC and auth requests. Pass `"include"` when the
+   * Outer server is on another origin so the browser attaches the session
+   * cookie — pair with `new Outer({ cors: { origins, credentials: true } })`
+   * on the server. Defaults to the platform default (`"same-origin"`).
+   */
+  credentials?: RequestCredentials;
 };
 
 export class OuterClientBuilder<
@@ -33,12 +40,25 @@ export class OuterClientBuilder<
 
   /** Builds the final client — only the entries enabled during the chain (RPC calls, plus `.auth` if `.auth()` was called). */
   build(): RouterClient<TRouter> & TExtra {
-    const link = new RPCLink({ origin: this.params.baseUrl, url: this.params.rpcPath ?? "/rpc" });
+    const { credentials } = this.params;
+    const link = new RPCLink({
+      origin: this.params.baseUrl,
+      url: this.params.rpcPath ?? "/rpc",
+      ...(credentials && {
+        fetch: (url: string, init: RequestInit) => globalThis.fetch(url, { ...init, credentials }),
+      }),
+    });
     const rpc = createORPCClient<RouterClient<TRouter>>(link);
 
     if (!this.authEnabled) return rpc as RouterClient<TRouter> & TExtra;
 
-    const auth = createAuthClient({ baseURL: this.params.baseUrl, ...this.authOptions });
+    const auth = createAuthClient({
+      baseURL: this.params.baseUrl,
+      ...this.authOptions,
+      ...(credentials && {
+        fetchOptions: { credentials, ...this.authOptions?.fetchOptions },
+      }),
+    });
 
     // `rpc` is itself a Proxy whose `get` trap unconditionally returns a nested
     // RPC client for any string key (see @orpc/client's createORPCClient) — it
