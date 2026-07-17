@@ -407,7 +407,7 @@ export class Outer<
     return this.pendingRouter;
   }
 
-  build(): BuiltOuter<TRouter> {
+  build(): BuiltOuter<TRouter, TDB> {
     const { db, auth, authRequiredBy, admin, cors } = this.resources;
 
     if (authRequiredBy.length > 0 && !auth) {
@@ -612,16 +612,17 @@ export class Outer<
   }
 }
 
-export class BuiltOuter<TRouter extends Record<string, any> = Router<any>> {
+export class BuiltOuter<TRouter extends Record<string, any> = Router<any>, TDB = any> {
   readonly migrator: ReturnType<typeof createMigrator>;
   readonly router: TRouter;
+  /** The same `db` handed to procedures (Kysely + `query` + `transact`) — use it for out-of-band work like seeding after migrations. */
+  readonly db: OuterDB<TDB>;
   private readonly server: H3;
-  private readonly db: Kysely<any>;
   private readonly auth: OuterAuth | undefined;
 
   constructor(
     server: H3,
-    db: Kysely<any>,
+    db: OuterDB<TDB>,
     migrator: ReturnType<typeof createMigrator>,
     router: TRouter,
     auth?: OuterAuth,

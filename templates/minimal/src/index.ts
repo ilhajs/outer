@@ -1,5 +1,6 @@
 import { Outer, type InferRouter } from "@outerjs/server";
 import { pglite } from "@outerjs/server/pglite";
+import { emailOTP } from "better-auth/plugins";
 import { serve } from "srvx";
 import { z } from "zod";
 
@@ -11,10 +12,12 @@ const env = z
     PORT: z.coerce.number().default(3000),
     BASE_URL: z.string().default("http://localhost:3000"),
     AUTH_SECRET: z.string().default("dev-only-secret"),
+    // seeded admin account — signs in via email OTP only (no password); leave unset to skip seeding
+    ADMIN_EMAIL: z.email().optional(),
     // comma-separated browser origins allowed cross-origin (e.g. an admin dashboard); the default is Vite's dev origin
     CORS_ORIGINS: z
       .string()
-      .default("http://localhost:5173")
+      .default("https://hub.outer.now")
       .transform((s) =>
         s
           .split(",")
@@ -35,6 +38,21 @@ const outer = new Outer({
   .auth({
     secret: env.AUTH_SECRET,
     emailAndPassword: { enabled: true },
+    user: {
+      // `input: false` blocks signups from setting their own role — only the seed (or an admin) can
+      additionalFields: { role: { type: "string", defaultValue: "user", input: false } },
+    },
+    plugins: [
+      emailOTP({
+        // OTP is sign-in only: it can't create accounts, so the seeded admin stays the only admin
+        disableSignUp: true,
+        async sendVerificationOTP({ email, otp }) {
+          // TODO: wire up your email provider (Resend, SMTP, ...) to deliver `otp` to `email`
+          void email;
+          void otp;
+        },
+      }),
+    ],
   })
   .openapi()
   .admin()
@@ -60,6 +78,26 @@ if (error) {
       ? `[Outer] ${results.length} migrations applied`
       : "[Outer] No migrations to apply",
   );
+}
+
+// Seed the single admin account: no password, so email OTP is its only sign-in path.
+// Idempotent — re-running promotes an existing user with this email instead of duplicating.
+if (!error && env.ADMIN_EMAIL) {
+  await outer.db
+    .insertInto("user")
+    .values({
+      id: crypto.randomUUID(),
+      name: "Admin",
+      email: env.ADMIN_EMAIL,
+      emailVerified: true,
+      role: "admin",
+      banned: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .onConflict((oc) => oc.column("email").doUpdateSet({ role: "admin" }))
+    .execute();
+  console.info("[Outer] Admin account seeded");
 }
 
 export type Router = InferRouter<typeof outer>;

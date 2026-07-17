@@ -302,6 +302,7 @@ Seals the router and constructs the HTTP server. Returns a `BuiltOuter` with:
 
 - `handle(request: Request): Promise<Response>` — fetch-compatible handler
 - `migrator` — Kysely `Migrator` instance (see Migrations)
+- `db` — the same typed `context.db` handed to procedures (Kysely + `query` + `transact`), for out-of-band work like seeding after migrations (e.g. upserting a single admin account from an `ADMIN_EMAIL` env var, as the minimal template does)
 - `client(headers?)` — in-process `RouterClient<TRouter>` (oRPC's `createRouterClient`) that calls procedures directly, skipping HTTP and the oRPC wire protocol. For SSR (Server Components, server functions) where Outer runs in the same process as the frontend. `headers` is a `Headers` or a `() => Headers | Promise<Headers>` (evaluated per call — pass the framework's request-headers accessor so permissions and `context.auth` see the caller's session); defaults to empty headers.
 
 ```ts
