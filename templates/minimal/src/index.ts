@@ -14,7 +14,7 @@ const env = z
     AUTH_SECRET: z.string().default("dev-only-secret"),
     // seeded admin account — signs in via email OTP only (no password); leave unset to skip seeding
     ADMIN_EMAIL: z.email().optional(),
-    // comma-separated browser origins allowed cross-origin (e.g. an admin dashboard); the default is Vite's dev origin
+    // comma-separated browser origins allowed cross-origin (e.g. an admin dashboard); the default is the hosted hub
     CORS_ORIGINS: z
       .string()
       .default("https://hub.outer.now")
