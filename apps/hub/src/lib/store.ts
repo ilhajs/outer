@@ -1,5 +1,6 @@
 import { persist, store } from "@ilha/store";
 import { extractFormData, validateWithSchema } from "@ilha/store/form";
+import type { AdminMeta } from "@outerjs/server";
 import slugify from "@sindresorhus/slugify";
 import { z } from "zod";
 
@@ -13,6 +14,8 @@ const InstanceSchema = z
     ...data,
     id: data.id ?? slugify(data.name),
   }));
+
+export type Instance = z.infer<typeof InstanceSchema>;
 
 const StoreSchema = z.object({
   instances: z.array(InstanceSchema).default([]),
@@ -34,4 +37,8 @@ persist(appStore, "appStore");
 
 export function getInstanceById(instanceId: string) {
   return appStore.getState().instances.find((instance) => instance.id === instanceId);
+}
+
+export function getTableByName(meta: AdminMeta, tableName: string) {
+  return meta.tables.find((table) => table.name === tableName);
 }

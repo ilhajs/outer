@@ -1,17 +1,91 @@
-import { loader, type InferLoader } from "@ilha/router";
-import { LayerCard } from "areia";
+import { getClient } from "$lib/outer";
+import { buildNewRecord, RecordField } from "$lib/record-form";
+import { getInstanceById, getTableByName } from "$lib/store";
+import { loader, navigate, type InferLoader } from "@ilha/router";
+import { Button, LayerCard, LinkButton } from "areia";
+import { toast } from "areia/sonner";
 import ilha from "ilha";
+import { each, when } from "quando";
 
-export const clientLoad = loader(({ head }) => {
-  head({ title: "New Record" });
-  return {};
+export const clientLoad = loader(async ({ head, params }) => {
+  const { instanceId, tableName } = params;
+  head({ title: `New ${tableName}` });
+
+  const instance = getInstanceById(instanceId);
+  if (!instance) {
+    navigate("/i");
+    return {};
+  }
+
+  const client = getClient(instance.url);
+  const meta = await client._admin.meta();
+  const table = getTableByName(meta, tableName);
+  if (!table) {
+    navigate(`/i/${instanceId}`);
+    return {};
+  }
+
+  return { table, instanceId, tableName };
 });
 
-export default ilha.input<InferLoader<typeof clientLoad>>().render(() => (
-  <div class="flex flex-col gap-4">
-    <LayerCard>
-      <LayerCard.Title>New Record</LayerCard.Title>
-      <LayerCard.Content>Form to create a new record</LayerCard.Content>
-    </LayerCard>
-  </div>
-));
+export default ilha
+  .input<InferLoader<typeof clientLoad>>()
+  .state("saving", false)
+  .on("#record-form@submit", async ({ input, state, event }) => {
+    event.preventDefault();
+    const { table, instanceId, tableName } = input;
+    if (!table) return;
+
+    const result = buildNewRecord(new FormData(event.target as HTMLFormElement), table.columns);
+    if (!result.ok) return void toast.error(result.error);
+
+    state.saving(true);
+    try {
+      const client = getClient(getInstanceById(instanceId!)!.url);
+      const created = await client._admin.data.create({ table: tableName!, data: result.data });
+      toast.success("Record created");
+      const pk = table.columns.find((column) => column.primaryKey);
+      const pkValue = pk ? created[pk.name] : undefined;
+      navigate(
+        pkValue !== undefined && pkValue !== null
+          ? `/i/${instanceId}/t/${tableName}/r/${encodeURIComponent(String(pkValue))}`
+          : `/i/${instanceId}/t/${tableName}`,
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create record");
+    } finally {
+      state.saving(false);
+    }
+  })
+  .render(({ input, state }) => {
+    const { table, instanceId, tableName } = input;
+    // serial PKs are database-generated — no point showing an empty disabled field
+    const columns = (table?.columns ?? []).filter((column) => column.type !== "serial");
+
+    return (
+      <div class="flex flex-1 flex-col gap-4 overflow-auto p-4">
+        <LayerCard class="w-full max-w-2xl self-center">
+          <LayerCard.Title>New {tableName}</LayerCard.Title>
+          <LayerCard.Content>
+            <form id="record-form" class="flex flex-col gap-3">
+              {each(columns).as((column) => (
+                <RecordField column={column} />
+              ))}
+              <div class="mt-2 flex items-center justify-end gap-2">
+                <LinkButton href={`/i/${instanceId}/t/${tableName}`} variant="ghost">
+                  Back
+                </LinkButton>
+                <Button type="submit" variant="primary" disabled={state.saving()}>
+                  {when(
+                    state.saving(),
+                    () => "Creating…",
+                    () => "Create Record",
+                  )}
+                </Button>
+              </div>
+            </form>
+          </LayerCard.Content>
+        </LayerCard>
+      </div>
+    );
+  });

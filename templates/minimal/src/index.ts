@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 import { Outer, type InferRouter } from "@outerjs/server";
 import { pglite } from "@outerjs/server/pglite";
 import { emailOTP } from "better-auth/plugins";
@@ -7,6 +9,9 @@ import { z } from "zod";
 import { v1_0_0 } from "./schema";
 
 // TODO: Copy .env.example to .env and set AUTH_SECRET in production
+// Node doesn't read .env on its own (Bun/Deno do); optional chaining skips runtimes that auto-load or lack loadEnvFile
+if (existsSync(".env")) process.loadEnvFile?.(".env");
+
 const env = z
   .object({
     PORT: z.coerce.number().default(3000),
@@ -14,6 +19,9 @@ const env = z
     AUTH_SECRET: z.string().default("dev-only-secret"),
     // seeded admin account — signs in via email OTP only (no password); leave unset to skip seeding
     ADMIN_EMAIL: z.email().optional(),
+    // namespaces this instance's auth cookies — set a unique value per instance so several
+    // Outer instances on the same host (localhost ports share one cookie jar) keep separate sessions
+    COOKIE_PREFIX: z.string().default("outer"),
     // comma-separated browser origins allowed cross-origin (e.g. an admin dashboard); the default is the hosted hub
     CORS_ORIGINS: z
       .string()
@@ -37,6 +45,7 @@ const outer = new Outer({
   .schema(v1_0_0)
   .auth({
     secret: env.AUTH_SECRET,
+    advanced: { cookiePrefix: env.COOKIE_PREFIX },
     emailAndPassword: { enabled: true },
     user: {
       // `input: false` blocks signups from setting their own role — only the seed (or an admin) can
@@ -47,9 +56,7 @@ const outer = new Outer({
         // OTP is sign-in only: it can't create accounts, so the seeded admin stays the only admin
         disableSignUp: true,
         async sendVerificationOTP({ email, otp }) {
-          // TODO: wire up your email provider (Resend, SMTP, ...) to deliver `otp` to `email`
-          void email;
-          void otp;
+          console.log(">>>OTP", { email, otp });
         },
       }),
     ],

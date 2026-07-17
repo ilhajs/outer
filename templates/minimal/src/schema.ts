@@ -6,6 +6,10 @@ export const v1_0_0 = schema("1.0.0")
   .table("post", (t) => ({
     id: t.serial().primaryKey(),
     title: t.text(),
+    content: t.text().nullable(),
+    userId: t.text().references("user", "id"),
     ...timestamps(t),
   }))
+  .relation("user", (rel) => rel.hasMany("post", { from: "id", to: "userId" }))
+  .relation("post", (rel) => rel.belongsTo("user", { from: "userId", to: "id" }))
   .build();

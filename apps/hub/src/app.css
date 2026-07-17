@@ -1,2 +1,6 @@
 @import "tailwindcss";
 @plugin "areia";
+
+[data-ilha-slot] {
+  @apply contents;
+}

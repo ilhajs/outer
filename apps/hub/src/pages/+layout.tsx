@@ -1,4 +1,5 @@
 import { defineLayout, loader } from "@ilha/router";
+import { Toaster } from "areia/sonner";
 import ilha from "ilha";
 
 export const clientLoad = loader(({ head }) => {
@@ -6,7 +7,10 @@ export const clientLoad = loader(({ head }) => {
 });
 
 export default defineLayout((Children) =>
-  ilha.render(({ input }) => {
-    return <Children {...input} />;
-  }),
+  ilha.render(({ input }) => (
+    <div class="flex min-h-screen flex-col">
+      <Children {...input} />
+      <Toaster />
+    </div>
+  )),
 );
