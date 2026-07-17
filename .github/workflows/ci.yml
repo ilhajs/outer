@@ -46,7 +46,8 @@ jobs:
         with:
           bun-version: latest
 
-      - run: bun install
+      # skip integrity as outer checksum changes in previous step
+      - run: bun install --no-verify
 
       - run: bun run build
         working-directory: apps/website
