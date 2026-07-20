@@ -1,10 +1,12 @@
+import { tableListHref } from "$lib/grid-filters";
 import { getClient } from "$lib/outer";
 import { buildNewRecord, RecordField } from "$lib/record-form";
 import { getInstanceById, getTableByName } from "$lib/store";
-import { loader, navigate, type InferLoader } from "@ilha/router";
-import { Button, LayerCard, LinkButton } from "areia";
+import { loader, navigate, useRoute, type InferLoader } from "@ilha/router";
+import { Button, Icon, LinkButton } from "areia";
 import { toast } from "areia/sonner";
 import ilha from "ilha";
+import { X } from "lucide";
 import { each, when } from "quando";
 
 export const clientLoad = loader(async ({ head, params }) => {
@@ -46,11 +48,15 @@ export default ilha
       toast.success("Record created");
       const pk = table.columns.find((column) => column.primaryKey);
       const pkValue = pk ? created[pk.name] : undefined;
-      navigate(
-        pkValue !== undefined && pkValue !== null
-          ? `/i/${instanceId}/t/${tableName}/r/${encodeURIComponent(String(pkValue))}`
-          : `/i/${instanceId}/t/${tableName}`,
-      );
+      const search = useRoute().search();
+      if (pkValue !== undefined && pkValue !== null) {
+        const recordPath = `/i/${instanceId}/t/${tableName}/r/${encodeURIComponent(String(pkValue))}`;
+        navigate(
+          search ? `${recordPath}${search.startsWith("?") ? search : `?${search}`}` : recordPath,
+        );
+      } else {
+        navigate(tableListHref(instanceId!, tableName!, search));
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to create record");
     } finally {
@@ -59,33 +65,45 @@ export default ilha
   })
   .render(({ input, state }) => {
     const { table, instanceId, tableName } = input;
-    // serial PKs are database-generated — no point showing an empty disabled field
     const columns = (table?.columns ?? []).filter((column) => column.type !== "serial");
+    const search = useRoute().search();
+    const closeHref = tableListHref(instanceId!, tableName!, search);
 
     return (
-      <div class="flex flex-1 flex-col gap-4 overflow-auto p-4">
-        <LayerCard class="w-full max-w-2xl self-center">
-          <LayerCard.Title>New {tableName}</LayerCard.Title>
-          <LayerCard.Content>
-            <form id="record-form" class="flex flex-col gap-3">
-              {each(columns).as((column) => (
-                <RecordField column={column} />
-              ))}
-              <div class="mt-2 flex items-center justify-end gap-2">
-                <LinkButton href={`/i/${instanceId}/t/${tableName}`} variant="ghost">
-                  Back
-                </LinkButton>
-                <Button type="submit" variant="primary" disabled={state.saving()}>
-                  {when(
-                    state.saving(),
-                    () => "Creating…",
-                    () => "Create Record",
-                  )}
-                </Button>
-              </div>
-            </form>
-          </LayerCard.Content>
-        </LayerCard>
+      <div class="flex h-full min-h-0 flex-col">
+        <header class="border-areia-border flex items-center justify-between gap-2 border-b p-3">
+          <h3 class="min-w-0 truncate text-base font-semibold">New {tableName}</h3>
+          <LinkButton
+            href={closeHref}
+            variant="ghost"
+            shape="square"
+            size="sm"
+            aria-label="Close"
+            title="Close"
+          >
+            <Icon icon={X} class="size-4" />
+          </LinkButton>
+        </header>
+
+        <form id="record-form" class="flex min-h-0 flex-1 flex-col">
+          <div class="flex flex-1 flex-col gap-3 overflow-auto p-3">
+            {each(columns).as((column) => (
+              <RecordField column={column} />
+            ))}
+          </div>
+          <div class="border-areia-border flex items-center justify-end gap-2 border-t p-3">
+            <LinkButton href={closeHref} variant="ghost">
+              Cancel
+            </LinkButton>
+            <Button type="submit" variant="primary" disabled={state.saving()}>
+              {when(
+                state.saving(),
+                () => "Creating…",
+                () => "Create Record",
+              )}
+            </Button>
+          </div>
+        </form>
       </div>
     );
   });

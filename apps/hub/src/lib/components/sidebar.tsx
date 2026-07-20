@@ -1,9 +1,12 @@
 import type { Instance } from "$lib/store";
+import { useRoute } from "@ilha/router";
 import type { AdminMeta } from "@outerjs/server";
 import { Button, Icon, LinkButton } from "areia";
 import ilha from "ilha";
 import { ArrowRightLeft, MoreVertical } from "lucide";
 import { each } from "quando";
+
+const { params } = useRoute();
 
 export const Sidebar = ilha
   .input<{ meta: AdminMeta | undefined; instance: Instance | undefined }>()
@@ -23,11 +26,18 @@ export const Sidebar = ilha
         </div>
         <div class="flex flex-col">
           <div class="text-sm">Tables</div>
-          {each(input.meta?.tables ?? []).as((table) => (
-            <LinkButton href={`/i/${input.instance?.id}/t/${table.name}`} size="lg" class="w-full">
-              {table.name}
-            </LinkButton>
-          ))}
+          {each(input.meta?.tables ?? []).as((table) => {
+            const isActive = params().tableName === table.name;
+            return (
+              <LinkButton
+                variant={isActive ? "outline" : undefined}
+                href={`/i/${input.instance?.id}/t/${table.name}`}
+                class="w-full"
+              >
+                {table.name}
+              </LinkButton>
+            );
+          })}
         </div>
       </div>
       <LinkButton href="/i" variant="outline" class="w-full" icon={<Icon icon={ArrowRightLeft} />}>

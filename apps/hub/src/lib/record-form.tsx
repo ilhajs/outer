@@ -1,10 +1,19 @@
 import type { AdminMeta } from "@outerjs/server";
-import { Input, Switch, Textarea } from "areia";
+import { Button, ClipboardText, Icon, Input, Switch, Textarea } from "areia";
 import { format } from "date-fns";
+import ilha from "ilha";
+import { Eye, EyeOff } from "lucide";
 import { when } from "quando";
 
 export type Column = AdminMeta["tables"][number]["columns"][number];
 export type Row = Record<string, unknown>;
+
+/** Column names that should be masked in the grid and record pane (tokens, passwords, …). */
+export const SECRET_PATTERN = /token|password|secret/i;
+
+export function isSecretColumn(column: Column): boolean {
+  return column.type === "text" && SECRET_PATTERN.test(column.name);
+}
 
 // ── Value conversion ────────────────────────────────────────────────────────
 
@@ -118,17 +127,106 @@ export function buildNewRecord(formData: FormData, columns: Column[]): BuildResu
   return { ok: true, data };
 }
 
-// ── Field component ─────────────────────────────────────────────────────────
+// ── Field components ────────────────────────────────────────────────────────
 
-/** One form control for a column, picked by column type. Name/label/value all derive from the schema. */
-export function RecordField(props: { column: Column; value?: unknown; disabled?: boolean }) {
-  const { column, value, disabled } = props;
-  const label = (
+function fieldLabel(column: Column) {
+  return (
     <span class="flex items-center gap-1">
       {column.name}
       <span class="text-muted-foreground text-xs font-normal">{column.type}</span>
     </span>
   );
+}
+
+/**
+ * Masked secret field: ClipboardText (copy real value) + reveal toggle to an
+ * editable Areia Input. Hidden input keeps the value in the form while masked.
+ */
+const SecretRecordField = ilha
+  .input<{ column: Column; value?: unknown; disabled?: boolean }>()
+  .state("revealed", false)
+  .state("draft", (input) => toFieldValue(input.value, input.column!))
+  .on("[data-toggle-secret]@click", ({ state, event }) => {
+    event.preventDefault();
+    state.revealed(!state.revealed());
+  })
+  .render(({ input, state }) => {
+    const column = input.column!;
+    const disabled = input.disabled;
+    const revealed = state.revealed();
+    const draft = state.draft();
+    const label = fieldLabel(column);
+    const toggle = (
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        shape="square"
+        data-toggle-secret
+        disabled={disabled}
+        aria-label={revealed ? "Hide value" : "Show value"}
+        aria-pressed={revealed}
+        title={revealed ? "Hide" : "Show"}
+      >
+        <Icon icon={revealed ? EyeOff : Eye} class="size-4" />
+      </Button>
+    );
+
+    // Exactly one control: ClipboardText (masked) or Input (revealed) — never nested.
+    return when(
+      revealed,
+      () => (
+        <div class="grid gap-1.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-sm font-medium">{label}</span>
+            {toggle}
+          </div>
+          <Input
+            name={column.name}
+            disabled={disabled}
+            type="text"
+            autocomplete="off"
+            spellcheck={false}
+            class="font-mono text-sm"
+            bind:value={state.draft}
+          />
+        </div>
+      ),
+      () => (
+        <div class="grid gap-1.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-sm font-medium">{label}</span>
+            {toggle}
+          </div>
+          {/* Hidden so the value still submits while masked. */}
+          <input type="hidden" name={column.name} value={draft} disabled={disabled} />
+          <ClipboardText
+            key={`secret-${column.name}`}
+            class="font-mono"
+            size="base"
+            text="••••••••"
+            textToCopy={draft}
+          />
+        </div>
+      ),
+    );
+  });
+
+/** One form control for a column, picked by column type. Name/label/value all derive from the schema. */
+export function RecordField(props: { column: Column; value?: unknown; disabled?: boolean }) {
+  const { column, value, disabled } = props;
+  const label = fieldLabel(column);
+
+  if (isSecretColumn(column)) {
+    return (
+      <SecretRecordField
+        key={`secret-field-${column.name}`}
+        column={column}
+        value={value}
+        disabled={disabled}
+      />
+    );
+  }
 
   if (column.type === "boolean") {
     return (
