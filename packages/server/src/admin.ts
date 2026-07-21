@@ -35,6 +35,8 @@ export type AdminMeta = {
   versions: string[];
   /** The latest schema version — `null` when no `.schema()` was called. */
   version: string | null;
+  /** Whether `GET /openapi.json` is mounted — i.e. `.openapi()` was enabled. */
+  openapi: boolean;
   tables: { name: string; columns: AdminColumnMeta[] }[];
   relations: RelationDef[];
 };
@@ -191,9 +193,11 @@ export function buildAdminProcedures(params: {
   schemas: SchemaResult<any>[];
   kind: DialectKind;
   migrator: { getMigrations(): Promise<readonly { name: string; executedAt?: Date }[]> };
+  /** Mirrors `.openapi()` — surfaced in `meta` so UIs can hide API-reference views. */
+  openapi: boolean;
   config: AdminConfig;
 }): Record<string, AnyProcedure> {
-  const { base, name, schemas, kind, migrator, config } = params;
+  const { base, name, schemas, kind, migrator, openapi, config } = params;
   const latest = schemas.at(-1);
   const tables = (latest?.tables ?? {}) as Record<string, Record<string, ColumnDef>>;
   const relations = latest?.relations ?? [];
@@ -218,6 +222,7 @@ export function buildAdminProcedures(params: {
       dialect: kind,
       versions: schemas.map((s) => s.version),
       version: latest?.version ?? null,
+      openapi,
       tables: Object.entries(tables).map(([tableName, cols]) => ({
         name: tableName,
         columns: Object.entries(cols).map(([colName, col]) => ({

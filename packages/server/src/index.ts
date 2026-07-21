@@ -584,6 +584,7 @@ export class Outer<
         schemas: this.schemas,
         kind: this.resources.dialectKind,
         migrator,
+        openapi: this.resources.openapiEnabled,
         config: admin,
       });
       for (const [procName, proc] of Object.entries(adminProcedures)) {

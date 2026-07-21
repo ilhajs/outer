@@ -3,10 +3,10 @@ import { useRoute } from "@ilha/router";
 import type { AdminMeta } from "@outerjs/server";
 import { Button, Icon, LinkButton } from "areia";
 import ilha from "ilha";
-import { ArrowRightLeft, MoreVertical } from "lucide";
-import { each } from "quando";
+import { ArrowRightLeft, BookOpen, MoreVertical } from "lucide";
+import { each, when } from "quando";
 
-const { params } = useRoute();
+const { params, path } = useRoute();
 
 export const Sidebar = ilha
   .input<{ meta: AdminMeta | undefined; instance: Instance | undefined }>()
@@ -39,6 +39,16 @@ export const Sidebar = ilha
             );
           })}
         </div>
+        {when(input.meta?.openapi ?? false, () => (
+          <LinkButton
+            variant={path().endsWith("/scalar") ? "outline" : undefined}
+            href={`/i/${input.instance?.id}/scalar`}
+            class="w-full"
+            icon={<Icon icon={BookOpen} />}
+          >
+            API Reference
+          </LinkButton>
+        ))}
       </div>
       <LinkButton href="/i" variant="outline" class="w-full" icon={<Icon icon={ArrowRightLeft} />}>
         {input.instance?.name}

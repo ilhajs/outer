@@ -21,38 +21,36 @@ const adminSchema = schema("1.0.0")
 
 const adminDb = testDb([adminSchema]);
 
-async function makeAdminApp() {
-  return (
-    new Outer({
-      name: "Admin Test",
-      baseUrl: "http://localhost",
-      db: await adminDb(),
-      cors: { origins: ["https://admin.example.com"] },
+async function makeAdminApp(opts: { openapi?: boolean } = {}) {
+  const outer = new Outer({
+    name: "Admin Test",
+    baseUrl: "http://localhost",
+    db: await adminDb(),
+    cors: { origins: ["https://admin.example.com"] },
+  })
+    .schema(adminSchema)
+    .auth({
+      secret: "test-secret",
+      emailAndPassword: fastPasswordHashing,
+      user: {
+        additionalFields: { role: { type: "string", defaultValue: "user", input: false } },
+      },
     })
-      .schema(adminSchema)
-      .auth({
-        secret: "test-secret",
-        emailAndPassword: fastPasswordHashing,
-        user: {
-          additionalFields: { role: { type: "string", defaultValue: "user", input: false } },
-        },
-      })
-      .admin()
-      // test-only helper to promote a user to admin without wiring up the admin plugin
-      .procedure("test.promote", (base) =>
-        base
-          .input(z.object({ userId: z.string(), role: z.string().default("admin") }))
-          .handler(async ({ context, input }) => {
-            await context.db
-              .updateTable("user")
-              .set({ role: input.role })
-              .where("id", "=", input.userId)
-              .execute();
-            return { ok: true };
-          }),
-      )
-      .build()
-  );
+    .admin()
+    // test-only helper to promote a user to admin without wiring up the admin plugin
+    .procedure("test.promote", (base) =>
+      base
+        .input(z.object({ userId: z.string(), role: z.string().default("admin") }))
+        .handler(async ({ context, input }) => {
+          await context.db
+            .updateTable("user")
+            .set({ role: input.role })
+            .where("id", "=", input.userId)
+            .execute();
+          return { ok: true };
+        }),
+    );
+  return (opts.openapi ? outer.openapi() : outer).build();
 }
 
 type App = Awaited<ReturnType<typeof makeAdminApp>>;
@@ -165,6 +163,8 @@ describe("admin — API", () => {
     expect(output.dialect).toBe("postgres");
     expect(output.version).toBe("1.0.0");
     expect(output.versions).toEqual(["1.0.0"]);
+    // No `.openapi()` on this app, so UIs should hide the API reference.
+    expect(output.openapi).toBe(false);
     const post = output.tables.find((t: any) => t.name === "post");
     expect(post).toBeDefined();
     const id = post.columns.find((c: any) => c.name === "id");
@@ -177,6 +177,15 @@ describe("admin — API", () => {
     expect(output.relations).toContainEqual(
       expect.objectContaining({ fromTable: "post", toTable: "user", kind: "belongsTo" }),
     );
+  });
+
+  test("meta reports openapi: true when .openapi() is enabled", async () => {
+    const openapiApp = await makeAdminApp({ openapi: true });
+    await openapiApp.migrator.migrateToLatest();
+    const openapiAdmin = await signUp(openapiApp, "openapi-admin@test.com");
+    await rpc(openapiApp, "test/promote", { userId: openapiAdmin.userId });
+    const { output } = await rpc(openapiApp, "_admin/meta", {}, openapiAdmin.cookie);
+    expect(output.openapi).toBe(true);
   });
 
   test("migrations reports executed migrations", async () => {
