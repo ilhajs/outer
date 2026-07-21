@@ -16,7 +16,7 @@
     "@outerjs/server": "https://pkg.pr.new/ilhajs/outer/@outerjs/server@main",
     "better-auth": "1.6.23",
     "srvx": "^0.11.18",
-    "unstorage": "^1.17.1",
+    "unstorage": "2.0.0-alpha.7",
     "zod": "^4.4.3"
   },
   "devDependencies": {
