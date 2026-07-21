@@ -1,5 +1,6 @@
 import { v1_0_0 } from "$lib/schemas/v1-0-0";
-import { Outer, type InferRouter } from "@outerjs/server";
+import { v1_1_0 } from "$lib/schemas/v1-1-0";
+import { fromUnstorage, Outer, type InferRouter } from "@outerjs/server";
 import { pglite } from "@outerjs/server/pglite";
 import { admin, emailOTP } from "better-auth/plugins";
 import { useRuntimeConfig } from "nitro/runtime-config";
@@ -25,8 +26,12 @@ const outer = new Outer({
   name: "Outer",
   baseUrl: env.VITE_APP_URL,
   db: pglite(),
+  // The `fs` mount from vite.config.ts. Swap that driver for `s3` in production
+  // and nothing here changes.
+  storage: fromUnstorage(useStorage("fs")),
 })
   .schema(v1_0_0)
+  .schema(v1_1_0)
   .auth({
     secret: env.authSecret,
     plugins: [
@@ -41,22 +46,12 @@ const outer = new Outer({
   })
   .openapi()
   .admin()
-  .middleware(async ({ context, next }) => {
-    const kv = useStorage();
-    const fs = useStorage("fs");
-    const authSession = await context.auth.api.getSession({
-      headers: context.headers,
-    });
-    return next({
-      context: {
-        session: authSession?.session,
-        user: authSession?.user,
-        kv,
-        fs,
-        runTask,
-      },
-    });
-  })
+  // Adds file.upload / list / get / delete / attach / detach plus GET /files/:id.
+  // Files default to private: only the uploader can read or delete them.
+  .files({ maxBytes: 10 * 1024 * 1024 })
+  // `context.user` and `context.session` are already resolved by `.auth()` —
+  // this middleware only adds the extras this app wants.
+  .middleware(async ({ next }) => next({ context: { kv: useStorage(), runTask } }))
   .resource("todo", {
     permissions: {
       list: "owner",
@@ -67,12 +62,14 @@ const outer = new Outer({
     },
     ownerColumn: "userId",
   })
-  .procedure("foo", (base) =>
-    base.handler(async ({ context }) => {
-      await context.kv.setItem("foo", "bar");
-      const foo = await context.kv.getItem("foo");
-      return { foo };
-    }),
+  .procedure(
+    "foo",
+    (base) =>
+      base.handler(async ({ context }) => {
+        await context.kv.setItem("foo", "bar");
+        return { foo: await context.kv.getItem("foo"), signedInAs: context.user?.email ?? null };
+      }),
+    { permission: "authenticated" },
   )
   .build();
 

@@ -21,7 +21,7 @@ await server.migrator.migrateToLatest();
 serve({ fetch: (req) => server.handle(req) });
 ```
 
-Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`. `.auth()` and `.openapi()` can appear anywhere in the chain.
+Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`. `.auth()`, `.openapi()`, `.admin()`, and `.files()` can appear anywhere in the chain.
 
 ---
 
@@ -34,6 +34,7 @@ Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`
 | `db.dialect` | `Dialect`                | —             | Required. A Kysely `Dialect` — see below                                                                      |
 | `db.kind`    | `"postgres" \| "sqlite"` | —             | Required. Drives DDL generation, Better Auth's schema, and DB error mapping — must match `db.dialect`         |
 | `cors`       | `CorsConfig`             | —             | Cross-origin browser callers allowed to reach `/rpc/**`, `/api/auth/**`, and the admin API — see CORS below   |
+| `storage`    | `OuterStorage`           | —             | Object store for file bytes — surfaced as `context.storage` and used by `.files()`                            |
 
 `db` is required — `@outerjs/server`'s core has no database opinion baked in. For the zero-infra default (embedded [PGlite](https://pglite.dev), real Postgres, writes to local disk, no external infra to run), import the helper from the `/pglite` subpath rather than the framework's dependency tree pulling it in unconditionally:
 
@@ -46,7 +47,12 @@ new Outer({ db: pglite() }); // or pglite({ dataDir: "..." }), defaults to <cwd>
 
 This is the path to reach for first; it's what makes Outer deployable to a VPS/Coolify box with nothing else to provision. Splitting it into a subpath keeps PGlite's WASM out of deploy bundles for platforms where it's dead weight (Cloudflare Workers, Vercel Functions) — see `templates/cloudflare` and `templates/vercel-neon`.
 
-`@electric-sql/pglite` is an **optional peer dependency**: apps that use `pglite()` must install it themselves (`bun add @electric-sql/pglite`), and apps on other dialects (Durable Objects, Neon, network Postgres) never download its WASM at all.
+`@electric-sql/pglite` and `@electric-sql/pglite-pgvector` are **optional peer dependencies**: apps that use `pglite()` must install them themselves (`bun add @electric-sql/pglite @electric-sql/pglite-pgvector`), and apps on other dialects (Durable Objects, Neon, network Postgres) never download the WASM at all.
+
+Two extensions are loaded by default:
+
+- **live** (`@electric-sql/pglite/live`) — reactive queries, available on the underlying PGlite client.
+- **vector** (`@electric-sql/pglite-pgvector`) — pgvector. `CREATE EXTENSION IF NOT EXISTS vector` is issued at construction, ahead of any other query, so `vector` columns and operators are usable from migrations onward.
 
 ### Custom dialects
 
@@ -85,7 +91,7 @@ The `/rpc/**` handler speaks oRPC's own wire protocol, which generic OpenAPI cli
 
 ## `.auth(config)`
 
-Enables Better Auth and mounts `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain. Returns a new `Outer` whose `context.auth` type is narrowed to required (non-optional) for everything chained after this call (like `.middleware()`'s `next({ context })`). When `.auth()` is not called, `context.auth` is `undefined` and `/api/auth/**` is not mounted — resource permissions other than `"public"` will throw a configuration error.
+Enables Better Auth and mounts `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain. Also resolves the session once per request and exposes it as `context.user` / `context.session` — no `getSession` middleware needed; see "Request context". Returns a new `Outer` whose `context.auth` type is narrowed to required (non-optional) for everything chained after this call (like `.middleware()`'s `next({ context })`). When `.auth()` is not called, `context.auth` is `undefined` and `/api/auth/**` is not mounted — resource permissions other than `"public"` will throw a configuration error.
 
 `config` is `Omit<BetterAuthOptions, "database"> & { secret: string }` — every Better Auth option (`plugins`, `emailAndPassword`, `trustedOrigins`, etc.) is accepted directly, with `secret` made required. `database` is owned by Outer (wired to whichever dialect was configured via `new Outer({ db })`) and cannot be overridden here. `baseURL` defaults to the `baseUrl` passed to `new Outer({ baseUrl })`, but can be overridden per-call via `.auth({ baseURL })` if you need a different value just for auth.
 
@@ -280,11 +286,30 @@ Registers an oRPC procedure. `name` supports dot-notation — `"user.me"` nests 
 .procedure("user.update", (base) => base.input(z.object({...})).handler(...))
 ```
 
+### Procedure permissions
+
+An optional third argument applies a declarative access check before the handler runs, using the same vocabulary as `.resource()`:
+
+```ts
+.procedure("post.publish", (base) => base.handler(...), { permission: "authenticated" })
+.procedure("stats.purge",  (base) => base.handler(...), { permission: "admin", roles: ["staff"] })
+.procedure("beta.feature", (base) => base.handler(...), {
+  permission: ({ context }) => context.user?.email.endsWith("@acme.com") ?? false,
+})
+```
+
+| Option       | Type                                                          | Default     |
+| ------------ | ------------------------------------------------------------- | ----------- |
+| `permission` | `"public" \| "authenticated" \| "admin" \| (args) => boolean` | `"public"`  |
+| `roles`      | `string[]` — roles accepted by `"admin"`                      | `["admin"]` |
+
+`"authenticated"` returns `401` when signed out; `"admin"` and function permissions return `403`. There's no `"owner"` — that needs a row, which a bare procedure doesn't have; use `.resource()` or check inside the handler. Any non-public permission is registered at `.build()`, so forgetting `.auth()` throws at startup instead of failing per-request.
+
 ---
 
 ## `.route(method, path, handler)`
 
-Mounts a raw H3 route alongside `.procedure()`-defined RPC routes — for webhooks, custom REST endpoints, or anything that doesn't fit the oRPC shape. `handler` receives the H3 `event` and the same `context` (`headers`, `db`, `auth`) available in procedure handlers. Registered before `/rpc/**`, so it takes precedence on overlapping paths.
+Mounts a raw H3 route alongside `.procedure()`-defined RPC routes — for webhooks, custom REST endpoints, or anything that doesn't fit the oRPC shape. `handler` receives the H3 `event` and the same `context` (`headers`, `db`, `auth`, `user`, `session`, `storage`) available in procedure handlers — including the already-resolved session, so raw routes authorize the same way procedures do. Registered before `/rpc/**`, so it takes precedence on overlapping paths.
 
 ```ts
 .route("post", "/webhooks/stripe", async (event, { db }) => {
@@ -293,6 +318,71 @@ Mounts a raw H3 route alongside `.procedure()`-defined RPC routes — for webhoo
   return new Response("ok");
 })
 ```
+
+Route params are available as `event.context.params`.
+
+---
+
+## `.files(config?)` (file uploads)
+
+Registers a complete upload surface — six `file.*` procedures plus a download route — from the `file` tables `schema().files()` defines. Requires an `OuterStorage`.
+
+```ts
+import { Outer, fromUnstorage } from "@outerjs/server";
+
+new Outer({ db: pglite(), storage: fromUnstorage(useStorage("fs")) })
+  .schema(v1_1) // schema(...).auth().files({ attachTo: ["post"] })
+  .auth({ secret })
+  .files()
+  .build();
+```
+
+| Procedure        | Input                                       | Notes                                          |
+| ---------------- | ------------------------------------------- | ---------------------------------------------- |
+| `file.upload`    | `{ file, name?, attach? }`                  | Returns a `FileRecord` including `url`         |
+| `file.list`      | `{ attachedTo?, take?, skip? }`             | Non-admins only ever see their own files       |
+| `file.get`       | `{ id }`                                    | `null` when missing, like `.resource().get`    |
+| `file.delete`    | `{ id }`                                    | Removes the row, then the bytes                |
+| `file.attach`    | `{ id, table, entityId, role?, position? }` | Links an existing file to a row                |
+| `file.detach`    | `{ id, table, entityId }`                   | Unlinks it                                     |
+| `GET /files/:id` | —                                           | Serves the bytes; path configurable via `path` |
+
+Uploads travel the ordinary typed-SDK path: oRPC's codec detects the `File` field and switches the request to `multipart/form-data` on its own, so `client.file.upload({ file })` just works from the browser.
+
+| Option        | Type                             | Default                                             |
+| ------------- | -------------------------------- | --------------------------------------------------- |
+| `storage`     | `OuterStorage`                   | the `new Outer({ storage })` instance               |
+| `maxBytes`    | `number`                         | `10 * 1024 * 1024` — larger uploads get `413`       |
+| `accept`      | `string[]` (`"image/*"` allowed) | all types                                           |
+| `permissions` | `{ upload, list, get, delete }`  | upload/list `"authenticated"`, get/delete `"owner"` |
+| `path`        | `string` containing `:id`        | `"/files/:id"`                                      |
+| `roles`       | `string[]`                       | `["admin"]`                                         |
+
+**Defaults are private.** `"owner"` means only `file.userId` can read or delete a file — the download route returns `404` (not `403`) to everyone else, so file IDs can't be probed for existence. Admins bypass ownership so moderation tools need no second code path. Set `permissions: { get: "public" }` for avatars and other world-readable assets; the route switches to `Cache-Control: public` accordingly.
+
+Ordering is deliberate: on upload the row commits **before** the bytes are written, and on delete the row is removed **before** the bytes. A failure leaves at worst a retryable orphaned blob, never a database row pointing at bytes that aren't there.
+
+`attach` / `attachedTo` use the pivot tables from `schema().files({ attachTo })`. Attaching to a table that wasn't listed there is a `400` naming the fix.
+
+### `OuterStorage`
+
+Three methods, deliberately tiny so core never depends on unstorage, S3, or a filesystem:
+
+```ts
+type OuterStorage = {
+  get(key: string): Promise<Uint8Array | null>;
+  set(key: string, bytes: Uint8Array): Promise<void>;
+  delete(key: string): Promise<void>;
+};
+```
+
+Three adapters ship with the package:
+
+- `fromUnstorage(storage)` — any [unstorage](https://unstorage.unjs.io) instance, including Nitro's `useStorage()`. Moving from `fs-lite` to S3/R2 in production is a driver change in your Nitro config; no application code moves.
+- `fromS3(client, commands, bucket)` — `@aws-sdk/client-s3` or an R2 binding.
+- `memoryStorage()` — a `Map`, for tests.
+
+Uploads are buffered in memory, so `maxBytes` is a real ceiling. For large media, issue presigned URLs and upload directly to the bucket instead of through the Outer process.
 
 ---
 
@@ -371,8 +461,23 @@ type OuterRpcContext<TDB> = {
   headers: Headers;
   auth?: OuterAuth; // Better Auth instance; undefined if .auth() was not called
   db: OuterDB<TDB>; // Kysely<TDB> + .query (sola)
+  user: SessionUser | null; // resolved once per request; null when signed out
+  session: UserSession | null;
+  storage?: OuterStorage; // the object store passed to new Outer({ storage })
 };
 ```
+
+### `context.user` / `context.session`
+
+When `.auth()` is called, Outer resolves the session **once per request** and shares it with every procedure, raw route, and permission check. No `getSession` middleware needed:
+
+```ts
+.procedure("user.me", (base) => base.handler(({ context }) => context.user))
+```
+
+Both are `null` for anonymous callers, and always `null` when `.auth()` was never called. After `.auth()` the types narrow from optional to `SessionUser | null` / `UserSession | null`, so `context.user` no longer needs a `?.`. Because the lookup is shared, a request that touches auth costs exactly one session query no matter how many procedures or checks read it.
+
+The session `user` only carries plugin fields (like `role`) when the corresponding Better Auth plugin is registered — add `admin()` to `.auth({ plugins })` if you use `"admin"` permissions.
 
 ### `context.db`
 
@@ -466,6 +571,38 @@ schema("1.0.0")
 ```
 
 The tables are typed like hand-written ones (exported as `AuthTables`), so `context.db.query.user` etc. stay fully typed. Pairs with the Better Auth `admin()` plugin and `.admin()` on the `Outer` chain, which both expect these fields.
+
+### `.files(options?)` (file tables)
+
+Registers a `file` metadata table for blobs held in an object store — the bytes stay in unstorage/S3/R2, only the pointer and ownership live in Postgres. The counterpart to `.auth()` for uploads.
+
+```ts
+const v1_1 = schema("1.1.0")
+  .auth()
+  .table("post", (t) => ({ id: t.text().primaryKey(), title: t.text() }))
+  .files({ attachTo: ["post"] })
+  .build();
+```
+
+`file` columns: `id` (PK), `key` (unique — the storage key the bytes live under), `name`, `type` (MIME), `size` (integer), `userId` (nullable, references `user`), plus `timestamps(t)`. The `key` uniqueness constraint means a blob can never be double-registered.
+
+**`owner`** (default `true`) adds `file.userId` and the `user hasMany file` / `file belongsTo user` relations — so it requires `.auth()`. Pass `owner: false` for files with no per-user owner; the column and both relations are omitted, and the type drops `userId` too.
+
+**`attachTo`** links files to existing tables. Each name `x` gets a pivot table `x_file`:
+
+| Column     | Purpose                                                                                       |
+| ---------- | --------------------------------------------------------------------------------------------- |
+| `id`       | PK                                                                                            |
+| `fileId`   | references `file.id`                                                                          |
+| `entityId` | references `x.id`                                                                             |
+| `role`     | nullable label, so one table can carry several kinds of attachment (`"avatar"`, `"cover"`, …) |
+| `position` | integer, default `0` — sort key for ordered galleries                                         |
+
+plus a `manyToMany` relation in both directions, so `context.db.query` traverses `post → file` and `file → post`. `attachTo` only accepts tables already declared on the builder; unknown names are a type error.
+
+The tables are typed like hand-written ones (exported as `FileTables`), and both foreign keys are enforced at the database level.
+
+Outer deliberately stops at the schema: it does not read, write, or serve the bytes. See "File uploads" for the procedure and route side.
 
 ### Relation kinds
 

@@ -54,18 +54,24 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.4",
+    "@electric-sql/pglite-pgvector": "0.0.5",
     "@orpc/openapi": "2.0.0-beta.15",
     "@orpc/zod": "2.0.0-beta.15",
-    "srvx": "^0.11.21"
+    "srvx": "^0.11.21",
+    "unstorage": "^1.17.5"
   },
   "peerDependencies": {
     "@electric-sql/pglite": "0.5.4",
+    "@electric-sql/pglite-pgvector": "0.0.5",
     "@orpc/openapi": "2.0.0-beta.15",
     "@orpc/zod": "2.0.0-beta.15",
     "h3": "^2.0.1-rc.22"
   },
   "peerDependenciesMeta": {
     "@electric-sql/pglite": {
+      "optional": true
+    },
+    "@electric-sql/pglite-pgvector": {
       "optional": true
     },
     "@orpc/openapi": {

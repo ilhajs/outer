@@ -16,18 +16,26 @@ import { H3, H3Event, HTTPMethod } from "h3";
 import { Dialect, Kysely } from "kysely";
 
 import { AdminConfig, AdminRouter, buildAdminProcedures } from "./admin";
+import { buildFileProcedures, buildFileRoute, FilesConfig, FilesRouter } from "./files";
 import { createMigrator, DialectKind } from "./migrator";
 import {
   actionsRequiringAuth,
   buildResourceProcedures,
+  hasRole,
   ResourceOptions,
   ResourceProcedures,
 } from "./resource";
 import { schema, timestamps, SchemaResult, InferDB, TablesDef, ColumnDef } from "./schema";
 import { createSola, Sola } from "./sola";
+import { fromUnstorage, fromS3, memoryStorage, OuterStorage } from "./storage";
 
 export { schema, timestamps };
-export type { AuthTables } from "./schema";
+export { fromUnstorage, fromS3, memoryStorage };
+export type { OuterStorage } from "./storage";
+export type { FilesConfig, FilesRouter, FilePermission, FileRecord } from "./files";
+/** Throw from a handler to return a specific HTTP status instead of a 500. */
+export { ORPCError };
+export type { AuthTables, FileTables, FilesOptions } from "./schema";
 export type { ResourceOptions, DialectKind };
 export type {
   AdminConfig,
@@ -48,10 +56,30 @@ type OuterDB<TDB> = Kysely<TDB> & {
   transact<R>(fn: (trx: OuterDB<TDB>) => Promise<R>): Promise<R>;
 };
 
+/** The signed-in user, as Better Auth returns it (plus whatever plugins add). */
+export type SessionUser = { id: string; email: string; role?: string } & Record<string, any>;
+export type UserSession = { id: string; userId: string; expiresAt: Date } & Record<string, any>;
+
 export type OuterRpcContext<TDB = any> = {
   headers: Headers;
   db: OuterDB<TDB>;
   auth?: OuterAuth;
+  /**
+   * Resolved once per request when `.auth()` is enabled, `null` when there's no
+   * session (and always `null` without `.auth()`). Widened to non-null-typed
+   * access after `.auth()` — see `AuthedContext`.
+   */
+  user?: SessionUser | null;
+  session?: UserSession | null;
+  /** The object store passed as `new Outer({ storage })`, if any. */
+  storage?: OuterStorage;
+};
+
+/** Context additions `.auth()` guarantees: `auth` is present and `user`/`session` are always resolved (possibly to `null`). */
+type AuthedContext = {
+  auth: OuterAuth;
+  user: SessionUser | null;
+  session: UserSession | null;
 };
 
 /** Extracts the oRPC router type from an `Outer` or `BuiltOuter` instance. */
@@ -76,6 +104,52 @@ type MergeRouters<A, B> = {
       ? A[K]
       : never;
 };
+
+/**
+ * Declarative access control for `.procedure()`, using the same vocabulary as
+ * `.resource()`. `"owner"` is deliberately absent — there's no row to own.
+ */
+export type ProcedurePermission<TContext> =
+  | "public"
+  | "authenticated"
+  | "admin"
+  | ((args: { context: TContext }) => boolean | Promise<boolean>);
+
+export type ProcedureOptions<TContext> = {
+  /** Defaults to `"public"` — no check, matching procedures without options. */
+  permission?: ProcedurePermission<TContext>;
+  /** Roles accepted by `"admin"`. Defaults to `["admin"]`. */
+  roles?: string[];
+};
+
+/**
+ * oRPC middleware enforcing a procedure permission. Reads the `user` that
+ * `.auth()` already resolved for this request rather than re-querying it.
+ */
+function procedurePermission(
+  permission: Exclude<ProcedurePermission<any>, "public">,
+  resources: { auth: OuterAuth | undefined },
+  roles: string[] = ["admin"],
+) {
+  return async ({ context, next }: any) => {
+    if (typeof permission === "function") {
+      if (!(await permission({ context }))) {
+        throw new ORPCError("FORBIDDEN", { message: "Permission denied" });
+      }
+      return next();
+    }
+    if (!resources.auth) {
+      throw new Error(
+        "This procedure permission requires auth — call `.auth()` on the Outer instance before `.build()`",
+      );
+    }
+    if (!context.user) throw new ORPCError("UNAUTHORIZED", { message: "You must be signed in" });
+    if (permission === "admin" && !hasRole(context.user, roles)) {
+      throw new ORPCError("FORBIDDEN", { message: "Admin access required" });
+    }
+    return next();
+  };
+}
 
 /** Extracts the `ownerColumn` literal from resource options so create inputs can omit it (it's auto-filled from the session). */
 type OwnerColumnOf<TOptions> = TOptions extends { ownerColumn: infer O extends string } ? O : never;
@@ -112,6 +186,12 @@ export type OuterParams = {
    * non-browser clients are unaffected.
    */
   cors?: CorsConfig;
+  /**
+   * Object store for file bytes, surfaced as `context.storage` and used by
+   * `.files()`. Wrap unstorage/Nitro's `useStorage()` with `fromUnstorage()`,
+   * an S3 client with `fromS3()`, or pass any `OuterStorage` implementation.
+   */
+  storage?: OuterStorage;
 };
 
 type OuterRoute<TContext> = {
@@ -133,6 +213,9 @@ type OuterResources = {
   cors: CorsConfig | undefined;
   /** Set by `.admin()` — the `_admin.*` procedures are built at `.build()` so they see the final schema and migrator. */
   admin: AdminConfig | undefined;
+  /** Set by `.files()` — the `file.*` procedures are built at `.build()` so they see the final schema. */
+  files: FilesConfig | undefined;
+  storage: OuterStorage | undefined;
 };
 
 export type OpenApiConfig = {
@@ -228,7 +311,7 @@ export class Outer<
       this.pendingRouter = _router ?? ({} as TRouter);
       this.schemas = _schemas ?? [];
     } else {
-      const { db: dbConfig, baseUrl, cors } = params as OuterParams;
+      const { db: dbConfig, baseUrl, cors, storage } = params as OuterParams;
       const { dialect, kind: dialectKind } = dbConfig;
       const db = new Kysely<any>({ dialect });
       this.resources = {
@@ -242,6 +325,8 @@ export class Outer<
         authRequiredBy: [],
         cors,
         admin: undefined,
+        files: undefined,
+        storage,
       };
       this.pendingBase = os.$context<OuterRpcContext>() as unknown as Builder<
         TContext & object,
@@ -279,8 +364,13 @@ export class Outer<
     >;
   }
 
-  /** Enables Better Auth and mounts `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain. Narrows `context.auth` to non-null. */
-  auth(config: AuthConfig): Outer<TContext & { auth: OuterAuth }, TDB, TRouter, TTables> {
+  /**
+   * Enables Better Auth and mounts `/api/auth/**`. Must be called before
+   * `.build()`. Can appear anywhere in the chain. Narrows `context.auth` to
+   * non-null and adds `context.user` / `context.session`, resolved once per
+   * request — no `getSession` middleware needed.
+   */
+  auth(config: AuthConfig): Outer<TContext & AuthedContext, TDB, TRouter, TTables> {
     const corsOrigins = this.resources.cors?.origins ?? [];
     const existingTrustedOrigins = Array.isArray(config.trustedOrigins)
       ? config.trustedOrigins
@@ -293,11 +383,11 @@ export class Outer<
       }),
       database: { type: this.resources.dialectKind, dialect: this.resources.dialect },
     });
-    return new Outer<TContext & { auth: OuterAuth }, TDB, TRouter, TTables>(
+    return new Outer<TContext & AuthedContext, TDB, TRouter, TTables>(
       { ...(this.name && { name: this.name }) },
       this.resources,
       this.pendingBase as unknown as Builder<
-        (TContext & { auth: OuterAuth }) & object,
+        (TContext & AuthedContext) & object,
         Record<never, never>
       >,
       this.pendingRouter,
@@ -335,11 +425,49 @@ export class Outer<
     );
   }
 
+  /**
+   * Registers the `file.*` procedures (`upload`, `list`, `get`, `delete`,
+   * `attach`, `detach`) plus a `GET /files/:id` route that serves the bytes.
+   * Requires a `file` table from `schema().files()` and an `OuterStorage` —
+   * either `new Outer({ storage })` or `.files({ storage })`.
+   *
+   * Permissions default to upload/list `"authenticated"` and get/delete
+   * `"owner"`, so files are private to whoever uploaded them.
+   */
+  files(
+    config: FilesConfig = {},
+  ): Outer<TContext, TDB, MergeRouters<TRouter, { file: FilesRouter }>, TTables> {
+    this.resources.files = config;
+    const permissions = config.permissions ?? {};
+    for (const [action, permission] of Object.entries({
+      upload: permissions.upload ?? "authenticated",
+      list: permissions.list ?? "authenticated",
+      get: permissions.get ?? "owner",
+      delete: permissions.delete ?? "owner",
+    })) {
+      if (permission !== "public") this.resources.authRequiredBy.push(`file.${action}`);
+    }
+    return this as unknown as Outer<
+      TContext,
+      TDB,
+      MergeRouters<TRouter, { file: FilesRouter }>,
+      TTables
+    >;
+  }
+
   procedure<TName extends string, TProc extends AnyProcedure>(
     name: TName,
     cb: (base: Builder<TContext & object, Record<never, never>>) => TProc,
+    options?: ProcedureOptions<TContext>,
   ): Outer<TContext, TDB, MergeRouters<TRouter, NestRoute<TName, TProc>>, TTables> {
-    this.addToRouter(name, cb(this.pendingBase));
+    let base = this.pendingBase;
+    if (options?.permission && options.permission !== "public") {
+      this.resources.authRequiredBy.push(name);
+      base = base.use(
+        procedurePermission(options.permission, this.resources, options.roles) as any,
+      ) as any;
+    }
+    this.addToRouter(name, cb(base));
     return this as unknown as Outer<
       TContext,
       TDB,
@@ -408,12 +536,28 @@ export class Outer<
   }
 
   build(): BuiltOuter<TRouter, TDB> {
-    const { db, auth, authRequiredBy, admin, cors } = this.resources;
+    const { db, auth, authRequiredBy, admin, cors, files } = this.resources;
 
     if (authRequiredBy.length > 0 && !auth) {
       throw new Error(
         `The following resource actions require a signed-in session but \`.auth()\` was never called: ${authRequiredBy.join(", ")}. Call \`.auth({ secret, ... })\` before \`.build()\`.`,
       );
+    }
+    if (files) {
+      const tables = this.schemas.at(-1)?.tables ?? {};
+      if (!tables["file"]) {
+        throw new Error(
+          '`.files()` requires a `file` table — add `.files()` to your schema: `schema("1.0.0").auth().files()`.',
+        );
+      }
+      if (!(files.storage ?? this.resources.storage)) {
+        throw new Error(
+          '`.files()` needs somewhere to put the bytes. Pass `new Outer({ storage })` or `.files({ storage })` — e.g. `fromUnstorage(useStorage("fs"))`.',
+        );
+      }
+      if (files.path && !files.path.includes(":id")) {
+        throw new Error(`\`.files({ path })\` must contain ":id" — got "${files.path}".`);
+      }
     }
     if (admin && !auth) {
       throw new Error(
@@ -441,6 +585,29 @@ export class Outer<
       }
     }
 
+    if (files) {
+      const latest = this.schemas.at(-1);
+      const fileTables = latest?.tables ?? {};
+      const fileStorage = (files.storage ?? this.resources.storage)!;
+      const fileProcedures = buildFileProcedures({
+        base: this.pendingBase as any,
+        storage: fileStorage,
+        config: files,
+        tables: fileTables,
+        owned: "userId" in ((fileTables["file"] ?? {}) as Record<string, unknown>),
+        kind: this.resources.dialectKind,
+      });
+      for (const [procName, proc] of Object.entries(fileProcedures)) {
+        this.addToRouter(`file.${procName}`, proc);
+      }
+      // Registered ahead of /rpc/** like any other .route(), so it wins on overlap
+      this.resources.routes.push({
+        method: "get",
+        path: files.path ?? "/files/:id",
+        handler: buildFileRoute({ storage: fileStorage, config: files }) as any,
+      });
+    }
+
     const router: Router<OuterRpcContext<TDB>> = this.pendingRouter as unknown as Router<
       OuterRpcContext<TDB>
     >;
@@ -457,6 +624,30 @@ export class Outer<
           k.transaction().execute((trx) => fn(wrapDb(trx))),
       }) as OuterDB<TDB>;
     const typedDb = wrapDb(db);
+
+    const storage = this.resources.storage;
+
+    /**
+     * Per-request context. When `.auth()` is enabled the session is resolved
+     * once here and shared by every procedure, route, and permission check, so
+     * apps no longer need a `getSession` middleware and a request never pays
+     * for more than one session lookup.
+     */
+    const buildContext = async (event: H3Event): Promise<OuterRpcContext<TDB>> => {
+      const base = {
+        headers: event.req.headers,
+        db: typedDb,
+        ...(storage && { storage }),
+      } as OuterRpcContext<TDB>;
+      if (!auth) return { ...base, user: null, session: null };
+      const resolved = await auth.api.getSession({ headers: event.req.headers }).catch(() => null);
+      return {
+        ...base,
+        auth,
+        user: (resolved?.user as SessionUser | undefined) ?? null,
+        session: (resolved?.session as UserSession | undefined) ?? null,
+      };
+    };
 
     const rpc = new RPCHandler(router, {
       interceptors: [
@@ -556,7 +747,7 @@ export class Outer<
         });
         const { response } = await openapiHandler.handle(event.req, {
           prefix: "/rest",
-          context: { headers: event.req.headers, db: typedDb, ...(auth && { auth }) },
+          context: await buildContext(event),
         });
         return response;
       });
@@ -567,15 +758,15 @@ export class Outer<
     }
 
     for (const { method, path, handler } of this.resources.routes) {
-      server = server.on(method, path, (event) =>
-        handler(event, { headers: event.req.headers, db: typedDb, ...(auth && { auth }) } as any),
+      server = server.on(method, path, async (event) =>
+        handler(event, (await buildContext(event)) as any),
       );
     }
 
     server = server.all("/rpc/**", async (event) => {
       const { response } = await rpc.handle(event.req, {
         prefix: "/rpc",
-        context: { headers: event.req.headers, db: typedDb, ...(auth && { auth }) },
+        context: await buildContext(event),
       });
       return response;
     });

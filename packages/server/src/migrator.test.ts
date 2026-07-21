@@ -236,3 +236,77 @@ describe("dialect kinds", () => {
     expect(createSql).toContain("text");
   });
 });
+
+describe("schema().files()", () => {
+  test("creates the file table and links it to the owner", async () => {
+    const db = makeDb();
+    const s = schema("1.0.0").auth().files().build();
+
+    const { error } = await createMigrator({ db, schemas: [s] }).migrateToLatest();
+    expect(error).toBeUndefined();
+    expect(await tableExists(db, "file")).toBe(true);
+    for (const col of ["id", "key", "name", "type", "size", "userId", "createdAt"]) {
+      expect(await columnExists(db, "file", col)).toBe(true);
+    }
+    expect(await columnType(db, "file", "size")).toBe("int4");
+    expect(s.relations).toContainEqual(
+      expect.objectContaining({ kind: "belongsTo", fromTable: "file", toTable: "user" }),
+    );
+  });
+
+  test("owner: false drops the userId column, so no .auth() is needed", async () => {
+    const db = makeDb();
+    const s = schema("1.0.0").files({ owner: false }).build();
+
+    const { error } = await createMigrator({ db, schemas: [s] }).migrateToLatest();
+    expect(error).toBeUndefined();
+    expect(await columnExists(db, "file", "userId")).toBe(false);
+    expect(s.relations).toHaveLength(0);
+  });
+
+  test("attachTo creates a pivot table and manyToMany relations both ways", async () => {
+    const db = makeDb();
+    const s = schema("1.0.0")
+      .auth()
+      .table("post", (t) => ({ id: t.text().primaryKey(), title: t.text() }))
+      .files({ attachTo: ["post"] })
+      .build();
+
+    const { error } = await createMigrator({ db, schemas: [s] }).migrateToLatest();
+    expect(error).toBeUndefined();
+    expect(await tableExists(db, "post_file")).toBe(true);
+    for (const col of ["fileId", "entityId", "role", "position"]) {
+      expect(await columnExists(db, "post_file", col)).toBe(true);
+    }
+    expect(s.relations).toContainEqual(
+      expect.objectContaining({
+        kind: "manyToMany",
+        fromTable: "post",
+        toTable: "file",
+        pivotTable: "post_file",
+        pivotFromCol: "entityId",
+        pivotToCol: "fileId",
+      }),
+    );
+    expect(s.relations).toContainEqual(
+      expect.objectContaining({ kind: "manyToMany", fromTable: "file", toTable: "post" }),
+    );
+  });
+
+  test("the pivot's foreign keys are enforced", async () => {
+    const db = makeDb();
+    const s = schema("1.0.0")
+      .auth()
+      .table("post", (t) => ({ id: t.text().primaryKey(), title: t.text() }))
+      .files({ attachTo: ["post"] })
+      .build();
+    await createMigrator({ db, schemas: [s] }).migrateToLatest();
+
+    await expect(
+      db
+        .insertInto("post_file")
+        .values({ id: "a", fileId: "missing", entityId: "missing" })
+        .execute(),
+    ).rejects.toThrow();
+  });
+});

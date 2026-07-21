@@ -2,6 +2,7 @@ import { test, describe, expect } from "bun:test";
 
 import { PGlite } from "@electric-sql/pglite";
 import { ORPCError } from "@orpc/client";
+import { admin as betterAuthAdmin } from "better-auth/plugins";
 import { PGliteDialect } from "kysely";
 
 import { Outer, schema } from "./index";
@@ -389,5 +390,202 @@ describe("db: custom dialect", () => {
     );
     expect(created.status).toBe(200);
     expect(((await created.json()) as any).json.title).toBe("hello");
+  });
+});
+
+describe("auth context", () => {
+  const authSchema = schema("1.0.0").auth().build();
+  const SECRET = "test-secret-that-is-long-enough";
+
+  function makeAuthed(build: (o: any) => any) {
+    const app = build(
+      new Outer({ baseUrl: "http://localhost", db: pglite({ dataDir: "memory://" }) })
+        .schema(authSchema)
+        .auth({ secret: SECRET, emailAndPassword: { enabled: true } }),
+    ).build();
+    return app;
+  }
+
+  async function signUp(app: any, email: string) {
+    const res = await app.handle(
+      new Request("http://localhost/api/auth/sign-up/email", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password: "password1234", name: email }),
+      }),
+    );
+    return (res.headers.getSetCookie?.() ?? []).map((c: string) => c.split(";")[0]).join("; ");
+  }
+
+  function call(app: any, name: string, cookie?: string) {
+    return app.handle(
+      new Request(`http://localhost/rpc/${name}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+        body: JSON.stringify({ json: {} }),
+      }),
+    );
+  }
+
+  test("context.user is populated without a getSession middleware", async () => {
+    const app = makeAuthed((o: any) =>
+      o.procedure("me", (base: any) =>
+        base.handler(({ context }: any) => ({
+          email: context.user?.email ?? null,
+          hasSession: context.session != null,
+        })),
+      ),
+    );
+    await app.migrator.migrateToLatest();
+    const cookie = await signUp(app, "ctx@example.com");
+
+    const { json } = await (await call(app, "me", cookie)).json();
+    expect(json.email).toBe("ctx@example.com");
+    expect(json.hasSession).toBe(true);
+  });
+
+  test("context.user is null for anonymous callers", async () => {
+    const app = makeAuthed((o: any) =>
+      o.procedure("me", (base: any) =>
+        base.handler(({ context }: any) => ({ user: context.user, session: context.session })),
+      ),
+    );
+    await app.migrator.migrateToLatest();
+    const { json } = await (await call(app, "me")).json();
+    expect(json.user).toBeNull();
+    expect(json.session).toBeNull();
+  });
+
+  test("the session is resolved once per request, not per procedure", async () => {
+    let lookups = 0;
+    const app = makeAuthed((o: any) =>
+      o
+        .middleware(async ({ context, next }: any) => {
+          if (context.user) lookups++;
+          return next();
+        })
+        .procedure("me", (base: any) => base.handler(({ context }: any) => context.user!.email)),
+    );
+    await app.migrator.migrateToLatest();
+    const cookie = await signUp(app, "once@example.com");
+    await call(app, "me", cookie);
+    expect(lookups).toBe(1);
+  });
+
+  test("raw .route() handlers get the same resolved user", async () => {
+    const app = makeAuthed((o: any) =>
+      o.route("get", "/whoami", (_event: any, context: any) =>
+        Response.json({ email: context.user?.email ?? null }),
+      ),
+    );
+    await app.migrator.migrateToLatest();
+    const cookie = await signUp(app, "route@example.com");
+    const res = await app.handle(new Request("http://localhost/whoami", { headers: { cookie } }));
+    expect((await res.json()).email).toBe("route@example.com");
+  });
+
+  test("context.user is null when .auth() was never called", async () => {
+    const app = new Outer({ db: pglite({ dataDir: "memory://" }) })
+      .schema(s)
+      .procedure("me", (base: any) => base.handler(({ context }: any) => context.user))
+      .build();
+    const { json } = await (await call(app, "me")).json();
+    expect(json).toBeNull();
+  });
+});
+
+describe("procedure permissions", () => {
+  // `role` only reaches the session user when Better Auth's admin plugin is registered
+
+  const authSchema = schema("1.0.0").auth().build();
+  const SECRET = "test-secret-that-is-long-enough";
+
+  function makeApp(permission: any, roles?: string[]) {
+    return new Outer({ baseUrl: "http://localhost", db: pglite({ dataDir: "memory://" }) })
+      .schema(authSchema)
+      .auth({ secret: SECRET, emailAndPassword: { enabled: true }, plugins: [betterAuthAdmin()] })
+      .procedure("secret", (base: any) => base.handler(() => "ok"), {
+        permission,
+        ...(roles && { roles }),
+      })
+      .build();
+  }
+
+  async function signUp(app: any, email: string, role?: string) {
+    const res = await app.handle(
+      new Request("http://localhost/api/auth/sign-up/email", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password: "password1234", name: email }),
+      }),
+    );
+    if (role) await app.db.updateTable("user").set({ role }).where("email", "=", email).execute();
+    return (res.headers.getSetCookie?.() ?? []).map((c: string) => c.split(";")[0]).join("; ");
+  }
+
+  function call(app: any, cookie?: string) {
+    return app.handle(
+      new Request("http://localhost/rpc/secret", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+        body: JSON.stringify({ json: {} }),
+      }),
+    );
+  }
+
+  test("'authenticated' rejects anonymous and allows signed-in callers", async () => {
+    const app = makeApp("authenticated");
+    await app.migrator.migrateToLatest();
+    expect((await call(app)).status).toBe(401);
+    const cookie = await signUp(app, "perm@example.com");
+    expect((await call(app, cookie)).status).toBe(200);
+  });
+
+  test("'admin' rejects a plain user and allows an admin", async () => {
+    const app = makeApp("admin");
+    await app.migrator.migrateToLatest();
+    const user = await signUp(app, "plain@example.com");
+    expect((await call(app, user)).status).toBe(403);
+    const admin = await signUp(app, "boss@example.com", "admin");
+    expect((await call(app, admin)).status).toBe(200);
+  });
+
+  test("custom `roles` is respected", async () => {
+    const app = makeApp("admin", ["staff"]);
+    await app.migrator.migrateToLatest();
+    const staff = await signUp(app, "staff@example.com", "staff");
+    expect((await call(app, staff)).status).toBe(200);
+  });
+
+  test("a function permission receives the context", async () => {
+    const app = new Outer({ baseUrl: "http://localhost", db: pglite({ dataDir: "memory://" }) })
+      .schema(authSchema)
+      .auth({ secret: SECRET, emailAndPassword: { enabled: true }, plugins: [betterAuthAdmin()] })
+      .procedure("secret", (base: any) => base.handler(() => "ok"), {
+        permission: ({ context }: any) => context.user?.email === "allowed@example.com",
+      })
+      .build();
+    await app.migrator.migrateToLatest();
+    const denied = await signUp(app, "denied@example.com");
+    expect((await call(app, denied)).status).toBe(403);
+    const allowed = await signUp(app, "allowed@example.com");
+    expect((await call(app, allowed)).status).toBe(200);
+  });
+
+  test("a permission requiring auth without .auth() throws at build()", () => {
+    expect(() =>
+      new Outer({ db: pglite({ dataDir: "memory://" }) })
+        .schema(s)
+        .procedure("secret", (base: any) => base.handler(() => "ok"), {
+          permission: "authenticated",
+        })
+        .build(),
+    ).toThrow(/require a signed-in session/);
+  });
+
+  test("no permission option leaves the procedure public", async () => {
+    const app = makeApp(undefined);
+    await app.migrator.migrateToLatest();
+    expect((await call(app)).status).toBe(200);
   });
 });

@@ -10,8 +10,10 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.3",
+    "@electric-sql/pglite-pgvector": "0.0.5",
     "@ilha/router": "^0.8.9",
     "@ilha/store": "^0.7.7",
+    "@orpc/client": "2.0.0-beta.15",
     "@orpc/openapi": "2.0.0-beta.15",
     "@outerjs/sdk": "https://pkg.pr.new/ilhajs/outer/@outerjs/sdk@main",
     "@outerjs/server": "https://pkg.pr.new/ilhajs/outer/@outerjs/server@main",

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.3",
+    "@electric-sql/pglite-pgvector": "0.0.5",
     "@orpc/openapi": "2.0.0-beta.15",
     "@orpc/zod": "2.0.0-beta.15",
     "@outerjs/server": "https://pkg.pr.new/ilhajs/outer/@outerjs/server@main",

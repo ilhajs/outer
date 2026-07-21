@@ -1,3 +1,5 @@
+import type { Generated } from "kysely";
+
 // ── Column ─────────────────────────────────────────────────────────────────
 
 export type SQLTypeMap = {
@@ -159,13 +161,25 @@ function makeRelChain(fromTable: string): RelationChain {
 
 export type TablesDef = Record<string, Record<string, ColumnDef>>;
 
-// serial columns are DB-generated and optional in both insert and select contexts
+// serial columns are DB-generated and optional in both insert and select contexts.
+// Columns with a DB-side default are wrapped in Kysely's `Generated<T>`: present on
+// select, optional on insert (so callers needn't pass `createdAt`/`updatedAt`).
 type InferRow<T extends Record<string, ColumnDef>> = {
   [K in keyof T as T[K]["_type"] extends "serial"
     ? never
     : T[K]["_nullable"] extends false
-      ? K
+      ? T[K]["_hasDefault"] extends true
+        ? never
+        : K
       : never]: SQLTypeMap[T[K]["_type"]];
+} & {
+  [K in keyof T as T[K]["_type"] extends "serial"
+    ? never
+    : T[K]["_nullable"] extends false
+      ? T[K]["_hasDefault"] extends true
+        ? K
+        : never
+      : never]: Generated<SQLTypeMap[T[K]["_type"]]>;
 } & {
   [K in keyof T as T[K]["_type"] extends "serial"
     ? K
@@ -249,6 +263,77 @@ function authTableDefs(t: TableBuilder) {
 
 export type AuthTables = ReturnType<typeof authTableDefs>;
 
+// ── File tables ────────────────────────────────────────────────────────────
+
+/**
+ * Metadata for blobs held in an object store (unstorage, S3, R2, …). `key` is the
+ * storage key the bytes live under — Outer never puts the bytes themselves in
+ * Postgres. Registered via `schema().files()`.
+ */
+function fileTableDef(t: TableBuilder, owned: boolean) {
+  return {
+    id: t.text().primaryKey(),
+    /** Storage key the bytes live under — unique so a blob is never double-registered. */
+    key: t.text().unique(),
+    name: t.text(),
+    /** MIME type as reported at upload time. */
+    type: t.text(),
+    size: t.integer(),
+    ...(owned ? { userId: t.text().nullable().references("user", "id") } : {}),
+    ...timestamps(t),
+  };
+}
+
+type FileCols = {
+  id: ColumnDef<"text", false, true, false>;
+  key: ColumnDef<"text", false, false, false>;
+  name: ColumnDef<"text", false, false, false>;
+  type: ColumnDef<"text", false, false, false>;
+  size: ColumnDef<"integer", false, false, false>;
+} & TimestampCols;
+
+type OwnerCol = { userId: ColumnDef<"text", true, false, false> };
+
+/** Pivot row linking one `file` to one row of the attached table. */
+type AttachmentCols = {
+  id: ColumnDef<"text", false, true, false>;
+  fileId: ColumnDef<"text", false, false, false>;
+  entityId: ColumnDef<"text", false, false, false>;
+  /** Free-form label so one table can hold several kinds of attachment ("avatar", "cover", …). */
+  role: ColumnDef<"text", true, false, false>;
+  /** Sort key for ordered galleries. */
+  position: ColumnDef<"integer", false, false, true>;
+} & TimestampCols;
+
+function attachmentTableDef(t: TableBuilder, entityTable: string) {
+  return {
+    id: t.text().primaryKey(),
+    fileId: t.text().references("file", "id"),
+    entityId: t.text().references(entityTable, "id"),
+    role: t.text().nullable(),
+    position: t.integer().default("0"),
+    ...timestamps(t),
+  };
+}
+
+export type FilesOptions<Attach extends string = never> = {
+  /**
+   * Tables to link files to. Each name `x` gets a pivot table `x_file` and a
+   * `manyToMany` relation in both directions, so `context.db.query` can traverse it.
+   */
+  attachTo?: readonly Attach[];
+  /**
+   * Adds `file.userId` referencing `user`. Defaults to `true`; requires `.auth()`.
+   * Set to `false` for files with no per-user owner.
+   */
+  owner?: boolean;
+};
+
+export type FileTables<Attach extends string = never, Owned extends boolean = true> = Record<
+  "file",
+  Owned extends true ? FileCols & OwnerCol : FileCols
+> & { [K in Attach as `${K}_file`]: AttachmentCols };
+
 // ── Builder ────────────────────────────────────────────────────────────────
 
 export type SchemaResult<T extends TablesDef> = {
@@ -267,6 +352,22 @@ type SchemaBuilder<T extends TablesDef> = {
    * columns merge, with yours winning on name collisions.
    */
   auth(): SchemaBuilder<T & AuthTables>;
+
+  /**
+   * Registers a `file` metadata table for blobs kept in an object store — the bytes
+   * stay in unstorage/S3, only the pointer and ownership live in Postgres.
+   *
+   * `attachTo` links files to existing tables: each name `x` adds a pivot table
+   * `x_file` (`fileId`, `entityId`, `role`, `position`) plus `manyToMany` relations
+   * both ways. `role` lets one table carry several kinds of attachment.
+   *
+   * ```ts
+   * schema("1.1.0").auth().table("post", ...).files({ attachTo: ["post"] })
+   * ```
+   */
+  files<Attach extends keyof T & string = never, Owned extends boolean = true>(
+    options?: FilesOptions<Attach> & { owner?: Owned },
+  ): SchemaBuilder<T & FileTables<Attach, Owned>>;
 
   table<Name extends string, Cols extends Record<string, ColumnDef>>(
     name: Name,
@@ -296,6 +397,35 @@ export function schema(version: string): SchemaBuilder<Record<never, never>> {
         makeRelChain("session").belongsTo("user", { from: "userId", to: "id" }),
         makeRelChain("account").belongsTo("user", { from: "userId", to: "id" }),
       );
+      return builder;
+    },
+    files(options) {
+      const owned = options?.owner ?? true;
+      tables["file"] = { ...tables["file"], ...fileTableDef(t, owned) };
+      if (owned) {
+        relations.push(
+          makeRelChain("user").hasMany("file", { from: "id", to: "userId" }),
+          makeRelChain("file").belongsTo("user", { from: "userId", to: "id" }),
+        );
+      }
+      for (const entity of options?.attachTo ?? []) {
+        const pivot = `${entity}_file`;
+        tables[pivot] = { ...tables[pivot], ...attachmentTableDef(t, entity) };
+        relations.push(
+          makeRelChain(entity).manyToMany("file", pivot, {
+            from: "id",
+            to: "id",
+            pivotFrom: "entityId",
+            pivotTo: "fileId",
+          }),
+          makeRelChain("file").manyToMany(entity, pivot, {
+            from: "id",
+            to: "id",
+            pivotFrom: "fileId",
+            pivotTo: "entityId",
+          }),
+        );
+      }
       return builder;
     },
     // re-declaring a table merges columns (later wins), so auth tables can be extended
