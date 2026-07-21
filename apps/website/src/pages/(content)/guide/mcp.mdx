@@ -1,0 +1,79 @@
+---
+title: MCP
+description: Serve your procedures as MCP tools with .mcp(), authenticated with API keys.
+order: 7
+tags: [mcp, ai, agents, tools, api-keys]
+---
+
+# MCP
+
+`.mcp()` serves the same router you already have as an [MCP](https://modelcontextprotocol.io) server over the Streamable HTTP transport, so Claude, IDEs, and agents can call your procedures as tools. One router definition, four surfaces: RPC, REST, OpenAPI, and MCP.
+
+It needs two optional peer dependencies:
+
+```bash
+bun add orpc-mcp @orpc/zod
+```
+
+## Exposing a procedure
+
+Exposure is **opt-in per procedure**. Tag one with the `mcp` meta helper and it appears; leave it untagged and MCP clients never see it:
+
+```ts
+import { mcp, Outer } from "@outerjs/server";
+import { z } from "zod";
+
+new Outer({ db: pglite() })
+  .schema(v1_0)
+  .procedure(
+    "post.search",
+    (base) =>
+      base
+        .meta(mcp.tool({ description: "Search posts by title" }))
+        .input(z.object({ q: z.string() }))
+        .handler(({ input, context }) =>
+          context.db.query.post.findMany({ where: { title: { contains: input.q } } }),
+        ),
+    { permission: "authenticated" },
+  )
+  .mcp()
+  .build();
+```
+
+`mcp.tool()`, `mcp.resource()`, and `mcp.prompt()` map a procedure to the corresponding MCP capability. The input schema becomes the tool's JSON Schema, so the description and argument names an agent sees come straight from the procedure.
+
+Because it is opt-in, the reserved `_admin` namespace — which can read, update, and delete any row in any table — and every `file.*` route stay invisible whether or not you remember to exclude them.
+
+**Dots aren't legal in MCP tool names**, so a dot-namespaced procedure is exposed with underscores: `post.search` is listed and called as `post_search`.
+
+## Authentication
+
+The MCP endpoint resolves a session exactly the way `/rpc/**` does, so permissions, `context.user`, and `ownerColumn` behave identically — an untagged permission is not a loophole, and `{ permission: "authenticated" }` on a tool means an anonymous MCP client gets rejected.
+
+Browsers can authenticate with a cookie. Headless clients use an [API key](/guide/auth#api-keys):
+
+```
+POST https://your-app.com/mcp
+Authorization: Bearer <key>
+```
+
+The key authenticates as the user it belongs to, so an agent has exactly that user's permissions — no more.
+
+Clients that only support the MCP OAuth discovery flow, rather than a configurable header, need Better Auth's separate `mcp` plugin; that isn't wired into `.mcp()` today.
+
+## Options
+
+```ts
+.mcp({ path: "/mcp", instructions: "Search and summarise posts." })
+```
+
+| Field                             | Default                                 | Description                                                         |
+| --------------------------------- | --------------------------------------- | ------------------------------------------------------------------- |
+| `enabled`                         | `true` when called                      | Set `false` to gate it behind an env flag without removing the call |
+| `path`                            | `/mcp`                                  | Where the endpoint is mounted                                       |
+| `serverInfo`                      | instance `name` + latest schema version | Identity reported to clients during `initialize`                    |
+| `instructions`                    | —                                       | Free-form guidance returned during `initialize`                     |
+| `enableDnsRebindingProtection`    | `false`                                 | Reject `Origin`/`Host` values outside the allowlists                |
+| `allowedOrigins` / `allowedHosts` | —                                       | Exact-match allowlists used when protection is on                   |
+
+Turn on `enableDnsRebindingProtection` when the endpoint is reachable from a browser: a missing `Origin` header always passes (non-browser clients), but a present one outside the allowlist is rejected with `403`.

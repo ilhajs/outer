@@ -38,7 +38,13 @@ export { liveIterable } from "./live";
 export type { FilesConfig, FilesRouter, FilePermission, FileRecord } from "./files";
 /** Throw from a handler to return a specific HTTP status instead of a 500. */
 export { ORPCError };
-export type { AuthOptions, AuthTables, FileTables, FilesOptions } from "./schema";
+export type { ApiKeyTable, AuthOptions, AuthTables, FileTables, FilesOptions } from "./schema";
+/**
+ * Marks a procedure for MCP exposure — `mcp.tool()`, `mcp.resource()`,
+ * `mcp.prompt()`. Re-exported from `orpc-mcp` so `.mcp()` users need only one
+ * import. Requires `orpc-mcp` to be installed.
+ */
+export { mcp } from "orpc-mcp";
 export { parseSet, toSet } from "./schema";
 export type { ResourceOptions, DialectKind };
 export type {
@@ -259,7 +265,10 @@ export type OuterParams = {
    * `ORPCError` response. Route it to your logger or Sentry; without it,
    * Outer writes to `console.error`. Pass `() => {}` to silence it.
    */
-  onError?: (error: unknown, info: { request: Request; source: "rpc" | "rest" | "route" }) => void;
+  onError?: (
+    error: unknown,
+    info: { request: Request; source: "rpc" | "rest" | "route" | "mcp" },
+  ) => void;
   /**
    * Mounts `GET /health`, returning `{ status, database }` with a `select 1`
    * probe — for Coolify/Docker/uptime checks. Enabled by default; pass `false`
@@ -291,6 +300,8 @@ type OuterResources = {
   health: OuterParams["health"];
   rateLimit: RateLimitConfig | undefined;
   openapiEnabled: boolean;
+  /** Set by `.mcp()`; the MCP endpoint is mounted at `.build()`. */
+  mcp: McpConfig | undefined;
   routes: OuterRoute<any>[];
   /** `"resource.action"` entries whose permission requires a session — checked against `auth` at `.build()`. */
   authRequiredBy: string[];
@@ -300,6 +311,21 @@ type OuterResources = {
   /** Set by `.files()` — the `file.*` procedures are built at `.build()` so they see the final schema. */
   files: FilesConfig | undefined;
   storage: OuterStorage | undefined;
+};
+
+export type McpConfig = {
+  /** Mounts the MCP endpoint. Defaults to `true` when `.mcp()` is called. */
+  enabled?: boolean;
+  /** Where to serve it. Defaults to `/mcp`. */
+  path?: string;
+  /** Server identity reported to clients during `initialize`. Defaults to the Outer instance name. */
+  serverInfo?: { name?: string; version?: string };
+  /** Free-form guidance returned to the client during `initialize`. */
+  instructions?: string;
+  /** Reject browser `Origin`/`Host` values outside the allowlists (DNS-rebinding protection). */
+  enableDnsRebindingProtection?: boolean;
+  allowedOrigins?: string[];
+  allowedHosts?: string[];
 };
 
 export type OpenApiConfig = {
@@ -333,6 +359,28 @@ async function loadOpenApiModules() {
   } catch (cause) {
     throw new Error(
       "`.openapi()` requires the optional peer dependencies `@orpc/openapi` and `@orpc/zod`. Install them with: bun add @orpc/openapi @orpc/zod",
+      { cause },
+    );
+  }
+}
+
+/**
+ * `orpc-mcp` and `@orpc/zod` are optional peer dependencies — only needed when
+ * `.mcp()` is enabled, so they're loaded lazily on the first request.
+ */
+async function loadMcpModules() {
+  try {
+    const [mcpFetch, orpcZod] = await Promise.all([
+      import("orpc-mcp/fetch" as string),
+      import("@orpc/zod"),
+    ]);
+    return {
+      MCPHandler: (mcpFetch as { MCPHandler: any }).MCPHandler,
+      ZodToJsonSchemaConverter: orpcZod.ZodToJsonSchemaConverter,
+    };
+  } catch (cause) {
+    throw new Error(
+      "`.mcp()` requires the optional peer dependencies `orpc-mcp` and `@orpc/zod`. Install them with: bun add orpc-mcp @orpc/zod",
       { cause },
     );
   }
@@ -414,6 +462,7 @@ export class Outer<
         baseUrl,
         auth: undefined,
         openapiEnabled: false,
+        mcp: undefined,
         routes: [],
         authRequiredBy: [],
         cors,
@@ -431,6 +480,35 @@ export class Outer<
       this.pendingRouter = {} as TRouter;
       this.schemas = [];
     }
+  }
+
+  /**
+   * Serves the router as an MCP server over the Streamable HTTP transport, so
+   * Claude, IDEs, and agents can call your procedures as tools.
+   *
+   * **Exposure is opt-in per procedure** — only procedures tagged with the
+   * `mcp` meta helper appear. Everything else, including the whole `_admin`
+   * namespace and `file.*`, stays invisible:
+   *
+   * ```ts
+   * import { mcp } from "@outerjs/server";
+   *
+   * .procedure("post.search", (base) =>
+   *   base.meta(mcp.tool({ description: "Search posts by title" }))
+   *     .input(z.object({ q: z.string() }))
+   *     .handler(({ input, context }) => ...),
+   * )
+   * ```
+   *
+   * Permissions are unchanged: the endpoint resolves a session the same way
+   * `/rpc/**` does, so a caller must authenticate — a cookie for browsers, or
+   * an API key (`@better-auth/api-key`) for headless clients.
+   *
+   * Requires the optional peers `orpc-mcp` and `@orpc/zod`.
+   */
+  mcp(config?: McpConfig): this {
+    this.resources.mcp = { enabled: config?.enabled ?? true, ...config };
+    return this;
   }
 
   /** Toggles `GET /openapi.json`. Not mounted unless this is called; calling it with no args enables it. Must be called before `.build()`. Can appear anywhere in the chain. */
@@ -750,7 +828,7 @@ export class Outer<
     // ORPCError is an intentional application response (400/401/403/404/409, etc.) —
     // only surface genuinely unexpected failures, to avoid noisy/sensitive logs.
     const reportError =
-      (source: "rpc" | "rest" | "route") =>
+      (source: "rpc" | "rest" | "route" | "mcp") =>
       (error: unknown, request?: Request): void => {
         if (error instanceof ORPCError) return;
         const hook = this.resources.onError;
@@ -911,6 +989,37 @@ export class Outer<
           context: await buildContext(event),
         });
         return response;
+      });
+    }
+
+    const mcpConfig = this.resources.mcp;
+    if (mcpConfig?.enabled) {
+      const mcpPath = mcpConfig.path ?? "/mcp";
+      let mcpModules: ReturnType<typeof loadMcpModules> | undefined;
+      let mcpHandler: { handle: (req: Request, opts: any) => Promise<{ response?: Response }> };
+      server = server.all(mcpPath, async (event) => {
+        if (!mcpHandler) {
+          const { MCPHandler, ZodToJsonSchemaConverter } = await (mcpModules ??= loadMcpModules());
+          mcpHandler = new MCPHandler(router, {
+            converters: [new ZodToJsonSchemaConverter()],
+            serverInfo: {
+              name: mcpConfig.serverInfo?.name ?? this.name ?? "Outer",
+              version: mcpConfig.serverInfo?.version ?? latestSchema?.version ?? "0.0.0",
+            },
+            ...(mcpConfig.instructions && { instructions: mcpConfig.instructions }),
+            ...(mcpConfig.enableDnsRebindingProtection && {
+              enableDnsRebindingProtection: true,
+              allowedOrigins: mcpConfig.allowedOrigins,
+              allowedHosts: mcpConfig.allowedHosts,
+            }),
+            interceptors: [onError((error) => reportError("mcp")(error))],
+          });
+        }
+        const { response } = await mcpHandler.handle(event.req, {
+          prefix: mcpPath as `/${string}`,
+          context: await buildContext(event),
+        });
+        return response ?? new Response("Not found", { status: 404 });
       });
     }
 

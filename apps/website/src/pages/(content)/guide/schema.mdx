@@ -48,10 +48,19 @@ Re-declaring a table merges columns (later definition wins on name collisions), 
 ```ts
 schema("1.0.0")
   .auth()
-  .table("user", (t) => ({ plan: t.text().default("'free'") })); // adds to the auth user table
+  .table("user", (t) => ({ plan: t.text().default("free") })); // adds to the auth user table
 ```
 
 The tables are typed like hand-written ones (exported as `AuthTables`), so `context.db.query.user` etc. stay fully typed.
+
+`user.role` is left unconstrained by default, because Better Auth's admin plugin allows custom role names and comma-separated lists (`"support,admin"`). Pass `roles` to declare the set your app recognises — a user may still hold several at once:
+
+```ts
+schema("1.0.0").auth({ roles: ["user", "admin", "support"] });
+// "admin,support" ✓   "admin,root" ✗ rejected
+```
+
+`.auth({ apiKeys: true })` additionally declares the `apikey` table needed by [API keys](/guide/auth#api-keys).
 
 ### File tables
 
@@ -73,13 +82,64 @@ Registering the tables is all the schema does — serving the bytes is [`.files(
 
 ### Column types
 
-`text` · `varchar` · `integer` · `serial` · `boolean` · `timestamp` · `jsonb` · `uuid`
+`text` · `varchar` · `integer` · `serial` · `bigint` · `decimal` · `real` · `boolean` · `timestamp` · `date` · `jsonb` · `uuid` · `bytes`
 
 `timestamp` maps to `timestamptz` in the generated DDL.
 
+| Column    | Postgres           | SQLite    | TS type      | Notes                                                                                    |
+| --------- | ------------------ | --------- | ------------ | ---------------------------------------------------------------------------------------- |
+| `bigint`  | `bigint`           | `integer` | `string`     | 64-bit — a JS `number` loses precision past 2^53, so it is read and written as a string  |
+| `decimal` | `numeric`          | `text`    | `string`     | Exact. SQLite maps to `text`, not `NUMERIC`, whose float affinity would defeat the point |
+| `real`    | `double precision` | `real`    | `number`     | Approximate — don't store money in it                                                    |
+| `date`    | `date`             | `text`    | `Date`       | Calendar date, no time component                                                         |
+| `bytes`   | `bytea`            | `blob`    | `Uint8Array` | Raw bytes                                                                                |
+
 ### Column modifiers
 
-`.primaryKey()` · `.unique()` · `.nullable()` · `.default(expr: string)` · `.references(table, column)`
+`.primaryKey()` · `.unique()` · `.nullable()` · `.index()` · `.default(value)` · `.defaultSql(expr)` · `.references(table, column, actions?)` · `.enum(values, options?)`
+
+#### Defaults
+
+`.default()` takes the **value**, quoted for you by column type — not a SQL fragment:
+
+```ts
+t.text().default("user"); // → default 'user'
+t.boolean().default(false); // → default false (postgres) / default 0 (sqlite)
+t.integer().default(0); // → default 0
+```
+
+Embedded quotes are escaped for you. For expressions, use `.defaultSql("CURRENT_TIMESTAMP")`, which is emitted verbatim.
+
+#### Foreign keys
+
+```ts
+userId: t.text().references("user", "id", { onDelete: "cascade" });
+```
+
+`onDelete` / `onUpdate` accept `"cascade"`, `"set null"`, `"restrict"`, or `"no action"`. **Without one, deleting a referenced row fails with a foreign-key violation** — which is why the built-in [`auth()`](#auth-tables) tables cascade `session.userId` and `account.userId`, and `files()` cascades its pivots.
+
+#### Indexes
+
+`.index()` adds a non-unique index named `{table}_{column}_idx`. On a `.unique()` column it is a no-op rather than a duplicate index.
+
+#### Enums
+
+`.enum(values)` restricts a `text`/`varchar` column to a fixed set. The TS type narrows from `string` to the union, resource inputs validate against it with `z.enum`, and `_admin.meta` reports the values so the Hub renders a select instead of a text box:
+
+```ts
+status: t.text().enum(["draft", "published"]).default("draft");
+```
+
+The SQL type is unchanged — no `CREATE TYPE`, no `CHECK` constraint. The constraint lives in Outer, so editing the value list never produces a migration, and values written by raw SQL are not validated.
+
+`{ multiple: true }` stores a **set** of the declared values in one text column, comma-separated:
+
+```ts
+role: t.text().enum(["user", "admin", "support"], { multiple: true });
+// "admin,support" ✓   "admin,root" ✗ unknown   "admin,admin" ✗ duplicate
+```
+
+Each part is validated independently. The TS type stays `string` — enumerating every legal combination would be combinatorial — so read one with `parseSet(value)` and build one with `toSet([...])`, both exported from `@outerjs/server`.
 
 ### Relation kinds
 
@@ -110,10 +170,22 @@ await server.migrator.migrateToLatest();
 
 Outer uses a custom `SchemaMigrationProvider` that diffs consecutive schema versions. Each `schema("x.y.z")` call becomes one Kysely migration keyed by its version string. Kysely applies migrations in plain lexicographic order of those version-string keys, which can disagree with numeric order once a segment reaches double digits (`"1.10.0"` sorts before `"1.2.0"` as a string). `migrateToLatest()` detects this mismatch up front and returns an error telling you to zero-pad segments (e.g. `"1.02.00"`) instead of silently applying migrations out of order.
 
-- **Up** — creates new tables, adds new columns, drops removed columns.
+- **Up** — creates new tables, adds new columns (with their indexes), drops removed columns.
 - **Down** — reverses: drops added tables/columns, restores dropped ones.
 
-Type changes on existing columns are not handled automatically — use `context.db` directly for those.
+### Changed columns are refused, not ignored
+
+Editing a column **in place** — its type, nullability, default, uniqueness, primary key, foreign key, or index — produces no add and no drop, so the diff has nothing to emit. Rather than migrate to nothing and leave your schema and database silently disagreeing, `migrateToLatest()` returns an error naming each offending table and column:
+
+```
+Schema version "2.0.0" changes existing columns, which Outer cannot migrate automatically:
+  thing
+    name: became nullable
+```
+
+Adding and dropping columns is supported; altering one is not. Either revert the edit, or write the `ALTER` yourself with `context.db` and keep the schema in sync.
+
+**Renaming a column is a drop plus an add**, which the diff will happily perform — and that destroys the old column's data. Copy it across yourself before removing the old name.
 
 ## Auto-generated CRUD with `.resource()`
 
@@ -142,7 +214,7 @@ Type changes on existing columns are not handled automatically — use `context.
 | `{name}.update`     | `{ where: { <pk> }, data: Partial<createInput> }` | `Row`         | `UPDATE ... RETURNING *`       |
 | `{name}.delete`     | `{ <pk>: ... }`                                   | `Row`         | `DELETE ... RETURNING *`       |
 
-Input types are derived from column definitions at build time. `serial` primary key columns, columns with `.default()`, and `ownerColumn` are omitted from create input.
+Input types are derived from column definitions at build time. `serial` primary key columns and `ownerColumn` are omitted from create input — the database and the session own those. Columns with `.default()` are **optional**: omit one and the default applies, pass one and it wins.
 
 `list` accepts the same Prisma-style query surface described in [Procedures & Context](/guide/procedures#where-operators):
 

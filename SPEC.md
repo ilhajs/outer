@@ -21,7 +21,7 @@ await server.migrator.migrateToLatest();
 serve({ fetch: (req) => server.handle(req) });
 ```
 
-Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`. `.auth()`, `.openapi()`, `.admin()`, and `.files()` can appear anywhere in the chain.
+Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`. `.auth()`, `.openapi()`, `.mcp()`, `.admin()`, and `.files()` can appear anywhere in the chain.
 
 ---
 
@@ -142,6 +142,45 @@ The `/rpc/**` handler speaks oRPC's own wire protocol, which generic OpenAPI cli
 
 ---
 
+## `.mcp(config?)`
+
+Serves the same router as an [MCP](https://modelcontextprotocol.io) server over the Streamable HTTP transport, so Claude, IDEs, and agents can call your procedures as tools. Requires the optional peers `orpc-mcp` and `@orpc/zod`.
+
+```ts
+import { mcp, Outer } from "@outerjs/server";
+
+new Outer({ db: pglite() })
+  .schema(v1_0)
+  .procedure(
+    "post.search",
+    (base) =>
+      base
+        .meta(mcp.tool({ description: "Search posts by title" }))
+        .input(z.object({ q: z.string() }))
+        .handler(({ input, context }) =>
+          context.db.query.post.findMany({ where: { title: { contains: input.q } } }),
+        ),
+    { permission: "authenticated" },
+  )
+  .mcp()
+  .build();
+```
+
+**Exposure is opt-in per procedure.** Only procedures carrying `mcp.tool()` / `mcp.resource()` / `mcp.prompt()` meta are visible — every other procedure, the whole reserved `_admin` namespace, and all `file.*` routes stay invisible to MCP clients whether or not you remember to exclude them.
+
+**Tool names replace dots with underscores**, since dots are not legal in MCP tool names: the procedure `post.search` is listed and called as `post_search`.
+
+| Field                             | Default                                 | Description                                                     |
+| --------------------------------- | --------------------------------------- | --------------------------------------------------------------- |
+| `enabled`                         | `true` when called                      | Set `false` to gate it on an env flag without removing the call |
+| `path`                            | `/mcp`                                  | Where the endpoint is mounted                                   |
+| `serverInfo`                      | instance `name` + latest schema version | Identity reported during `initialize`                           |
+| `instructions`                    | —                                       | Free-form guidance returned during `initialize`                 |
+| `enableDnsRebindingProtection`    | `false`                                 | Reject `Origin`/`Host` outside the allowlists                   |
+| `allowedOrigins` / `allowedHosts` | —                                       | Exact-match allowlists used when protection is on               |
+
+Requests run through the ordinary procedure pipeline: the endpoint resolves a session exactly as `/rpc/**` does, so permissions, `context.user`, and `ownerColumn` behave identically. Browsers can authenticate with a cookie; headless clients use an API key (below).
+
 ## `.auth(config)`
 
 Enables Better Auth and mounts `/api/auth/**`. Must be called before `.build()`. Can appear anywhere in the chain. Also resolves the session once per request and exposes it as `context.user` / `context.session` — no `getSession` middleware needed; see "Request context". Returns a new `Outer` whose `context.auth` type is narrowed to required (non-optional) for everything chained after this call (like `.middleware()`'s `next({ context })`). When `.auth()` is not called, `context.auth` is `undefined` and `/api/auth/**` is not mounted — resource permissions other than `"public"` will throw a configuration error.
@@ -169,6 +208,50 @@ Patterns are matched against the full `Host` header including port — bare `"lo
 Outer's core does not set any Better Auth defaults (no default plugins, no default email options) — configure everything explicitly.
 
 ---
+
+### API keys (bearer tokens)
+
+Long-lived tokens for MCP clients, CI, and server-to-server calls, via Better Auth's [`@better-auth/api-key`](https://better-auth.com/docs/plugins/api-key) plugin — a **separate install**, not part of `better-auth` core:
+
+```bash
+bun add @better-auth/api-key
+```
+
+Declare its table with [`schema().auth({ apiKeys: true })`](#auth-auth-tables), then register the plugin:
+
+```ts
+import { apiKey } from "@better-auth/api-key";
+
+.auth({
+  secret: process.env.AUTH_SECRET!,
+  plugins: [
+    apiKey({
+      // Required. Defaults to false, in which case a key never resolves to a
+      // session and every call fails with a misleading "You must be signed in".
+      enableSessionForAPIKeys: true,
+      // The plugin reads `x-api-key` by default. MCP clients send
+      // `Authorization: Bearer <key>`, so strip the scheme:
+      customAPIKeyGetter: (ctx) => {
+        const header = ctx.headers?.get("authorization");
+        return header?.toLowerCase().startsWith("bearer ") ? header.slice(7) : null;
+      },
+    }),
+  ],
+})
+```
+
+A key **authenticates as the user it belongs to**: the plugin resolves it into a session before Outer builds the request context, so `context.user`, every `.resource()` and `.procedure()` permission, `hasRole()`, and `ownerColumn` all work unchanged. There is no second authorization path to keep in sync.
+
+Management endpoints come from the plugin at `/api/auth/api-key/create|list|delete`. **The plaintext key is returned once, at creation, and is unrecoverable** — only its hash is stored.
+
+Pointing an MCP client at the server is then:
+
+```
+POST https://your-app.com/mcp
+Authorization: Bearer <key>
+```
+
+Clients that only support the MCP OAuth discovery flow (rather than a custom header) need Better Auth's separate `mcp` plugin instead; that is not wired into `.mcp()` today.
 
 ## CORS (`new Outer({ cors })`)
 
@@ -496,12 +579,15 @@ const posts = await api.post.list({});
 
 ## HTTP routes
 
-| Method | Path            | Handler                                                                       |
-| ------ | --------------- | ----------------------------------------------------------------------------- |
-| `GET`  | `/openapi.json` | OpenAPI 3.x spec (only mounted when `.openapi({ enabled: true })` was called) |
-| `ALL`  | `/api/auth/**`  | Better Auth handler (only mounted when `.auth()` was called)                  |
-| `ALL`  | `/rpc/**`       | oRPC handler (prefix `/rpc`)                                                  |
-| `ALL`  | `/rest/**`      | Plain-JSON OpenAPI handler (only mounted when `.openapi()` was called)        |
+| Method | Path            | Handler                                                                                 |
+| ------ | --------------- | --------------------------------------------------------------------------------------- |
+| `GET`  | `/openapi.json` | OpenAPI 3.x spec (only mounted when `.openapi({ enabled: true })` was called)           |
+| `ALL`  | `/api/auth/**`  | Better Auth handler (only mounted when `.auth()` was called)                            |
+| `ALL`  | `/rpc/**`       | oRPC handler (prefix `/rpc`)                                                            |
+| `ALL`  | `/rest/**`      | Plain-JSON OpenAPI handler (only mounted when `.openapi()` was called)                  |
+| `ALL`  | `/mcp`          | MCP Streamable HTTP endpoint (only mounted when `.mcp()` was called; path configurable) |
+| `GET`  | `/health`       | Liveness probe with a `select 1` check (mounted unless `health: false`)                 |
+| `GET`  | `/files/:id`    | File download (only mounted when `.files()` was called; path configurable)              |
 
 ---
 
@@ -728,6 +814,8 @@ schema("1.0.0").auth({ roles: ["user", "admin"] });
 ```
 
 Omitted by default, because Better Auth's admin plugin permits custom role names and comma-separated lists (`"support,admin"`) that a closed set would reject.
+
+`.auth({ apiKeys: true })` additionally declares the `apikey` table required by `@better-auth/api-key` (hashed `key`, owning `referenceId`, expiry, rate-limit and refill bookkeeping). The plugin owns those rows; Outer only declares the DDL so the migrator creates them. See [API keys](#api-keys-bearer-tokens).
 
 Re-declaring a table merges columns (later definition wins on name collisions), so auth tables can be extended:
 

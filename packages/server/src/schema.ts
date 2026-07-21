@@ -426,7 +426,57 @@ export type AuthOptions<Roles extends readonly string[] = readonly string[]> = {
    * Left open when omitted, so any role name is accepted.
    */
   roles?: Roles;
+  /**
+   * Adds the `apikey` table for `@better-auth/api-key`, so long-lived bearer
+   * tokens can authenticate as a user — MCP clients, CI, server-to-server.
+   *
+   * The plugin itself is a separate install and must also be passed to
+   * `.auth({ plugins: [apiKey()] })` on the `Outer` instance:
+   * `bun add @better-auth/api-key`.
+   */
+  apiKeys?: boolean;
 };
+
+/**
+ * The `@better-auth/api-key` plugin's table, mirroring its own field
+ * definitions (including rate-limit and refill bookkeeping). The plugin owns
+ * these rows — Outer only declares the DDL so the migrator can create them.
+ *
+ * `referenceId` is the owning user's id; `key` is the hashed token.
+ */
+function apiKeyTableDef(t: TableBuilder) {
+  return {
+    id: t.text().primaryKey(),
+    /** Names the plugin configuration a key belongs to when several are registered. */
+    configId: t.text().default("default").index(),
+    name: t.text().nullable(),
+    /** Leading characters of the token, kept for display. */
+    start: t.text().nullable(),
+    prefix: t.text().nullable(),
+    /** The hashed key. Indexed — every authenticated request looks up by it. */
+    key: t.text().index(),
+    /** The user the key authenticates as. */
+    referenceId: t.text().index(),
+    refillInterval: t.integer().nullable(),
+    refillAmount: t.integer().nullable(),
+    lastRefillAt: t.timestamp().nullable(),
+    enabled: t.boolean().default(true),
+    rateLimitEnabled: t.boolean().default(true),
+    rateLimitTimeWindow: t.integer().nullable(),
+    rateLimitMax: t.integer().nullable(),
+    requestCount: t.integer().default(0),
+    remaining: t.integer().nullable(),
+    lastRequest: t.timestamp().nullable(),
+    expiresAt: t.timestamp().nullable(),
+    /** JSON-encoded permission map. */
+    permissions: t.text().nullable(),
+    /** JSON-encoded free-form metadata. */
+    metadata: t.text().nullable(),
+    ...timestamps(t),
+  };
+}
+
+export type ApiKeyTable = { apikey: ReturnType<typeof apiKeyTableDef> };
 
 function authTableDefs(t: TableBuilder, roles?: readonly string[]) {
   return {
@@ -590,9 +640,13 @@ type SchemaBuilder<T extends TablesDef> = {
    * comma-separated in the single `role` column, so `"admin,support"` is valid
    * while `"admin,root"` is rejected. Omit `roles` to accept any name.
    */
-  auth<const Roles extends readonly string[] = never>(
-    options?: AuthOptions<Roles>,
-  ): SchemaBuilder<T & AuthTables<[Roles] extends [never] ? string : Roles[number]>>;
+  auth<const Roles extends readonly string[] = never, const Keys extends boolean = false>(
+    options?: AuthOptions<Roles> & { apiKeys?: Keys },
+  ): SchemaBuilder<
+    T &
+      AuthTables<[Roles] extends [never] ? string : Roles[number]> &
+      (Keys extends true ? ApiKeyTable : Record<never, never>)
+  >;
 
   /**
    * Registers a `file` metadata table for blobs kept in an object store — the bytes
@@ -631,6 +685,9 @@ export function schema(version: string): SchemaBuilder<Record<never, never>> {
     auth(options) {
       for (const [name, cols] of Object.entries(authTableDefs(t, options?.roles))) {
         tables[name] = { ...tables[name], ...cols };
+      }
+      if (options?.apiKeys) {
+        tables["apikey"] = { ...tables["apikey"], ...apiKeyTableDef(t) };
       }
       relations.push(
         makeRelChain("user").hasMany("session", { from: "id", to: "userId" }),

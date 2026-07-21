@@ -83,6 +83,41 @@ Custom procedures take the same permission vocabulary as resources, as a third a
 
 `.resource()` accepts a `permissions` map per CRUD action — see [Schema & Migrations](/guide/schema#permissions) for the full table of `"public"`, `"authenticated"`, `"admin"`, and `"owner"` behavior, including automatic owner-column injection and 403 handling.
 
+## API keys
+
+Long-lived bearer tokens for MCP clients, CI, and server-to-server calls, via Better Auth's [`@better-auth/api-key`](https://better-auth.com/docs/plugins/api-key) plugin. It is a **separate package**, not part of `better-auth` core:
+
+```bash
+bun add @better-auth/api-key
+```
+
+Declare its table with [`schema().auth({ apiKeys: true })`](/guide/schema#auth-tables), then register the plugin:
+
+```ts
+import { apiKey } from "@better-auth/api-key";
+
+.auth({
+  secret: process.env.AUTH_SECRET!,
+  plugins: [
+    apiKey({
+      // Required. Defaults to false, in which case a key never resolves to a
+      // session and calls fail with a misleading "You must be signed in".
+      enableSessionForAPIKeys: true,
+      // The plugin reads `x-api-key` by default. MCP clients send
+      // `Authorization: Bearer <key>`, so strip the scheme:
+      customAPIKeyGetter: (ctx) => {
+        const header = ctx.headers?.get("authorization");
+        return header?.toLowerCase().startsWith("bearer ") ? header.slice(7) : null;
+      },
+    }),
+  ],
+})
+```
+
+A key **authenticates as the user it belongs to**. The plugin resolves it into a session before Outer builds the request context, so `context.user`, every `.procedure()` and `.resource()` permission, and `ownerColumn` behave exactly as they do for a cookie session — there is no second authorization path to keep in sync.
+
+Keys are managed through the plugin's own endpoints at `/api/auth/api-key/create|list|delete`. **The plaintext key is shown once, at creation, and cannot be recovered** — only its hash is stored.
+
 ## CORS
 
 Allows browser clients on other origins to call `/rpc/**`, `/api/auth/**`, and the admin API. Configured on the constructor — the origins are also folded into Better Auth's `trustedOrigins` automatically:
