@@ -8,17 +8,17 @@ const v1_0 = schema("1.0.0")
     id: t.text().primaryKey(),
     name: t.text(),
     email: t.text().unique(),
-    emailVerified: t.boolean().default("false"),
+    emailVerified: t.boolean().default(false),
     image: t.text().nullable(),
-    createdAt: t.timestamp().default("CURRENT_TIMESTAMP"),
-    updatedAt: t.timestamp().default("CURRENT_TIMESTAMP"),
+    createdAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
+    updatedAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
   }))
   .table("session", (t) => ({
     id: t.text().primaryKey(),
     expiresAt: t.timestamp(),
     token: t.text().unique(),
-    createdAt: t.timestamp().default("CURRENT_TIMESTAMP"),
-    updatedAt: t.timestamp().default("CURRENT_TIMESTAMP"),
+    createdAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
+    updatedAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
     ipAddress: t.text().nullable(),
     userAgent: t.text().nullable(),
     userId: t.text().references("user", "id"),
@@ -35,16 +35,16 @@ const v1_0 = schema("1.0.0")
     refreshTokenExpiresAt: t.timestamp().nullable(),
     scope: t.text().nullable(),
     password: t.text().nullable(),
-    createdAt: t.timestamp().default("CURRENT_TIMESTAMP"),
-    updatedAt: t.timestamp().default("CURRENT_TIMESTAMP"),
+    createdAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
+    updatedAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
   }))
   .table("verification", (t) => ({
     id: t.text().primaryKey(),
     identifier: t.text(),
     value: t.text(),
     expiresAt: t.timestamp(),
-    createdAt: t.timestamp().default("CURRENT_TIMESTAMP"),
-    updatedAt: t.timestamp().default("CURRENT_TIMESTAMP"),
+    createdAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
+    updatedAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
   }))
   .relation("user", (rel) => rel.hasMany("session", { from: "id", to: "userId" }))
   .relation("user", (rel) => rel.hasMany("account", { from: "id", to: "userId" }))

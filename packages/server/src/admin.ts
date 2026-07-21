@@ -4,7 +4,14 @@ import { z } from "zod/v4";
 
 import { DialectKind } from "./migrator";
 import { getSession, hasRole, mapDbError, TypedProcedure } from "./resource";
-import { ColumnDef, RelationDef, SchemaResult } from "./schema";
+import {
+  AnyColumn,
+  ColumnDef,
+  displayDefault,
+  parseSet,
+  RelationDef,
+  SchemaResult,
+} from "./schema";
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
@@ -26,6 +33,10 @@ export type AdminColumnMeta = {
   hasDefault: boolean;
   default: string | null;
   references: { table: string; column: string } | null;
+  /** Allowed values from `.enum([...])`, or `null` when unconstrained — drives select inputs in a UI. */
+  enum: string[] | null;
+  /** True when the column holds a comma-separated set of `enum` values (e.g. `user.role`) — render a multi-select. */
+  multiple: boolean;
 };
 
 export type AdminMeta = {
@@ -130,7 +141,7 @@ function badRequest(message: string): never {
 
 function assertColumnKeys(
   keys: string[],
-  cols: Record<string, ColumnDef>,
+  cols: Record<string, AnyColumn>,
   table: string,
   what: string,
 ): void {
@@ -139,8 +150,35 @@ function assertColumnKeys(
   }
 }
 
+/**
+ * Rejects values outside a column's `.enum([...])` list. Admin writes take
+ * untyped rows, so the constraint has to be enforced here — the DB column is
+ * plain text and won't do it.
+ */
+function assertEnumValues(data: Row, cols: Record<string, AnyColumn>, table: string): void {
+  for (const [key, value] of Object.entries(data)) {
+    const col = cols[key];
+    const allowed = col?._enum;
+    if (!col || !allowed || value === null || value === undefined) continue;
+    // A `{ multiple: true }` column carries a comma-separated set — check each part.
+    const parts = col._multiple ? parseSet(value) : [value as string];
+    if (col._multiple && parts.length === 0) {
+      badRequest(
+        `Invalid value for "${key}" in table "${table}" — expected one or more of: ${allowed.join(", ")}`,
+      );
+    }
+    for (const part of parts) {
+      if (!allowed.includes(part)) {
+        badRequest(
+          `Invalid value for "${key}" in table "${table}" — expected ${col._multiple ? "one or more" : "one"} of: ${allowed.join(", ")}`,
+        );
+      }
+    }
+  }
+}
+
 /** Recursively validates a Sola-style `where` filter: column keys must exist, operator keys must be recognized. */
-function assertWhere(where: Row, cols: Record<string, ColumnDef>, table: string): void {
+function assertWhere(where: Row, cols: Record<string, AnyColumn>, table: string): void {
   for (const [key, value] of Object.entries(where)) {
     if (key === "AND" || key === "OR") {
       if (!Array.isArray(value)) badRequest(`"${key}" must be an array of filters`);
@@ -164,7 +202,7 @@ function assertWhere(where: Row, cols: Record<string, ColumnDef>, table: string)
 }
 
 /** `where` for write actions is plain column equality — reject operator objects so a filter can't silently widen an update/delete. */
-function assertEqualityWhere(where: Row, cols: Record<string, ColumnDef>, table: string): void {
+function assertEqualityWhere(where: Row, cols: Record<string, AnyColumn>, table: string): void {
   const entries = Object.entries(where);
   if (entries.length === 0) badRequest("`where` requires at least one column");
   assertColumnKeys(
@@ -199,10 +237,10 @@ export function buildAdminProcedures(params: {
 }): Record<string, AnyProcedure> {
   const { base, name, schemas, kind, migrator, openapi, config } = params;
   const latest = schemas.at(-1);
-  const tables = (latest?.tables ?? {}) as Record<string, Record<string, ColumnDef>>;
+  const tables = (latest?.tables ?? {}) as Record<string, Record<string, AnyColumn>>;
   const relations = latest?.relations ?? [];
 
-  const tableCols = (table: string): Record<string, ColumnDef> => {
+  const tableCols = (table: string): Record<string, AnyColumn> => {
     const cols = tables[table];
     if (!cols) badRequest(`Unknown table "${table}"`);
     return cols;
@@ -232,8 +270,10 @@ export function buildAdminProcedures(params: {
           primaryKey: col._primaryKey,
           unique: col._unique,
           hasDefault: col._default !== null,
-          default: col._default,
+          default: displayDefault(col._default),
           references: col._references,
+          enum: col._enum ? [...col._enum] : null,
+          multiple: col._multiple,
         })),
       })),
       relations,
@@ -300,6 +340,7 @@ export function buildAdminProcedures(params: {
       const keys = Object.keys(input.data);
       if (keys.length === 0) badRequest("create requires at least one field in `data`");
       assertColumnKeys(keys, cols, input.table, "data");
+      assertEnumValues(input.data, cols, input.table);
       try {
         return await context.db
           .insertInto(input.table)
@@ -321,6 +362,7 @@ export function buildAdminProcedures(params: {
         badRequest("update requires at least one field in `data`");
       }
       assertColumnKeys(Object.keys(input.data), cols, input.table, "data");
+      assertEnumValues(input.data, cols, input.table);
       const data: Row = { ...input.data };
       // Touch updatedAt (when the table has one) unless the caller set it explicitly
       if (cols["updatedAt"]?._type === "timestamp" && data["updatedAt"] === undefined) {

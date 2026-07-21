@@ -13,7 +13,7 @@ import {
 import { RPCHandler } from "@orpc/server/fetch";
 import { betterAuth, Auth, BetterAuthOptions } from "better-auth";
 import { H3, H3Event, HTTPMethod } from "h3";
-import { Dialect, Kysely } from "kysely";
+import { Dialect, Kysely, sql } from "kysely";
 
 import { AdminConfig, AdminRouter, buildAdminProcedures } from "./admin";
 import { buildFileProcedures, buildFileRoute, FilesConfig, FilesRouter } from "./files";
@@ -38,7 +38,8 @@ export { liveIterable } from "./live";
 export type { FilesConfig, FilesRouter, FilePermission, FileRecord } from "./files";
 /** Throw from a handler to return a specific HTTP status instead of a 500. */
 export { ORPCError };
-export type { AuthTables, FileTables, FilesOptions } from "./schema";
+export type { AuthOptions, AuthTables, FileTables, FilesOptions } from "./schema";
+export { parseSet, toSet } from "./schema";
 export type { ResourceOptions, DialectKind };
 export type {
   AdminConfig,
@@ -84,6 +85,64 @@ type AuthedContext = {
   user: SessionUser | null;
   session: UserSession | null;
 };
+
+/** Per-key request counter backing `rateLimit`. Swap in Redis/Upstash for multi-instance deploys. */
+export type RateLimitStore = {
+  /** Records a hit and returns the running count plus when the window resets (epoch ms). */
+  hit(key: string, windowMs: number): Promise<{ count: number; resetAt: number }>;
+  /** Releases any timers/handles. Called by `BuiltOuter.close()`. */
+  dispose?(): void;
+};
+
+export type RateLimitConfig = {
+  /** Requests allowed per window, per key. */
+  max: number;
+  /** Window length in milliseconds. */
+  windowMs: number;
+  /**
+   * Identifies the caller. Defaults to the signed-in user id, falling back to
+   * the client IP from `x-forwarded-for` / `x-real-ip`.
+   *
+   * Behind a proxy that strips those headers every caller shares one bucket —
+   * set this explicitly if your host forwards the IP some other way.
+   */
+  key?: (event: H3Event, user: SessionUser | null) => string | Promise<string>;
+  /** Return true to bypass the limit for a request. */
+  skip?: (event: H3Event) => boolean | Promise<boolean>;
+  /** Defaults to an in-process store — per-instance, so it does not coordinate across replicas. */
+  store?: RateLimitStore;
+};
+
+/**
+ * Fixed-window counter held in memory. Expired keys are swept on an interval
+ * so a flood of one-off keys can't grow the map without bound.
+ */
+export function memoryRateLimitStore(sweepMs = 60_000): RateLimitStore {
+  const hits = new Map<string, { count: number; resetAt: number }>();
+  const timer = setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of hits) if (entry.resetAt <= now) hits.delete(key);
+  }, sweepMs);
+  // Don't hold the process open just for the sweep.
+  (timer as unknown as { unref?: () => void }).unref?.();
+  return {
+    async hit(key, windowMs) {
+      const now = Date.now();
+      const existing = hits.get(key);
+      if (!existing || existing.resetAt <= now) {
+        const entry = { count: 1, resetAt: now + windowMs };
+        hits.set(key, entry);
+        return entry;
+      }
+      existing.count++;
+      return existing;
+    },
+    dispose() {
+      clearInterval(timer);
+      hits.clear();
+    },
+  };
+}
 
 /** Extracts the oRPC router type from an `Outer` or `BuiltOuter` instance. */
 export type InferRouter<T> = T extends { router: infer R } ? R : never;
@@ -195,6 +254,23 @@ export type OuterParams = {
    * an S3 client with `fromS3()`, or pass any `OuterStorage` implementation.
    */
   storage?: OuterStorage;
+  /**
+   * Called for unexpected failures — anything that isn't a deliberate
+   * `ORPCError` response. Route it to your logger or Sentry; without it,
+   * Outer writes to `console.error`. Pass `() => {}` to silence it.
+   */
+  onError?: (error: unknown, info: { request: Request; source: "rpc" | "rest" | "route" }) => void;
+  /**
+   * Mounts `GET /health`, returning `{ status, database }` with a `select 1`
+   * probe — for Coolify/Docker/uptime checks. Enabled by default; pass `false`
+   * to omit it, or a `path` to move it. A `.route()` on the same path wins.
+   */
+  health?: boolean | { path?: string };
+  /**
+   * Per-caller request limit for `/rpc/**` and `/rest/**`. Off by default.
+   * `/api/auth/**` is excluded — Better Auth ships its own limiter.
+   */
+  rateLimit?: RateLimitConfig;
 };
 
 type OuterRoute<TContext> = {
@@ -211,6 +287,9 @@ type OuterResources = {
   db: Kysely<any>;
   baseUrl: string | undefined;
   auth: OuterAuth | undefined;
+  onError: OuterParams["onError"];
+  health: OuterParams["health"];
+  rateLimit: RateLimitConfig | undefined;
   openapiEnabled: boolean;
   routes: OuterRoute<any>[];
   /** `"resource.action"` entries whose permission requires a session — checked against `auth` at `.build()`. */
@@ -316,7 +395,15 @@ export class Outer<
       this.pendingRouter = _router ?? ({} as TRouter);
       this.schemas = _schemas ?? [];
     } else {
-      const { db: dbConfig, baseUrl, cors, storage } = params as OuterParams;
+      const {
+        db: dbConfig,
+        baseUrl,
+        cors,
+        storage,
+        onError: onErrorHook,
+        health,
+        rateLimit,
+      } = params as OuterParams;
       const { dialect, kind: dialectKind, live } = dbConfig;
       const db = new Kysely<any>({ dialect });
       this.resources = {
@@ -333,6 +420,9 @@ export class Outer<
         admin: undefined,
         files: undefined,
         storage,
+        onError: onErrorHook,
+        health,
+        rateLimit,
       };
       this.pendingBase = os.$context<OuterRpcContext>() as unknown as Builder<
         TContext & object,
@@ -657,14 +747,19 @@ export class Outer<
       };
     };
 
+    // ORPCError is an intentional application response (400/401/403/404/409, etc.) —
+    // only surface genuinely unexpected failures, to avoid noisy/sensitive logs.
+    const reportError =
+      (source: "rpc" | "rest" | "route") =>
+      (error: unknown, request?: Request): void => {
+        if (error instanceof ORPCError) return;
+        const hook = this.resources.onError;
+        if (hook) hook(error, { request: request ?? new Request("http://localhost"), source });
+        else console.error(error);
+      };
+
     const rpc = new RPCHandler(router, {
-      interceptors: [
-        onError((error) => {
-          // ORPCError is an intentional application response (400/401/403/404/409, etc.) —
-          // only log genuinely unexpected failures to avoid noisy/sensitive logs.
-          if (!(error instanceof ORPCError)) console.error(error);
-        }),
-      ],
+      interceptors: [onError((error) => reportError("rpc")(error))],
     });
 
     let server = new H3();
@@ -724,6 +819,68 @@ export class Outer<
       });
     }
 
+    // Reject oversized uploads from Content-Length, before the body is parsed
+    // into memory — the per-file `maxBytes` check in `.files()` only runs after
+    // oRPC has already buffered the whole multipart payload.
+    if (files) {
+      const maxBytes = files.maxBytes ?? 10 * 1024 * 1024;
+      // Multipart adds boundaries and headers around the file itself.
+      const envelope = 1024 * 100;
+      server = server.use(async (event, next) => {
+        const declared = Number(event.req.headers.get("content-length") ?? "0");
+        if (declared > maxBytes + envelope) {
+          const path = new URL(event.req.url).pathname;
+          if (path.startsWith("/rpc") || path.startsWith("/rest")) {
+            return new Response(
+              JSON.stringify({ error: `Payload too large; the limit is ${maxBytes} bytes.` }),
+              { status: 413, headers: { "content-type": "application/json" } },
+            );
+          }
+        }
+        return next();
+      });
+    }
+
+    const rateLimit = this.resources.rateLimit;
+    const rateLimitStore = rateLimit ? (rateLimit.store ?? memoryRateLimitStore()) : undefined;
+    if (rateLimit && rateLimitStore) {
+      const guarded = (path: string) => path.startsWith("/rpc") || path.startsWith("/rest");
+      server = server.use(async (event, next) => {
+        const path = new URL(event.req.url).pathname;
+        // `/api/auth/**` is left alone — Better Auth rate-limits its own routes.
+        if (!guarded(path)) return next();
+        if (await rateLimit.skip?.(event)) return next();
+
+        const user = (await buildContext(event)).user ?? null;
+        const key = rateLimit.key
+          ? await rateLimit.key(event, user)
+          : (user?.id ??
+            event.req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+            event.req.headers.get("x-real-ip") ??
+            "unknown");
+
+        const { count, resetAt } = await rateLimitStore.hit(key, rateLimit.windowMs);
+        const remaining = Math.max(0, rateLimit.max - count);
+        event.res.headers.set("RateLimit-Limit", String(rateLimit.max));
+        event.res.headers.set("RateLimit-Remaining", String(remaining));
+        event.res.headers.set("RateLimit-Reset", String(Math.ceil((resetAt - Date.now()) / 1000)));
+        if (count > rateLimit.max) {
+          const retryAfter = Math.max(1, Math.ceil((resetAt - Date.now()) / 1000));
+          return new Response(JSON.stringify({ error: "Too many requests", retryAfter }), {
+            status: 429,
+            headers: {
+              "content-type": "application/json",
+              "retry-after": String(retryAfter),
+              "RateLimit-Limit": String(rateLimit.max),
+              "RateLimit-Remaining": "0",
+              "RateLimit-Reset": String(retryAfter),
+            },
+          });
+        }
+        return next();
+      });
+    }
+
     if (this.resources.openapiEnabled) {
       let modulesPromise: ReturnType<typeof loadOpenApiModules> | undefined;
       const modules = () => (modulesPromise ??= loadOpenApiModules());
@@ -747,11 +904,7 @@ export class Outer<
       let openapiHandler: OpenAPIHandler<OuterRpcContext<TDB>> | undefined;
       server = server.all("/rest/**", async (event) => {
         openapiHandler ??= new (await modules()).OpenAPIHandler(router, {
-          interceptors: [
-            onError((error) => {
-              if (!(error instanceof ORPCError)) console.error(error);
-            }),
-          ],
+          interceptors: [onError((error) => reportError("rest")(error))],
         });
         const { response } = await openapiHandler.handle(event.req, {
           prefix: "/rest",
@@ -771,6 +924,23 @@ export class Outer<
       );
     }
 
+    const health = this.resources.health ?? true;
+    if (health !== false) {
+      const healthPath = (typeof health === "object" && health.path) || "/health";
+      server = server.get(healthPath, async () => {
+        try {
+          await sql`select 1`.execute(db);
+          return { status: "ok", database: "up" };
+        } catch (error) {
+          reportError("route")(error);
+          return new Response(JSON.stringify({ status: "error", database: "down" }), {
+            status: 503,
+            headers: { "content-type": "application/json" },
+          });
+        }
+      });
+    }
+
     server = server.all("/rpc/**", async (event) => {
       const { response } = await rpc.handle(event.req, {
         prefix: "/rpc",
@@ -779,7 +949,7 @@ export class Outer<
       return response;
     });
 
-    return new BuiltOuter(server, typedDb, migrator, this.pendingRouter, auth);
+    return new BuiltOuter(server, typedDb, migrator, this.pendingRouter, auth, rateLimitStore);
   }
 
   private addToRouter(dotName: string, proc: AnyProcedure, opts?: { internal?: boolean }): void {
@@ -818,6 +988,8 @@ export class BuiltOuter<TRouter extends Record<string, any> = Router<any>, TDB =
   readonly db: OuterDB<TDB>;
   private readonly server: H3;
   private readonly auth: OuterAuth | undefined;
+  private readonly rateLimitStore: RateLimitStore | undefined;
+  private closed = false;
 
   constructor(
     server: H3,
@@ -825,12 +997,28 @@ export class BuiltOuter<TRouter extends Record<string, any> = Router<any>, TDB =
     migrator: ReturnType<typeof createMigrator>,
     router: TRouter,
     auth?: OuterAuth,
+    rateLimitStore?: RateLimitStore,
   ) {
     this.server = server;
     this.db = db;
     this.auth = auth;
     this.migrator = migrator;
     this.router = router;
+    this.rateLimitStore = rateLimitStore;
+  }
+
+  /**
+   * Releases the database pool (and the embedded PGlite instance with it) plus
+   * any rate-limit timers. Call it from your `SIGTERM`/`SIGINT` handler, and in
+   * tests that build more than one instance — otherwise connections leak.
+   *
+   * Safe to call more than once; the instance must not be used afterwards.
+   */
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    this.rateLimitStore?.dispose?.();
+    await this.db.destroy();
   }
 
   async handle(request: Request): Promise<Response> {
@@ -848,11 +1036,26 @@ export class BuiltOuter<TRouter extends Record<string, any> = Router<any>, TDB =
     headers: Headers | (() => Headers | Promise<Headers>) = new Headers(),
   ): RouterClient<TRouter> {
     return createRouterClient(this.router as Router<OuterRpcContext>, {
-      context: async (): Promise<OuterRpcContext> => ({
-        headers: typeof headers === "function" ? await headers() : headers,
-        db: this.db as OuterRpcContext["db"],
-        ...(this.auth && { auth: this.auth }),
-      }),
+      context: async (): Promise<OuterRpcContext> => {
+        const resolvedHeaders = typeof headers === "function" ? await headers() : headers;
+        const base = {
+          headers: resolvedHeaders,
+          db: this.db as OuterRpcContext["db"],
+        } as OuterRpcContext;
+        // Resolve the session exactly as the HTTP path does. Without this,
+        // `context.user` is absent and every permissioned procedure 401s even
+        // when the caller passed a valid session cookie.
+        if (!this.auth) return { ...base, user: null, session: null };
+        const resolved = await this.auth.api
+          .getSession({ headers: resolvedHeaders })
+          .catch(() => null);
+        return {
+          ...base,
+          auth: this.auth,
+          user: (resolved?.user as SessionUser | undefined) ?? null,
+          session: (resolved?.session as UserSession | undefined) ?? null,
+        };
+      },
     }) as RouterClient<TRouter>;
   }
 }

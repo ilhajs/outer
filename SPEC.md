@@ -27,15 +27,55 @@ Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`
 
 ## `new Outer(params)`
 
-| Param        | Type                     | Default       | Description                                                                                                   |
-| ------------ | ------------------------ | ------------- | ------------------------------------------------------------------------------------------------------------- |
-| `name`       | `string`                 | `"Outer API"` | API title in OpenAPI spec                                                                                     |
-| `baseUrl`    | `string`                 | —             | Default `baseURL` passed to Better Auth when `.auth()` is called (override per-call via `.auth({ baseURL })`) |
-| `db.dialect` | `Dialect`                | —             | Required. A Kysely `Dialect` — see below                                                                      |
-| `db.kind`    | `"postgres" \| "sqlite"` | —             | Required. Drives DDL generation, Better Auth's schema, and DB error mapping — must match `db.dialect`         |
-| `db.live`    | `LiveProvider`           | —             | Change feed backing [live queries](#live-queries). `pglite()` supplies one; without it `live*()` throws       |
-| `cors`       | `CorsConfig`             | —             | Cross-origin browser callers allowed to reach `/rpc/**`, `/api/auth/**`, and the admin API — see CORS below   |
-| `storage`    | `OuterStorage`           | —             | Object store for file bytes — surfaced as `context.storage` and used by `.files()`                            |
+| Param        | Type                     | Default         | Description                                                                                                   |
+| ------------ | ------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------- |
+| `name`       | `string`                 | `"Outer API"`   | API title in OpenAPI spec                                                                                     |
+| `baseUrl`    | `string`                 | —               | Default `baseURL` passed to Better Auth when `.auth()` is called (override per-call via `.auth({ baseURL })`) |
+| `db.dialect` | `Dialect`                | —               | Required. A Kysely `Dialect` — see below                                                                      |
+| `db.kind`    | `"postgres" \| "sqlite"` | —               | Required. Drives DDL generation, Better Auth's schema, and DB error mapping — must match `db.dialect`         |
+| `db.live`    | `LiveProvider`           | —               | Change feed backing [live queries](#live-queries). `pglite()` supplies one; without it `live*()` throws       |
+| `cors`       | `CorsConfig`             | —               | Cross-origin browser callers allowed to reach `/rpc/**`, `/api/auth/**`, and the admin API — see CORS below   |
+| `storage`    | `OuterStorage`           | —               | Object store for file bytes — surfaced as `context.storage` and used by `.files()`                            |
+| `onError`    | `(error, info) => void`  | `console.error` | Called for unexpected failures (never for deliberate `ORPCError` responses) — route to your logger or Sentry  |
+| `health`     | `boolean \| { path }`    | `true`          | Mounts `GET /health` with a `select 1` probe. `false` omits it; a `.route()` on the same path wins            |
+| `rateLimit`  | `RateLimitConfig`        | —               | Per-caller limit on `/rpc/**` and `/rest/**`. Off by default; `/api/auth/**` is excluded                      |
+
+### `onError`
+
+```ts
+new Outer({ db, onError: (error, { source }) => logger.error({ err: error, source }) });
+```
+
+`source` is `"rpc" | "rest" | "route"`. Deliberate `ORPCError` responses (400/401/403/404/409, …) are application behaviour, not failures, so they are never reported. Without a hook, unexpected errors go to `console.error`; pass `() => {}` to silence them entirely.
+
+### `health`
+
+`GET /health` returns `200 {"status":"ok","database":"up"}`, or `503 {"status":"error","database":"down"}` when the `select 1` probe fails — point Coolify/Docker/uptime checks at it. It is not rate limited.
+
+### `rateLimit`
+
+```ts
+new Outer({ db, rateLimit: { max: 100, windowMs: 60_000 } });
+```
+
+| Field      | Default                  | Description                                             |
+| ---------- | ------------------------ | ------------------------------------------------------- |
+| `max`      | —                        | Requests allowed per window, per key                    |
+| `windowMs` | —                        | Window length in ms (fixed window, not sliding)         |
+| `key`      | user id, else client IP  | `(event, user) => string` — identifies the caller       |
+| `skip`     | —                        | `(event) => boolean` to bypass the limit                |
+| `store`    | `memoryRateLimitStore()` | Swap in Redis/Upstash to share counters across replicas |
+
+Over-limit requests get `429` with `Retry-After` and `RateLimit-*` headers. **The default store is in-process**, so each replica counts separately — behind a load balancer the effective limit is `max × replicas`. The default key falls back to `x-forwarded-for` / `x-real-ip`; if your proxy strips both, every caller shares one bucket, so pass `key` explicitly.
+
+Implement `RateLimitStore` for a shared backend:
+
+```ts
+type RateLimitStore = {
+  hit(key: string, windowMs: number): Promise<{ count: number; resetAt: number }>;
+  dispose?(): void;
+};
+```
 
 `db` is required — `@outerjs/server`'s core has no database opinion baked in. For the zero-infra default (embedded [PGlite](https://pglite.dev), real Postgres, writes to local disk, no external infra to run), import the helper from the `/pglite` subpath rather than the framework's dependency tree pulling it in unconditionally:
 
@@ -231,17 +271,19 @@ Auto-generates six CRUD procedures for a schema table. `name` must match a table
 // Registers: post.list, post.get, post.create, post.createMany, post.update, post.delete
 ```
 
-| Procedure           | Input                                            | Output            | Description                                      |
-| ------------------- | ------------------------------------------------ | ----------------- | ------------------------------------------------ |
-| `{name}.list`       | `{ where?, orderBy?, take?, skip?, include? }`   | `Row[]`           | Filtered/ordered `SELECT`                        |
-| `{name}.get`        | `{ <pk>: ..., include? }`                        | `Row \| null`     | Fetch by primary key                             |
-| `{name}.create`     | Row minus serial PK, defaults, and `ownerColumn` | `Row`             | `INSERT ... RETURNING *`                         |
-| `{name}.createMany` | `{ data: createInput[] }` (1–1000 rows)          | `Row[]`           | Batch `INSERT ... RETURNING *`                   |
-| `{name}.update`     | `{ where: { <pk> }, data: partialUpdateInput }`  | `Row`             | `UPDATE ... RETURNING *`                         |
-| `{name}.delete`     | `{ <pk>: ... }`                                  | `Row`             | `DELETE ... RETURNING *`                         |
-| `{name}.live`       | `{ where?, orderBy?, take? }`                    | stream of `Row[]` | `list` as a live query — only when `live` is set |
+| Procedure           | Input                                                             | Output            | Description                                      |
+| ------------------- | ----------------------------------------------------------------- | ----------------- | ------------------------------------------------ |
+| `{name}.list`       | `{ where?, orderBy?, take?, skip?, include? }`                    | `Row[]`           | Filtered/ordered `SELECT`                        |
+| `{name}.get`        | `{ <pk>: ..., include? }`                                         | `Row \| null`     | Fetch by primary key                             |
+| `{name}.create`     | Row minus serial PK and `ownerColumn`; defaulted columns optional | `Row`             | `INSERT ... RETURNING *`                         |
+| `{name}.createMany` | `{ data: createInput[] }` (1–1000 rows)                           | `Row[]`           | Batch `INSERT ... RETURNING *`                   |
+| `{name}.update`     | `{ where: { <pk> }, data: partialUpdateInput }`                   | `Row`             | `UPDATE ... RETURNING *`                         |
+| `{name}.delete`     | `{ <pk>: ... }`                                                   | `Row`             | `DELETE ... RETURNING *`                         |
+| `{name}.live`       | `{ where?, orderBy?, take? }`                                     | stream of `Row[]` | `list` as a live query — only when `live` is set |
 
-Input types are derived from column definitions at build time. `serial` primary key columns, columns with `.default()`, and `ownerColumn` are omitted from create input. Update `data` accepts any non–serial-PK column (including columns with `.default()`, such as boolean flags); `ownerColumn` is still omitted from update input.
+Input types are derived from column definitions at build time. `serial` primary key columns and `ownerColumn` are omitted from create input — the database and the session own those. Columns with `.default()` are **optional** on create: omit one and the DB default applies, pass one and it wins (so a defaulted enum like `status` is still settable at creation). Nullable columns are optional too. Update `data` accepts any non–serial-PK column; `ownerColumn` is omitted there as well.
+
+A supplied `ownerColumn` is stripped rather than rejected, so passing someone else's id cannot spoof ownership — the value from the session is used regardless.
 
 `list` accepts the same Prisma-style query surface as Sola, validated per column type:
 
@@ -433,7 +475,15 @@ Seals the router and constructs the HTTP server. Returns a `BuiltOuter` with:
 - `handle(request: Request): Promise<Response>` — fetch-compatible handler
 - `migrator` — Kysely `Migrator` instance (see Migrations)
 - `db` — the same typed `context.db` handed to procedures (Kysely + `query` + `transact`), for out-of-band work like seeding after migrations (e.g. upserting a single admin account from an `ADMIN_EMAIL` env var, as the minimal template does)
-- `client(headers?)` — in-process `RouterClient<TRouter>` (oRPC's `createRouterClient`) that calls procedures directly, skipping HTTP and the oRPC wire protocol. For SSR (Server Components, server functions) where Outer runs in the same process as the frontend. `headers` is a `Headers` or a `() => Headers | Promise<Headers>` (evaluated per call — pass the framework's request-headers accessor so permissions and `context.auth` see the caller's session); defaults to empty headers.
+- `client(headers?)` — in-process `RouterClient<TRouter>` (oRPC's `createRouterClient`) that calls procedures directly, skipping HTTP and the oRPC wire protocol. For SSR (Server Components, server functions) where Outer runs in the same process as the frontend. `headers` is a `Headers` or a `() => Headers | Promise<Headers>` (evaluated per call — pass the framework's request-headers accessor so permissions and `context.auth` see the caller's session); defaults to empty headers. The session is resolved from those headers exactly as the HTTP path does, so `context.user` and every permission check behave identically.
+- `close()` — releases the database pool (and the embedded PGlite instance with it) plus any rate-limit timers. Call it from your `SIGTERM`/`SIGINT` handler, and in tests that build more than one instance. Idempotent; the instance must not be used afterwards.
+
+```ts
+process.on("SIGTERM", async () => {
+  await server.close();
+  process.exit(0);
+});
+```
 
 ```ts
 // e.g. Next.js Server Component
@@ -569,13 +619,80 @@ const v1_0 = schema("1.0.0")
 
 ### Column types
 
-`text` · `varchar` · `integer` · `serial` · `boolean` · `timestamp` · `jsonb` · `uuid`
+`text` · `varchar` · `integer` · `serial` · `bigint` · `decimal` · `real` · `boolean` · `timestamp` · `date` · `jsonb` · `uuid` · `bytes`
+
+| Column    | Postgres           | SQLite    | TS type      | Notes                                                                                    |
+| --------- | ------------------ | --------- | ------------ | ---------------------------------------------------------------------------------------- |
+| `bigint`  | `bigint`           | `integer` | `string`     | 64-bit; a JS `number` loses precision past 2^53, so it is read and written as a string   |
+| `decimal` | `numeric`          | `text`    | `string`     | Exact. SQLite maps to `text`, not `NUMERIC`, whose float affinity would defeat the point |
+| `real`    | `double precision` | `real`    | `number`     | Approximate; don't store money in it                                                     |
+| `date`    | `date`             | `text`    | `Date`       | Calendar date, no time component                                                         |
+| `bytes`   | `bytea`            | `blob`    | `Uint8Array` | Raw bytes                                                                                |
 
 ### Column modifiers
 
-`.primaryKey()` · `.unique()` · `.nullable()` · `.default(expr: string)` · `.references(table, column)`
+`.primaryKey()` · `.unique()` · `.nullable()` · `.index()` · `.default(value)` · `.defaultSql(expr)` · `.references(table, column, actions?)` · `.enum(values, options?)`
+
+#### `.default(value)` / `.defaultSql(expr)`
+
+`.default()` takes the **value**, quoted for you by column type — not a SQL fragment:
+
+```ts
+t.text().default("user"); // → default 'user'
+t.boolean().default(false); // → default false   (postgres) / default 0 (sqlite)
+t.integer().default(0); // → default 0
+```
+
+Embedded quotes are escaped, and an enum column only accepts one of its declared values. For expressions, use `.defaultSql("CURRENT_TIMESTAMP")`, which is emitted verbatim.
+
+#### `.references(table, column, actions?)`
+
+```ts
+userId: t.text().references("user", "id", { onDelete: "cascade" });
+```
+
+`onDelete`/`onUpdate` accept `"cascade"`, `"set null"`, `"restrict"`, or `"no action"`. **Without one, deleting a referenced row fails with a foreign-key violation** — so the built-in `.auth()` tables cascade `session.userId` and `account.userId`, and `.files()` cascades its pivots and sets `file.userId` to null.
+
+#### `.index()`
+
+Adds a non-unique index named `{table}_{column}_idx`. `.unique()` columns already have one, so `.index()` on them is a no-op rather than a duplicate. The built-in FK columns are indexed.
 
 `timestamp` maps to `timestamptz` in DDL.
+
+#### `.enum(values, options?)`
+
+Restricts a `text`/`varchar` column to a declared set of values (throws at build time on any other column type, on an empty list, or on a value containing a comma):
+
+```ts
+.table("doc", (t) => ({ status: t.text().enum(["draft", "published"]).default("'draft'") }))
+```
+
+The column's TS type narrows from `string` to the union, so `context.db` writes and resource inputs reject anything else, and `.resource()` procedures validate against the list with `z.enum`. `_admin.data.create/update` check it too, since admin rows are untyped. `_admin.meta` reports the values as `columns[].enum` (`null` when unconstrained) — the hub uses that to render a `<Select>` instead of a text input.
+
+##### `{ multiple: true }`
+
+Stores a **set** of the declared values in the one text column, comma-separated — the format Better Auth's admin plugin already uses for `user.role`, and the one `hasRole()` reads:
+
+```ts
+.table("user", (t) => ({ role: t.text().enum(["user", "admin", "support"], { multiple: true }) }))
+// "admin,support"  ✓     "admin,root"  ✗ (unknown role)     "admin,admin"  ✗ (duplicate)
+```
+
+Each part is validated independently; unknown parts and duplicates are rejected. The TS type stays `string` rather than becoming a union — enumerating every legal combination is combinatorial — so use the exported `parseSet(value)` to read one and `toSet(values)` to build one. `_admin.meta` reports `columns[].multiple`, which the hub renders as a checkbox group.
+
+**The SQL type is unchanged** — the column stays `text`, with no `CREATE TYPE` and no `CHECK` constraint. The constraint is enforced by Outer, not the database, so editing the value list never produces a migration and existing rows are never rejected retroactively. Values written outside Outer (raw SQL, another client) are not validated.
+
+`.auth()` deliberately leaves `user.role` unconstrained: Better Auth's admin plugin allows custom role names and comma-separated lists (`"support,admin"`). Apps that want a fixed set opt in, either through `.auth({ roles })` or by re-declaring the column:
+
+```ts
+schema("1.0.0").auth({ roles: ["user", "admin"] });
+// identical to:
+schema("1.0.0")
+  .auth()
+  .table("user", (t) => ({ role: t.text().enum(["user", "admin"]).default("'user'") }));
+```
+
+`roles` is the shorter form and keeps the column's default without restating it; re-declaring is what you want when changing anything else about `role`.
 
 ### `timestamps(t)`
 
@@ -601,6 +718,16 @@ const v1_0 = schema("1.0.0")
   .table("todo", (t) => ({ id: t.text().primaryKey(), title: t.text(), ...timestamps(t) }))
   .build();
 ```
+
+`.auth({ roles })` narrows `user.role` to a fixed set — see [`.enum(values)`](#enumvalues) — while leaving its `'user'` default intact:
+
+```ts
+schema("1.0.0").auth({ roles: ["user", "admin"] });
+// user.role is typed "user" | "admin"; writes outside the set are rejected,
+// and `_admin.meta` reports the values so the hub renders a select.
+```
+
+Omitted by default, because Better Auth's admin plugin permits custom role names and comma-separated lists (`"support,admin"`) that a closed set would reject.
 
 Re-declaring a table merges columns (later definition wins on name collisions), so auth tables can be extended:
 
@@ -662,10 +789,22 @@ const { error, results } = await server.migrator.migrateToLatest();
 
 Uses a custom `SchemaMigrationProvider` that diffs consecutive schema versions. Each `schema("x.y.z")` call becomes one Kysely migration keyed by its version string. Diffing (which schema is "previous" vs "current") happens in numeric-per-segment version order. Kysely itself still applies migrations in plain lexicographic order of the version-string keys — for double-digit segments this can disagree with numeric order (`"1.10.0"` sorts before `"1.2.0"` as a string). `getMigrations()` detects this mismatch and throws before migrating, telling you to zero-pad segments (e.g. `"1.02.00"`) so lexicographic and numeric order match.
 
-**Up** — creates new tables, adds new columns, drops removed columns.  
+**Up** — creates new tables, adds new columns (with their indexes), drops removed columns.  
 **Down** — reverses: drops added tables/columns, restores dropped ones.
 
-Type changes on existing columns are not handled automatically — use `context.db` directly for those.
+### Changed columns are refused, not ignored
+
+Editing a column **in place** — its type, nullability, default, uniqueness, primary key, foreign key, or index — produces no add and no drop, so there is nothing for the diff to emit. Rather than migrate to nothing and leave the schema and database silently disagreeing, `getMigrations()` throws, naming each offending table and column:
+
+```
+Schema version "2.0.0" changes existing columns, which Outer cannot migrate automatically:
+  thing
+    name: became nullable
+```
+
+Adding and dropping columns is supported; altering one is not. Either revert the edit or write the `ALTER` yourself and keep the schema in sync.
+
+**Renaming a column is a drop plus an add**, which the diff will happily perform — and that destroys the old column's data. Copy the data across yourself before removing the old name.
 
 ---
 
@@ -869,7 +1008,7 @@ Outer's core has no CLI — write the file above by hand, or generate it with yo
 `.resource()` is strictly typed too: the six generated procedures (`list`/`get`/`create`/`createMany`/`update`/`delete`) get their input and output types derived from the table's column definitions (`ResourceProcedures` in `resource.ts`, mirroring the runtime Zod schemas). Concretely:
 
 - Rows come back with each column's TS type (`serial`/`integer` → `number`, `timestamp` → `Date | string` since drivers differ, nullable columns → `T | null`).
-- `create`/`createMany` inputs omit serial primary keys, columns with `.default()`, and the resource's `ownerColumn` (auto-filled from the session); nullable columns are optional.
+- `create`/`createMany` inputs omit serial primary keys and the resource's `ownerColumn` (auto-filled from the session); columns with `.default()` and nullable columns are optional.
 - `update` `data` is a partial of all updatable columns (serial PK and `ownerColumn` omitted; defaulted columns such as booleans are included so `false` is valid).
 - `get`/`update`/`delete` take `{ <pk>: value }` typed from the declared primary key column.
 - `list` accepts a typed `where` filter (per-column values or operator objects), `orderBy`, `take`, and `skip`.

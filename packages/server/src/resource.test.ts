@@ -10,7 +10,7 @@ const s = schema("1.0.0")
     id: t.serial().primaryKey(),
     title: t.text(),
     userId: t.text().nullable(),
-    status: t.text().default("'draft'"),
+    status: t.text().default("draft"),
   }))
   .build();
 
@@ -138,7 +138,7 @@ const todoSchema = schema("1.0.0")
   .table("todo", (t) => ({
     id: t.serial().primaryKey(),
     title: t.text(),
-    completed: t.boolean().default("false"),
+    completed: t.boolean().default(false),
   }))
   .build();
 
@@ -505,18 +505,18 @@ const authSchema = schema("1.0.0")
     id: t.text().primaryKey(),
     name: t.text(),
     email: t.text().unique(),
-    emailVerified: t.boolean().default("false"),
+    emailVerified: t.boolean().default(false),
     image: t.text().nullable(),
-    role: t.text().default("'user'"),
-    createdAt: t.timestamp().default("CURRENT_TIMESTAMP"),
-    updatedAt: t.timestamp().default("CURRENT_TIMESTAMP"),
+    role: t.text().default("user"),
+    createdAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
+    updatedAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
   }))
   .table("session", (t) => ({
     id: t.text().primaryKey(),
     expiresAt: t.timestamp(),
     token: t.text().unique(),
-    createdAt: t.timestamp().default("CURRENT_TIMESTAMP"),
-    updatedAt: t.timestamp().default("CURRENT_TIMESTAMP"),
+    createdAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
+    updatedAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
     ipAddress: t.text().nullable(),
     userAgent: t.text().nullable(),
     userId: t.text().references("user", "id"),
@@ -533,16 +533,16 @@ const authSchema = schema("1.0.0")
     refreshTokenExpiresAt: t.timestamp().nullable(),
     scope: t.text().nullable(),
     password: t.text().nullable(),
-    createdAt: t.timestamp().default("CURRENT_TIMESTAMP"),
-    updatedAt: t.timestamp().default("CURRENT_TIMESTAMP"),
+    createdAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
+    updatedAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
   }))
   .table("verification", (t) => ({
     id: t.text().primaryKey(),
     identifier: t.text(),
     value: t.text(),
     expiresAt: t.timestamp(),
-    createdAt: t.timestamp().default("CURRENT_TIMESTAMP"),
-    updatedAt: t.timestamp().default("CURRENT_TIMESTAMP"),
+    createdAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
+    updatedAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
   }))
   .table("post", (t) => ({
     id: t.serial().primaryKey(),
@@ -642,6 +642,20 @@ describe("resource — owner permission (real sessions)", () => {
       }),
     );
     postId = ((await res.json()) as any).json.id;
+  });
+
+  test("a supplied ownerColumn is ignored — it is filled from the session", async () => {
+    // Defaulted columns became settable on create; the owner column must not be.
+    // It is stripped from the input, so passing one cannot spoof ownership.
+    const res = await app.handle(
+      new Request("http://localhost/rpc/post/create", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: owner.cookie },
+        body: JSON.stringify({ json: { title: "spoof attempt", userId: other.userId } }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as any).json.userId).toBe(owner.userId);
   });
 
   test("owner can update their own row", async () => {
@@ -759,5 +773,188 @@ describe("resource — admin permission (real sessions)", () => {
   test("admin can delete", async () => {
     const { status } = await rpcAs(app, admin.cookie, "delete", { id: postId });
     expect(status).toBe(200);
+  });
+});
+
+// ── Enum columns ──────────────────────────────────────────────────────────
+
+describe("resource — enum columns", () => {
+  const enumSchema = schema("1.0.0")
+    .table("doc", (t) => ({
+      id: t.serial().primaryKey(),
+      title: t.text(),
+      status: t.text().enum(["draft", "published"]).default("draft"),
+      // multi-valued: a comma-separated set in one column, like user.role
+      tags: t.text().enum(["news", "sport", "tech"], { multiple: true }).nullable(),
+    }))
+    .build();
+  const enumDb = testDb([enumSchema]);
+
+  let app: any;
+  beforeAll(async () => {
+    app = new Outer({ name: "Test", baseUrl: "http://localhost", db: await enumDb() })
+      .schema(enumSchema)
+      .auth({ secret: "test-secret" })
+      .resource("doc")
+      .build();
+    await app.migrator.migrateToLatest();
+  });
+
+  const call = async (action: string, input: unknown) => {
+    const res = await app.handle(
+      new Request(`http://localhost/rpc/doc/${action}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ json: input }),
+      }),
+    );
+    return { status: res.status, output: ((await res.json()) as any).json };
+  };
+
+  test("accepts a declared single value", async () => {
+    const { status, output } = await call("create", { title: "a", status: "published" });
+    expect(status).toBe(200);
+    expect(output.status).toBe("published");
+  });
+
+  test("a defaulted enum can be omitted on create", async () => {
+    const { status, output } = await call("create", { title: "a2" });
+    expect(status).toBe(200);
+    expect(output.status).toBe("draft"); // DB default applied
+  });
+
+  test("rejects an undeclared single value", async () => {
+    const { status } = await call("create", { title: "b", status: "archived" });
+    expect(status).toBe(400);
+  });
+
+  test("update validates the enum too", async () => {
+    const { output } = await call("create", { title: "g", status: "draft" });
+    const bad = await call("update", { where: { id: output.id }, data: { status: "archived" } });
+    expect(bad.status).toBe(400);
+    const ok = await call("update", { where: { id: output.id }, data: { status: "published" } });
+    expect(ok.status).toBe(200);
+    expect(ok.output.status).toBe("published");
+  });
+
+  test("accepts several values in a multiple column", async () => {
+    const { status, output } = await call("create", {
+      title: "c",
+      status: "draft",
+      tags: "news,tech",
+    });
+    expect(status).toBe(200);
+    expect(output.tags).toBe("news,tech");
+  });
+
+  test("rejects a set containing an undeclared value", async () => {
+    const { status } = await call("create", { title: "d", tags: "news,gossip" });
+    expect(status).toBe(400);
+  });
+
+  test("update validates a multiple column too", async () => {
+    const { output } = await call("create", { title: "h", status: "draft", tags: "news" });
+    const bad = await call("update", { where: { id: output.id }, data: { tags: "news,gossip" } });
+    expect(bad.status).toBe(400);
+    const ok = await call("update", { where: { id: output.id }, data: { tags: "news,sport" } });
+    expect(ok.status).toBe(200);
+    expect(ok.output.tags).toBe("news,sport");
+  });
+
+  test("rejects duplicate values in a set", async () => {
+    const { status } = await call("create", { title: "e", tags: "news,news" });
+    expect(status).toBe(400);
+  });
+
+  test("a nullable multiple column still accepts null", async () => {
+    const { status, output } = await call("create", { title: "f", status: "draft", tags: null });
+    expect(status).toBe(200);
+    expect(output.tags).toBeNull();
+  });
+});
+
+// ── In-process client() ────────────────────────────────────────────────────
+
+describe("client() — in-process router client", () => {
+  const s2 = schema("1.0.0")
+    .auth()
+    .table("note", (t) => ({
+      id: t.serial().primaryKey(),
+      title: t.text(),
+      userId: t.text().nullable(),
+    }))
+    .build();
+  const noteDb = testDb([s2]);
+
+  let app: any;
+  let cookie: string;
+  let userId: string;
+  let sessionLookups: number;
+
+  beforeAll(async () => {
+    app = new Outer({ name: "T", baseUrl: "http://localhost", db: await noteDb() })
+      .schema(s2)
+      .auth({ secret: "test-secret", emailAndPassword: fastPasswordHashing })
+      .procedure(
+        "me.whoami",
+        (base) => base.handler(async ({ context }) => ({ id: (context as any).user?.id ?? null })),
+        { permission: "authenticated" },
+      )
+      .resource("note", { permissions: { create: "authenticated" }, ownerColumn: "userId" })
+      .build();
+    await app.migrator.migrateToLatest();
+
+    const res = await app.handle(
+      new Request("http://localhost/api/auth/sign-up/email", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "client@test.com", password: "password123", name: "N" }),
+      }),
+    );
+    userId = ((await res.json()) as any).user.id;
+    cookie = res.headers
+      .getSetCookie()
+      .map((c: string) => c.split(";")[0])
+      .join("; ");
+
+    // count how many times Better Auth is asked to resolve a session
+    const api = (app as any).auth.api;
+    const original = api.getSession.bind(api);
+    sessionLookups = 0;
+    api.getSession = async (...args: unknown[]) => {
+      sessionLookups++;
+      return original(...args);
+    };
+  });
+
+  test("a permissioned procedure works through client() with session headers", async () => {
+    const client = app.client(new Headers({ cookie }));
+    const out = await client.me.whoami();
+    expect(out.id).toBe(userId);
+  });
+
+  test("client() without headers is treated as signed out", async () => {
+    const client = app.client();
+    await expect(client.me.whoami()).rejects.toThrow();
+  });
+
+  test("a resource permission works through client() too", async () => {
+    const client = app.client(new Headers({ cookie }));
+    const created = await client.note.create({ title: "via client" });
+    expect(created.userId).toBe(userId); // ownerColumn filled from the session
+  });
+
+  test("an HTTP request resolves the session exactly once", async () => {
+    sessionLookups = 0;
+    const res = await app.handle(
+      new Request("http://localhost/rpc/note/create", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({ json: { title: "counted" } }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    // permission check + ownerColumn fill both reuse the context-resolved user
+    expect(sessionLookups).toBe(1);
   });
 });

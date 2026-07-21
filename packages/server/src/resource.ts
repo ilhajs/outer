@@ -4,7 +4,7 @@ import { NoResultError } from "kysely";
 import { z } from "zod/v4";
 
 import { DialectKind } from "./migrator";
-import { ColumnDef, RelationDef, TablesDef } from "./schema";
+import { AnyColumn, ColumnDef, parseSet, RelationDef, TablesDef } from "./schema";
 
 // ── Permission types ───────────────────────────────────────────────────────
 
@@ -98,6 +98,11 @@ type OutputValueMap = {
   integer: number;
   boolean: boolean;
   timestamp: Date | string;
+  date: Date | string;
+  bigint: string;
+  decimal: string;
+  real: number;
+  bytes: Uint8Array;
   jsonb: unknown;
   uuid: string;
 };
@@ -110,39 +115,58 @@ type InputValueMap = {
   integer: number;
   boolean: boolean;
   timestamp: string;
+  date: string;
+  /** Strings, so 64-bit ints and exact decimals survive JSON without float rounding. */
+  bigint: string;
+  decimal: string;
+  real: number;
+  bytes: Uint8Array;
   jsonb: unknown;
   uuid: string;
 };
 
 // Both maps are indexed with `SQLType` keys (via `ColumnDef["_type"]`), so a
 // missing entry is a compile error at the `ColOut`/`ColIn` usage sites.
-type ColOut<C extends ColumnDef> = C["_nullable"] extends true
-  ? OutputValueMap[C["_type"]] | null
-  : OutputValueMap[C["_type"]];
+type EnumOf<C extends ColumnDef> =
+  C extends ColumnDef<any, any, any, any, infer V> ? (string extends V ? never : V) : never;
 
-type ColIn<C extends ColumnDef> = InputValueMap[C["_type"]];
+type ColOut<C extends ColumnDef> = C["_nullable"] extends true
+  ? ([EnumOf<C>] extends [never] ? OutputValueMap[C["_type"]] : EnumOf<C>) | null
+  : [EnumOf<C>] extends [never]
+    ? OutputValueMap[C["_type"]]
+    : EnumOf<C>;
+
+type ColIn<C extends ColumnDef> = [EnumOf<C>] extends [never]
+  ? InputValueMap[C["_type"]]
+  : EnumOf<C>;
 
 /** A full row as returned by resource procedures. */
-export type ResourceRow<Cols extends Record<string, ColumnDef>> = {
+export type ResourceRow<Cols extends Record<string, AnyColumn>> = {
   [K in keyof Cols]: ColOut<Cols[K]>;
 };
 
 /** Columns the runtime `createSchema` omits: serial PKs (db-generated) and defaulted columns. The `ownerColumn` is excluded separately via `TOmit`. */
+/** Columns the runtime `createSchema` omits entirely: serial PKs (db-generated). The `ownerColumn` is excluded separately via `TOmit`. */
 type OmitOnCreate<C extends ColumnDef> = [C["_type"], C["_primaryKey"]] extends ["serial", true]
   ? true
-  : C["_hasDefault"] extends true
+  : false;
+
+/** Defaulted columns are accepted on create but never required — the DB fills them in. */
+type OptionalOnCreate<C extends ColumnDef> = C["_hasDefault"] extends true
+  ? true
+  : C["_nullable"] extends true
     ? true
     : false;
 
 export type ResourceCreateInput<
-  Cols extends Record<string, ColumnDef>,
+  Cols extends Record<string, AnyColumn>,
   TOmit extends string = never,
 > = {
   [K in keyof Cols as K extends TOmit
     ? never
     : OmitOnCreate<Cols[K]> extends true
       ? never
-      : Cols[K]["_nullable"] extends true
+      : OptionalOnCreate<Cols[K]> extends true
         ? never
         : K]: ColIn<Cols[K]>;
 } & {
@@ -150,9 +174,9 @@ export type ResourceCreateInput<
     ? never
     : OmitOnCreate<Cols[K]> extends true
       ? never
-      : Cols[K]["_nullable"] extends true
+      : OptionalOnCreate<Cols[K]> extends true
         ? K
-        : never]?: ColIn<Cols[K]> | null;
+        : never]?: Cols[K]["_nullable"] extends true ? ColIn<Cols[K]> | null : ColIn<Cols[K]>;
 };
 
 /** Columns omitted from update input: serial PKs only. Defaulted and nullable columns are updatable. */
@@ -161,7 +185,7 @@ type OmitOnUpdate<C extends ColumnDef> = [C["_type"], C["_primaryKey"]] extends 
   : false;
 
 export type ResourceUpdateInput<
-  Cols extends Record<string, ColumnDef>,
+  Cols extends Record<string, AnyColumn>,
   TOmit extends string = never,
 > = {
   [K in keyof Cols as K extends TOmit
@@ -181,12 +205,12 @@ export type ResourceUpdateInput<
         : never]?: ColIn<Cols[K]> | null;
 };
 
-type PKName<Cols extends Record<string, ColumnDef>> = {
+type PKName<Cols extends Record<string, AnyColumn>> = {
   [K in keyof Cols]: Cols[K]["_primaryKey"] extends true ? K : never;
 }[keyof Cols];
 
 /** `{ <pk>: value }` — falls back to `{ id }` when no PK is declared, matching the runtime `whereSchema`. */
-type ResourceWhereKey<Cols extends Record<string, ColumnDef>> = [PKName<Cols>] extends [never]
+type ResourceWhereKey<Cols extends Record<string, AnyColumn>> = [PKName<Cols>] extends [never]
   ? { id: string | number }
   : { [K in PKName<Cols>]: ColIn<Cols[K]> };
 
@@ -206,7 +230,7 @@ type FieldFilter<V> = {
   endsWith?: string;
 };
 
-export type ResourceFilter<Cols extends Record<string, ColumnDef>> = {
+export type ResourceFilter<Cols extends Record<string, AnyColumn>> = {
   [K in keyof Cols]?: ColIn<Cols[K]> | null | FieldFilter<ColIn<Cols[K]>>;
 } & {
   AND?: ResourceFilter<Cols>[];
@@ -217,7 +241,7 @@ export type ResourceFilter<Cols extends Record<string, ColumnDef>> = {
 /** Relations aren't tracked at the type level, so `include` stays loose — the runtime schema rejects unknown relation names. */
 type IncludeInput = Record<string, boolean>;
 
-export type ResourceListInput<Cols extends Record<string, ColumnDef>> = {
+export type ResourceListInput<Cols extends Record<string, AnyColumn>> = {
   where?: ResourceFilter<Cols>;
   orderBy?: { [K in keyof Cols]?: "asc" | "desc" }[];
   take?: number;
@@ -236,7 +260,7 @@ export type TypedProcedure<TInput, TOutput> = Procedure<
 
 /** The six procedures `.resource()` registers, strictly typed from the table's columns. */
 export type ResourceProcedures<
-  Cols extends Record<string, ColumnDef>,
+  Cols extends Record<string, AnyColumn>,
   TOmit extends string = never,
 > = {
   list: TypedProcedure<ResourceListInput<Cols> | undefined, ResourceRow<Cols>[]>;
@@ -280,8 +304,15 @@ const OUTPUT_TYPE_TO_ZOD: Record<string, z.ZodType> = {
   text: z.string(),
   varchar: z.string(),
   integer: z.number().int(),
+  // Drivers hand these back as strings (or numbers on SQLite); normalise to string
+  // so exact values never round-trip through a float.
+  bigint: z.union([z.string(), z.number()]).transform(String),
+  decimal: z.union([z.string(), z.number()]).transform(String),
+  real: z.number(),
   boolean: z.union([z.boolean(), z.number()]).transform((v) => Boolean(v)),
   timestamp: z.union([z.string(), z.date()]),
+  date: z.union([z.string(), z.date()]),
+  bytes: z.instanceof(Uint8Array),
   jsonb: z.unknown(),
   uuid: z.uuid(),
 };
@@ -291,24 +322,67 @@ const INPUT_TYPE_TO_ZOD: Record<string, z.ZodType> = {
   text: z.string(),
   varchar: z.string(),
   integer: z.number().int(),
+  bigint: z.string().regex(/^-?\d+$/, "must be an integer string"),
+  decimal: z.string().regex(/^-?\d+(\.\d+)?$/, "must be a decimal string"),
+  real: z.number(),
   boolean: z.boolean(),
   timestamp: z.iso.datetime({ offset: true }),
+  date: z.iso.date(),
+  bytes: z.instanceof(Uint8Array),
   jsonb: z.unknown(),
   uuid: z.uuid(),
 };
 
+/**
+ * `.enum([...])` columns validate against the value list rather than the raw SQL
+ * type. A `{ multiple: true }` column holds a comma-separated set, so each part
+ * is checked instead of the whole string.
+ */
+function enumZod(col: ColumnDef): z.ZodType | undefined {
+  const values = col._enum;
+  if (!values || values.length === 0) return undefined;
+  if (!col._multiple) return z.enum([...values] as [string, ...string[]]);
+  const allowed = new Set<string>(values);
+  return z.string().superRefine((raw, ctx) => {
+    const parts = parseSet(raw);
+    if (parts.length === 0) {
+      ctx.addIssue({ code: "custom", message: `expected one or more of: ${values.join(", ")}` });
+      return;
+    }
+    for (const part of parts) {
+      if (!allowed.has(part)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `unknown value "${part}" — expected one or more of: ${values.join(", ")}`,
+        });
+      }
+    }
+    if (new Set(parts).size !== parts.length) {
+      ctx.addIssue({ code: "custom", message: "duplicate values are not allowed" });
+    }
+  });
+}
+
 function colToZod(col: ColumnDef, map: Record<string, z.ZodType>): z.ZodType {
-  const base = map[col._type] ?? z.unknown();
+  const base = enumZod(col) ?? map[col._type] ?? z.unknown();
   return col._nullable ? z.union([base, z.null()]).optional() : base;
 }
 
 /** Column types that support range operators (`lt`/`lte`/`gt`/`gte`). */
-const RANGE_TYPES = new Set(["serial", "integer", "timestamp"]);
+const RANGE_TYPES = new Set([
+  "serial",
+  "integer",
+  "bigint",
+  "decimal",
+  "real",
+  "timestamp",
+  "date",
+]);
 const TEXT_TYPES = new Set(["text", "varchar", "uuid"]);
 
 /** Per-column filter object mirroring Sola's `FieldFilter` operators. */
 function buildFieldFilterSchema(col: ColumnDef): z.ZodType {
-  const base = INPUT_TYPE_TO_ZOD[col._type] ?? z.unknown();
+  const base = enumZod(col) ?? INPUT_TYPE_TO_ZOD[col._type] ?? z.unknown();
   const shape: Record<string, z.ZodType> = {
     equals: base,
     not: base,
@@ -331,7 +405,7 @@ function buildFieldFilterSchema(col: ColumnDef): z.ZodType {
 }
 
 /** Recursive `where` schema (per-column value/filter plus `AND`/`OR`/`NOT`) validating Sola's `WhereClause`. */
-function buildFilterSchema(cols: Record<string, ColumnDef>): z.ZodType {
+function buildFilterSchema(cols: Record<string, AnyColumn>): z.ZodType {
   const fieldShape: Record<string, z.ZodType> = {};
   for (const [name, col] of Object.entries(cols)) {
     const base = INPUT_TYPE_TO_ZOD[col._type] ?? z.unknown();
@@ -348,7 +422,7 @@ function buildFilterSchema(cols: Record<string, ColumnDef>): z.ZodType {
   return filterSchema;
 }
 
-function buildOrderBySchema(cols: Record<string, ColumnDef>): z.ZodType {
+function buildOrderBySchema(cols: Record<string, AnyColumn>): z.ZodType {
   const shape: Record<string, z.ZodType> = {};
   for (const name of Object.keys(cols)) shape[name] = z.enum(["asc", "desc"]).optional();
   return z.array(z.object(shape)).min(1);
@@ -390,7 +464,7 @@ function buildSchemas({
   cols,
   ownerColumn,
 }: {
-  cols: Record<string, ColumnDef>;
+  cols: Record<string, AnyColumn>;
   ownerColumn?: string;
 }) {
   const entries = Object.entries(cols);
@@ -408,13 +482,16 @@ function buildSchemas({
     : z.union([z.string(), z.number()]);
   const whereSchema = z.object({ [pkName]: pkZod });
 
-  // Create omits: serial PK (db-generated), columns with defaults, ownerColumn (auto-filled on create)
+  // Create omits only what the caller must not supply: the serial PK (db-generated)
+  // and ownerColumn (auto-filled from the session). Columns with a DB default are
+  // *optional* rather than omitted — omit one and the default applies, pass one and
+  // it wins. Omitting them outright made defaulted enums unsettable at creation.
   const createShape: Record<string, z.ZodType> = {};
   for (const [name, col] of entries) {
     if (col._type === "serial" && col._primaryKey) continue;
-    if (col._default !== null) continue;
     if (ownerColumn && name === ownerColumn) continue;
-    createShape[name] = colToZod(col, INPUT_TYPE_TO_ZOD);
+    const field = colToZod(col, INPUT_TYPE_TO_ZOD);
+    createShape[name] = col._default !== null ? field.optional() : field;
   }
   const createSchema = z.object(createShape);
 
@@ -438,6 +515,13 @@ export async function getSession(context: any) {
       "This resource permission requires auth — call `.auth()` on the Outer instance before `.build()`",
     );
   }
+  // `.auth()` already resolved the session for this request. Presence of the
+  // key (not truthiness) marks it as resolved — `null` means signed out, which
+  // must not trigger a second lookup.
+  if ("user" in context) {
+    if (!context.user) throw new ORPCError("UNAUTHORIZED", { message: "You must be signed in" });
+    return context.user as { id: string; role?: string; [key: string]: unknown };
+  }
   const result = await context.auth.api.getSession({ headers: context.headers });
   if (!result?.session || !result?.user) {
     throw new ORPCError("UNAUTHORIZED", { message: "You must be signed in" });
@@ -450,8 +534,7 @@ export async function getSession(context: any) {
  * (e.g. `"admin,user"`), so membership is checked per role, not by equality.
  */
 export function hasRole(user: { role?: unknown }, allowed: string[]): boolean {
-  const roles = typeof user.role === "string" ? user.role.split(",").map((r) => r.trim()) : [];
-  return roles.some((r) => allowed.includes(r));
+  return parseSet(user.role).some((role) => allowed.includes(role));
 }
 
 /**
@@ -461,6 +544,7 @@ export function hasRole(user: { role?: unknown }, allowed: string[]): boolean {
  */
 async function optionalUser(context: any): Promise<{ id: string; [key: string]: unknown } | null> {
   if (!context.auth) return null;
+  if ("user" in context) return (context.user as { id: string } | null) ?? null;
   const result = await context.auth.api.getSession({ headers: context.headers });
   return result?.user ?? null;
 }
@@ -571,7 +655,7 @@ async function fetchForPermission(
 
 export function buildResourceProcedures(
   tableName: string,
-  cols: Record<string, ColumnDef>,
+  cols: Record<string, AnyColumn>,
   base: Builder<any, any>,
   options: ResourceOptions = {},
   kind: DialectKind = "postgres",

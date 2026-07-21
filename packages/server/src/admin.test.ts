@@ -9,10 +9,14 @@ import { fastPasswordHashing, testDb } from "./test-utils";
 // Better Auth core tables (via schema().auth()) plus an app table
 const adminSchema = schema("1.0.0")
   .auth()
+  // declare the recognised roles, the way an app would
+  .table("user", (t) => ({
+    role: t.text().enum(["user", "admin", "support"], { multiple: true }).default("user"),
+  }))
   .table("post", (t) => ({
     id: t.serial().primaryKey(),
     title: t.text(),
-    published: t.boolean().default("false"),
+    published: t.boolean().default(false),
     userId: t.text().nullable(),
     ...timestamps(t),
   }))
@@ -44,7 +48,9 @@ async function makeAdminApp(opts: { openapi?: boolean } = {}) {
         .handler(async ({ context, input }) => {
           await context.db
             .updateTable("user")
-            .set({ role: input.role })
+            // cast: this helper deliberately writes out-of-band values (e.g. the
+            // comma-separated "support,admin") that the column's enum excludes
+            .set({ role: input.role as "user" | "admin" })
             .where("id", "=", input.userId)
             .execute();
           return { ok: true };
@@ -173,7 +179,11 @@ describe("admin — API", () => {
     expect(userId).toMatchObject({ nullable: true, type: "text" });
     const sessionTable = output.tables.find((t: any) => t.name === "session");
     const sessionUserId = sessionTable.columns.find((c: any) => c.name === "userId");
-    expect(sessionUserId.references).toEqual({ table: "user", column: "id" });
+    expect(sessionUserId.references).toEqual({
+      table: "user",
+      column: "id",
+      onDelete: "cascade",
+    });
     expect(output.relations).toContainEqual(
       expect.objectContaining({ fromTable: "post", toTable: "user", kind: "belongsTo" }),
     );
@@ -186,6 +196,75 @@ describe("admin — API", () => {
     await rpc(openapiApp, "test/promote", { userId: openapiAdmin.userId });
     const { output } = await rpc(openapiApp, "_admin/meta", {}, openapiAdmin.cookie);
     expect(output.openapi).toBe(true);
+  });
+
+  test("meta reports enum values for constrained columns", async () => {
+    const { output } = await rpc(app, "_admin/meta", {}, admin.cookie);
+    const userTable = output.tables.find((t: any) => t.name === "user");
+    const role = userTable.columns.find((c: any) => c.name === "role");
+    expect(role.enum).toEqual(["user", "admin", "support"]);
+    expect(role.multiple).toBe(true); // several roles may be held at once
+    const title = output.tables
+      .find((t: any) => t.name === "post")
+      .columns.find((c: any) => c.name === "title");
+    expect(title.enum).toBeNull();
+  });
+
+  test("data.update accepts several roles at once", async () => {
+    const { status, output } = await rpc(
+      app,
+      "_admin/data/update",
+      { table: "user", where: { id: regular.userId }, data: { role: "admin,support" } },
+      admin.cookie,
+    );
+    expect(status).toBe(200);
+    expect(output[0].role).toBe("admin,support");
+    await rpc(
+      app,
+      "_admin/data/update",
+      { table: "user", where: { id: regular.userId }, data: { role: "user" } },
+      admin.cookie,
+    );
+  });
+
+  test("data.update rejects a set containing an unknown role", async () => {
+    const { status, output } = await rpc(
+      app,
+      "_admin/data/update",
+      { table: "user", where: { id: regular.userId }, data: { role: "admin,root" } },
+      admin.cookie,
+    );
+    expect(status).toBe(400);
+    expect(JSON.stringify(output)).toMatch(/user, admin, support/);
+  });
+
+  test("data.update rejects a value outside the column enum", async () => {
+    const { status, output } = await rpc(
+      app,
+      "_admin/data/update",
+      { table: "user", where: { id: regular.userId }, data: { role: "superuser" } },
+      admin.cookie,
+    );
+    expect(status).toBe(400);
+    expect(JSON.stringify(output)).toMatch(/user, admin, support/);
+  });
+
+  test("data.update accepts a valid enum value", async () => {
+    const { status, output } = await rpc(
+      app,
+      "_admin/data/update",
+      { table: "user", where: { id: regular.userId }, data: { role: "admin" } },
+      admin.cookie,
+    );
+    expect(status).toBe(200);
+    expect(output[0].role).toBe("admin");
+    // restore, so later tests still see a non-admin user
+    await rpc(
+      app,
+      "_admin/data/update",
+      { table: "user", where: { id: regular.userId }, data: { role: "user" } },
+      admin.cookie,
+    );
   });
 
   test("migrations reports executed migrations", async () => {

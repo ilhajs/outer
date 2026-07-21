@@ -1,5 +1,5 @@
-import type { AdminMeta } from "@outerjs/server";
-import { Button, ClipboardText, Icon, Input, Switch, Textarea } from "areia";
+import { parseSet, toSet, type AdminMeta } from "@outerjs/server";
+import { Button, Checkbox, ClipboardText, Icon, Input, Select, Switch, Textarea } from "areia";
 import { format } from "date-fns";
 import ilha from "ilha";
 import { Eye, EyeOff } from "lucide";
@@ -25,6 +25,10 @@ export function coercePk(column: Column, raw: string): string | number {
 /** The value a column's form control should display. */
 export function toFieldValue(value: unknown, column: Column): string {
   if (value === null || value === undefined) return "";
+  if (column.type === "date") {
+    const date = new Date(String(value));
+    if (!Number.isNaN(date.getTime())) return format(date, "yyyy-MM-dd");
+  }
   if (column.type === "timestamp") {
     const date = new Date(String(value));
     if (!Number.isNaN(date.getTime())) return format(date, "yyyy-MM-dd'T'HH:mm:ss");
@@ -41,6 +45,18 @@ type Parsed = { ok: true; value: unknown } | { ok: false; error?: string };
  * comes back as `{ ok: false }` without an error — the caller decides whether
  * that means "unchanged" (edit) or "omit / required" (create).
  */
+/**
+ * Reads a column's raw form value. `{ multiple: true }` enums render as a
+ * checkbox group — one entry per checked box — which `FormData.get` would
+ * truncate to the first, so they're joined back into storage format here.
+ */
+export function readField(formData: FormData, column: Column): FormDataEntryValue | null {
+  if (column.enum && column.multiple) {
+    return toSet(formData.getAll(column.name).map(String));
+  }
+  return formData.get(column.name);
+}
+
 export function fromFieldValue(raw: FormDataEntryValue | null, column: Column): Parsed {
   if (column.type === "boolean") {
     // switches serialize like checkboxes: present ("on") when checked, absent otherwise
@@ -56,6 +72,31 @@ export function fromFieldValue(raw: FormDataEntryValue | null, column: Column): 
       const num = Number(text);
       if (!Number.isInteger(num)) return { ok: false, error: `${column.name} must be an integer` };
       return { ok: true, value: num };
+    }
+    case "real": {
+      const num = Number(text);
+      if (Number.isNaN(num)) return { ok: false, error: `${column.name} must be a number` };
+      return { ok: true, value: num };
+    }
+    // Exact numerics stay strings end to end — parsing them into a JS number
+    // would round the very precision the column exists to preserve.
+    case "bigint": {
+      if (!/^-?\d+$/.test(text))
+        return { ok: false, error: `${column.name} must be a whole number` };
+      return { ok: true, value: text };
+    }
+    case "decimal": {
+      if (!/^-?\d+(\.\d+)?$/.test(text)) {
+        return { ok: false, error: `${column.name} must be a decimal number` };
+      }
+      return { ok: true, value: text };
+    }
+    case "date": {
+      const date = new Date(text);
+      if (Number.isNaN(date.getTime())) {
+        return { ok: false, error: `${column.name} is not a valid date` };
+      }
+      return { ok: true, value: format(date, "yyyy-MM-dd") };
     }
     case "timestamp": {
       const date = new Date(text);
@@ -94,7 +135,7 @@ export function buildChanges(formData: FormData, columns: Column[], record: Row)
   const data: Row = {};
   for (const column of columns) {
     if (column.primaryKey) continue;
-    const parsed = fromFieldValue(formData.get(column.name), column);
+    const parsed = fromFieldValue(readField(formData, column), column);
     if (!parsed.ok) {
       if (parsed.error) return { ok: false, error: parsed.error };
       continue; // empty non-nullable input — leave the field unchanged
@@ -115,7 +156,7 @@ export function buildNewRecord(formData: FormData, columns: Column[]): BuildResu
   const data: Row = {};
   for (const column of columns) {
     if (column.type === "serial") continue;
-    const parsed = fromFieldValue(formData.get(column.name), column);
+    const parsed = fromFieldValue(readField(formData, column), column);
     if (!parsed.ok) {
       if (parsed.error) return { ok: false, error: parsed.error };
       if (column.hasDefault) continue; // empty — let the database default apply
@@ -228,6 +269,46 @@ export function RecordField(props: { column: Column; value?: unknown; disabled?:
     );
   }
 
+  // A `{ multiple: true }` enum holds several values at once (user.role), so it
+  // gets a checkbox group; each checked box submits under the same name.
+  if (column.enum && column.enum.length > 0 && column.multiple) {
+    const selected = new Set(parseSet(value));
+    return (
+      <Checkbox.Group
+        key={`field-${column.name}`}
+        legend={label}
+        disabled={disabled}
+        description={`Any combination of: ${column.enum.join(", ")}`}
+      >
+        {column.enum.map((option) => (
+          <Checkbox.Item
+            name={column.name}
+            value={option}
+            label={option}
+            checked={selected.has(option)}
+            disabled={disabled}
+          />
+        ))}
+      </Checkbox.Group>
+    );
+  }
+
+  // `.enum([...])` columns are a closed set — offer exactly those values.
+  if (column.enum && column.enum.length > 0) {
+    return (
+      <Select
+        key={`field-${column.name}`}
+        name={column.name}
+        label={label}
+        disabled={disabled}
+        // Non-nullable enums always submit a value, so no empty option for them.
+        placeholder={column.nullable ? "—" : undefined}
+        items={column.enum.map((option) => ({ label: option, value: option }))}
+        value={toFieldValue(value, column)}
+      />
+    );
+  }
+
   if (column.type === "boolean") {
     return (
       <Switch
@@ -260,9 +341,16 @@ export function RecordField(props: { column: Column; value?: unknown; disabled?:
         () => "datetime-local",
         () =>
           when(
-            column.type === "serial" || column.type === "integer",
-            () => "number",
-            () => "text",
+            column.type === "date",
+            () => "date",
+            () =>
+              when(
+                column.type === "serial" || column.type === "integer" || column.type === "real",
+                () => "number",
+                // bigint/decimal stay text inputs: a number input would coerce
+                // through a float and lose precision.
+                () => "text",
+              ),
           ),
       )}
       step={column.type === "timestamp" ? "1" : undefined}

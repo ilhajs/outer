@@ -186,6 +186,49 @@ describe("dialect kinds", () => {
     expect(await columnType(db, "post", "postedAt")).toBe("timestamptz");
   });
 
+  test("boolean defaults render as 1/0 on sqlite", async () => {
+    const s = schema("1.0.0")
+      .table("flagged", (t) => ({
+        id: t.serial().primaryKey(),
+        on: t.boolean().default(true),
+        off: t.boolean().default(false),
+        label: t.text().default("hi"),
+      }))
+      .build();
+
+    const captured: string[] = [];
+    const db = new Kysely<any>({
+      dialect: {
+        createDriver: () => ({
+          async init() {},
+          async acquireConnection() {
+            return {
+              async executeQuery(compiled: any) {
+                captured.push(compiled.sql);
+                return { rows: [] };
+              },
+              async *streamQuery() {},
+            };
+          },
+          async beginTransaction() {},
+          async commitTransaction() {},
+          async rollbackTransaction() {},
+          async releaseConnection() {},
+          async destroy() {},
+        }),
+        createAdapter: () => new SqliteAdapter(),
+        createIntrospector: (d: Kysely<any>) => new SqliteIntrospector(d),
+        createQueryCompiler: () => new SqliteQueryCompiler(),
+      },
+    });
+    await createMigrator({ db, schemas: [s], kind: "sqlite" }).migrateToLatest();
+    const ddl = captured.find((q) => q.includes("create table") && q.includes("flagged"))!;
+    // SQLite has no boolean literal — `true` would be a syntax error there.
+    expect(ddl).toContain("default 1");
+    expect(ddl).toContain("default 0");
+    expect(ddl).toContain("default 'hi'");
+  });
+
   test("kind: 'sqlite' generates SQLite-compatible DDL types", async () => {
     const s = schema("1.0.0")
       .table("post", (t) => ({
@@ -308,5 +351,255 @@ describe("schema().files()", () => {
         .values({ id: "a", fileId: "missing", entityId: "missing" })
         .execute(),
     ).rejects.toThrow();
+  });
+});
+
+// ── In-place column changes ────────────────────────────────────────────────
+
+describe("migrator — column changes", () => {
+  const v1 = schema("1.0.0")
+    .table("thing", (t) => ({ id: t.serial().primaryKey(), name: t.text() }))
+    .build();
+
+  /** Every kind of in-place edit must be refused rather than silently ignored. */
+  const cases: { label: string; v2: any }[] = [
+    {
+      label: "nullability",
+      v2: schema("2.0.0")
+        .table("thing", (t) => ({ id: t.serial().primaryKey(), name: t.text().nullable() }))
+        .build(),
+    },
+    {
+      label: "type",
+      v2: schema("2.0.0")
+        .table("thing", (t) => ({ id: t.serial().primaryKey(), name: t.integer() }))
+        .build(),
+    },
+    {
+      label: "default",
+      v2: schema("2.0.0")
+        .table("thing", (t) => ({
+          id: t.serial().primaryKey(),
+          name: t.text().default("anon"),
+        }))
+        .build(),
+    },
+    {
+      label: "uniqueness",
+      v2: schema("2.0.0")
+        .table("thing", (t) => ({ id: t.serial().primaryKey(), name: t.text().unique() }))
+        .build(),
+    },
+    {
+      label: "foreign key",
+      v2: schema("2.0.0")
+        .table("thing", (t) => ({
+          id: t.serial().primaryKey(),
+          name: t.text().references("other", "id"),
+        }))
+        .build(),
+    },
+  ];
+
+  for (const { label, v2 } of cases) {
+    test(`refuses to migrate a changed ${label} instead of silently ignoring it`, async () => {
+      const db = makeDb();
+      const { error } = await createMigrator({ db, schemas: [v1, v2] }).migrateToLatest();
+      expect(error).toBeDefined();
+      expect(String(error)).toMatch(/changes existing columns/);
+    });
+  }
+
+  test("the error names the table and the column that changed", async () => {
+    const db = makeDb();
+    const v2 = schema("2.0.0")
+      .table("thing", (t) => ({ id: t.serial().primaryKey(), name: t.text().nullable() }))
+      .build();
+    const { error } = await createMigrator({ db, schemas: [v1, v2] }).migrateToLatest();
+    expect(String(error)).toMatch(/thing/);
+    expect(String(error)).toMatch(/name: became nullable/);
+  });
+
+  test("an unchanged column alongside an added one still migrates", async () => {
+    const db = makeDb();
+    const v2 = schema("2.0.0")
+      .table("thing", (t) => ({
+        id: t.serial().primaryKey(),
+        name: t.text(),
+        extra: t.text().nullable(),
+      }))
+      .build();
+    const { error } = await createMigrator({ db, schemas: [v1, v2] }).migrateToLatest();
+    expect(error).toBeUndefined();
+    expect(await columnExists(db, "thing", "extra")).toBe(true);
+  });
+});
+
+// ── Referential actions, indexes, defaults, column types ───────────────────
+
+describe("migrator — referential actions", () => {
+  test("onDelete cascade removes dependent rows instead of blocking the delete", async () => {
+    const db = makeDb();
+    const s = schema("1.0.0")
+      .table("owner", (t) => ({ id: t.text().primaryKey() }))
+      .table("child", (t) => ({
+        id: t.text().primaryKey(),
+        ownerId: t.text().references("owner", "id", { onDelete: "cascade" }),
+      }))
+      .build();
+    await createMigrator({ db, schemas: [s] }).migrateToLatest();
+    await db.insertInto("owner").values({ id: "o1" }).execute();
+    await db.insertInto("child").values({ id: "c1", ownerId: "o1" }).execute();
+
+    await db.deleteFrom("owner").where("id", "=", "o1").execute();
+    const rows = await db.selectFrom("child").selectAll().execute();
+    expect(rows).toHaveLength(0);
+  });
+
+  test("without an action the delete is rejected by the FK", async () => {
+    const db = makeDb();
+    const s = schema("1.0.0")
+      .table("owner", (t) => ({ id: t.text().primaryKey() }))
+      .table("child", (t) => ({
+        id: t.text().primaryKey(),
+        ownerId: t.text().references("owner", "id"),
+      }))
+      .build();
+    await createMigrator({ db, schemas: [s] }).migrateToLatest();
+    await db.insertInto("owner").values({ id: "o1" }).execute();
+    await db.insertInto("child").values({ id: "c1", ownerId: "o1" }).execute();
+
+    await expect(db.deleteFrom("owner").where("id", "=", "o1").execute()).rejects.toThrow();
+  });
+
+  test("onDelete set null clears the reference", async () => {
+    const db = makeDb();
+    const s = schema("1.0.0")
+      .table("owner", (t) => ({ id: t.text().primaryKey() }))
+      .table("child", (t) => ({
+        id: t.text().primaryKey(),
+        ownerId: t.text().nullable().references("owner", "id", { onDelete: "set null" }),
+      }))
+      .build();
+    await createMigrator({ db, schemas: [s] }).migrateToLatest();
+    await db.insertInto("owner").values({ id: "o1" }).execute();
+    await db.insertInto("child").values({ id: "c1", ownerId: "o1" }).execute();
+
+    await db.deleteFrom("owner").where("id", "=", "o1").execute();
+    const row = await db.selectFrom("child").selectAll().executeTakeFirstOrThrow();
+    expect((row as any).ownerId).toBeNull();
+  });
+
+  test("deleting a user cascades to their sessions (built-in auth tables)", async () => {
+    const db = makeDb();
+    const s = schema("1.0.0").auth().build();
+    await createMigrator({ db, schemas: [s] }).migrateToLatest();
+    const now = new Date();
+    await db
+      .insertInto("user")
+      .values({ id: "u1", name: "n", email: "e@x.com", emailVerified: false })
+      .execute();
+    await db
+      .insertInto("session")
+      .values({ id: "s1", token: "t1", userId: "u1", expiresAt: now })
+      .execute();
+
+    await db.deleteFrom("user").where("id", "=", "u1").execute();
+    expect(await db.selectFrom("session").selectAll().execute()).toHaveLength(0);
+  });
+});
+
+describe("migrator — indexes", () => {
+  async function indexExists(db: Kysely<any>, name: string): Promise<boolean> {
+    const row = await db
+      .selectFrom("pg_indexes" as any)
+      .select("indexname" as any)
+      .where("indexname" as any, "=", name)
+      .executeTakeFirst();
+    return row != null;
+  }
+
+  test("index() creates one, and a column added later gets one too", async () => {
+    const db = makeDb();
+    const v1 = schema("1.0.0")
+      .table("thing", (t) => ({ id: t.serial().primaryKey(), slug: t.text().index() }))
+      .build();
+    const v2 = schema("2.0.0")
+      .table("thing", (t) => ({
+        id: t.serial().primaryKey(),
+        slug: t.text().index(),
+        later: t.text().nullable().index(),
+      }))
+      .build();
+    await createMigrator({ db, schemas: [v1, v2] }).migrateToLatest();
+    expect(await indexExists(db, "thing_slug_idx")).toBe(true);
+    expect(await indexExists(db, "thing_later_idx")).toBe(true);
+  });
+
+  test("unique columns get no second index", async () => {
+    const db = makeDb();
+    const s = schema("1.0.0")
+      .table("thing", (t) => ({ id: t.serial().primaryKey(), slug: t.text().unique().index() }))
+      .build();
+    await createMigrator({ db, schemas: [s] }).migrateToLatest();
+    expect(await indexExists(db, "thing_slug_idx")).toBe(false);
+  });
+});
+
+describe("migrator — defaults and column types", () => {
+  test("literal defaults are quoted by type", async () => {
+    const db = makeDb();
+    const s = schema("1.0.0")
+      .table("thing", (t) => ({
+        id: t.serial().primaryKey(),
+        name: t.text().default("anon"),
+        flag: t.boolean().default(true),
+        count: t.integer().default(7),
+        // a value with an embedded quote must not break the DDL
+        tricky: t.text().default("O'Brien"),
+        at: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
+      }))
+      .build();
+    await createMigrator({ db, schemas: [s] }).migrateToLatest();
+    await db.insertInto("thing").defaultValues().execute();
+    const row: any = await db.selectFrom("thing").selectAll().executeTakeFirstOrThrow();
+    expect(row.name).toBe("anon");
+    expect(row.flag).toBe(true);
+    expect(row.count).toBe(7);
+    expect(row.tricky).toBe("O'Brien");
+    expect(row.at).toBeInstanceOf(Date);
+  });
+
+  test("the new column types round-trip", async () => {
+    const db = makeDb();
+    const s = schema("1.0.0")
+      .table("wide", (t) => ({
+        id: t.serial().primaryKey(),
+        big: t.bigint(),
+        money: t.decimal(),
+        ratio: t.real(),
+        day: t.date(),
+        blob: t.bytes(),
+      }))
+      .build();
+    await createMigrator({ db, schemas: [s] }).migrateToLatest();
+    expect(await columnType(db, "wide", "big")).toBe("int8");
+    expect(await columnType(db, "wide", "money")).toBe("numeric");
+    expect(await columnType(db, "wide", "day")).toBe("date");
+    expect(await columnType(db, "wide", "blob")).toBe("bytea");
+
+    await db
+      .insertInto("wide")
+      .values({
+        big: "9007199254740993", // beyond Number.MAX_SAFE_INTEGER
+        money: "10.05",
+        ratio: 0.5,
+        day: new Date("2026-01-02"),
+        blob: Buffer.from([1, 2, 3]),
+      })
+      .execute();
+    const row: any = await db.selectFrom("wide").selectAll().executeTakeFirstOrThrow();
+    expect(String(row.big)).toBe("9007199254740993"); // no float rounding
+    expect(String(row.money)).toBe("10.05");
   });
 });

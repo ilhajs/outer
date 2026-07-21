@@ -22,9 +22,16 @@ export const FILTER_OPS = {
   uuid: ["equals"],
   integer: ["equals", "gt", "gte", "lt", "lte"],
   serial: ["equals", "gt", "gte", "lt", "lte"],
+  // exact numerics arrive as strings, but compare as numbers server-side
+  bigint: ["equals", "gt", "gte", "lt", "lte"],
+  decimal: ["equals", "gt", "gte", "lt", "lte"],
+  real: ["equals", "gt", "gte", "lt", "lte"],
   boolean: ["equals"],
   timestamp: ["gt", "gte", "lt", "lte"],
+  date: ["gt", "gte", "lt", "lte"],
   jsonb: [],
+  // raw bytes have no meaningful text filter
+  bytes: [],
 } as const satisfies Record<Column["type"], readonly string[]>;
 
 export const ALL_OPS = [...new Set(Object.values(FILTER_OPS).flat())];

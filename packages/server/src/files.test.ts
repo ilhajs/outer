@@ -326,3 +326,29 @@ describe(".files() deletion with attachments", () => {
     expect(await storage.get(file.key)).toBeNull();
   });
 });
+
+describe("upload size limits", () => {
+  test("an oversized Content-Length is rejected before the body is parsed", async () => {
+    const app = await makeApp({ maxBytes: 1024 });
+    const res = await app.handle(
+      new Request("http://localhost/rpc/file/upload", {
+        method: "POST",
+        headers: {
+          "content-type": "multipart/form-data",
+          "content-length": String(50 * 1024 * 1024),
+        },
+        body: "x",
+      }),
+    );
+    expect(res.status).toBe(413);
+    expect(JSON.stringify(await res.json())).toMatch(/limit is 1024/);
+  });
+
+  test("a file over maxBytes is rejected by the upload procedure", async () => {
+    const app = await makeApp({ maxBytes: 8 });
+    const cookie = await signIn(app, "size@example.com");
+    const big = new File([new Uint8Array(64)], "big.bin", { type: "application/octet-stream" });
+    const res = await upload(app, cookie, big);
+    expect(res.status).toBe(413);
+  });
+});

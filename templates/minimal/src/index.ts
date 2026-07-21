@@ -122,3 +122,12 @@ serve({
   fetch: (req) => outer.handle(req),
   port: env.PORT,
 });
+
+// Release the database (and the embedded PGlite with it) on a deploy restart,
+// so the data directory is left in a clean state.
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.on(signal, async () => {
+    await outer.close();
+    process.exit(0);
+  });
+}

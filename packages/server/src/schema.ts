@@ -7,10 +7,19 @@ export type SQLTypeMap = {
   text: string;
   varchar: string;
   integer: number;
+  /** 64-bit. Read back as a string — `bigint` overflows JS `number` past 2^53. */
+  bigint: string;
+  /** Exact numeric (`numeric`/`DECIMAL`). A string, so cents never round-trip through a float. */
+  decimal: string;
+  real: number;
   boolean: boolean;
   timestamp: Date;
+  /** Calendar date with no time component. */
+  date: Date;
   jsonb: unknown;
   uuid: string;
+  /** Raw bytes (`bytea` / `BLOB`). */
+  bytes: Uint8Array;
 };
 
 export type SQLType = keyof SQLTypeMap;
@@ -23,20 +32,132 @@ export type ColumnDef<
   Null extends boolean = boolean,
   PK extends boolean = boolean,
   HasDefault extends boolean = boolean,
+  Values extends string = string,
+  Multiple extends boolean = boolean,
 > = {
   _type: T;
   _nullable: Null;
   _primaryKey: PK;
   _hasDefault: HasDefault;
   _unique: boolean;
-  _default: string | null;
-  _references: { table: string; column: string } | null;
-  nullable(): ColumnDef<T, true, PK, HasDefault>;
-  primaryKey(): ColumnDef<T, Null, true, HasDefault>;
-  unique(): ColumnDef<T, Null, PK, HasDefault>;
-  default(expr: string): ColumnDef<T, Null, PK, true>;
-  references(table: string, column: string): ColumnDef<T, Null, PK, HasDefault>;
+  /** Rendered for display/DDL by `renderDefault()`. `null` when the column has no default. */
+  _default: ColumnDefault | null;
+  _references: {
+    table: string;
+    column: string;
+    onDelete?: ReferentialAction;
+    onUpdate?: ReferentialAction;
+  } | null;
+  /** True when the column should get a non-unique index. Unique columns are already indexed. */
+  _index: boolean;
+  /** Allowed values, or `null` for an unconstrained column. Text-shaped columns only. */
+  _enum: readonly Values[] | null;
+  /** When true the column stores a comma-separated *set* of `_enum` values rather than one. */
+  _multiple: boolean;
+  nullable(): ColumnDef<T, true, PK, HasDefault, Values, Multiple>;
+  primaryKey(): ColumnDef<T, Null, true, HasDefault, Values, Multiple>;
+  unique(): ColumnDef<T, Null, PK, HasDefault, Values, Multiple>;
+  /**
+   * A literal default, quoted for you according to the column type — pass the
+   * value you want, not SQL: `.default("user")`, `.default(false)`, `.default(0)`.
+   * Use `.defaultSql()` for expressions like `CURRENT_TIMESTAMP`.
+   */
+  default(value: DefaultValue<T, Values, Multiple>): ColumnDef<T, Null, PK, true, Values, Multiple>;
+  /** A raw SQL default expression, emitted verbatim: `.defaultSql("CURRENT_TIMESTAMP")`. */
+  defaultSql(expr: string): ColumnDef<T, Null, PK, true, Values, Multiple>;
+  /**
+   * A foreign key. `onDelete`/`onUpdate` set the referential action — without
+   * one, deleting a referenced row fails with an FK violation:
+   *
+   * ```ts
+   * userId: t.text().references("user", "id", { onDelete: "cascade" })
+   * ```
+   */
+  references(
+    table: string,
+    column: string,
+    actions?: { onDelete?: ReferentialAction; onUpdate?: ReferentialAction },
+  ): ColumnDef<T, Null, PK, HasDefault, Values, Multiple>;
+  /** Adds a non-unique index on this column. */
+  index(): ColumnDef<T, Null, PK, HasDefault, Values, Multiple>;
+  /**
+   * Restricts the column to a fixed set of values, narrowing its TS type to the
+   * union and making resource/admin inputs reject anything else.
+   *
+   * The stored SQL type is unchanged (still `text`/`varchar`) — the constraint
+   * lives in Outer, not the database, so editing the value list never generates
+   * a migration. `_admin.meta` reports it so a UI can render a select.
+   *
+   * ```ts
+   * role: t.text().enum(["user", "admin"]).default("user")
+   * ```
+   */
+  enum<const V extends readonly string[], M extends boolean = false>(
+    values: V,
+    options?: { multiple?: M },
+  ): ColumnDef<T, Null, PK, HasDefault, V[number], M>;
 };
+
+/** What the database should do to referencing rows when the referenced row changes. */
+export type ReferentialAction = "cascade" | "set null" | "restrict" | "no action";
+
+/** A column default: either a literal value (quoted at DDL time) or raw SQL. */
+export type ColumnDefault = { kind: "value"; value: unknown } | { kind: "sql"; sql: string };
+
+/**
+ * What `.default()` accepts for a column. Enum columns take one of their
+ * declared values; a `{ multiple: true }` enum takes the comma-separated form.
+ */
+export type DefaultValue<
+  T extends SQLType,
+  Values extends string = string,
+  Multiple extends boolean = false,
+> = string extends Values ? SQLTypeMap[T] : Multiple extends true ? string : Values;
+
+/**
+ * Any column, whatever its narrowing. Constraint positions must use this rather
+ * than bare `ColumnDef`: a column narrowed by `.enum()` has `Values` in both
+ * covariant (`_enum`) and contravariant (`.default()` parameter) positions, so
+ * it is not assignable to the alias's `string` default.
+ */
+export type AnyColumn = ColumnDef<any, any, any, any, any, any>;
+
+/** Column types `.enum()` accepts — the value list is stored as text. */
+export type EnumableType = "text" | "varchar";
+
+/**
+ * The TS type a column holds: its enum union when constrained to one value.
+ *
+ * A `{ multiple: true }` enum stores a comma-separated *set* in one text column
+ * (Better Auth's own format for `user.role`), so its type stays `string` —
+ * enumerating every legal combination as a union is combinatorial. Use
+ * `parseSet()` / `hasRole()` to read one, and `toSet()` to build one.
+ */
+export type ColumnValue<C extends ColumnDef> =
+  C extends ColumnDef<infer T, any, any, any, infer V, infer M>
+    ? string extends V
+      ? SQLTypeMap[T]
+      : M extends true
+        ? string
+        : V
+    : never;
+
+/** Splits a `{ multiple: true }` column's stored value into its parts. */
+export function parseSet(value: unknown): string[] {
+  return typeof value === "string"
+    ? value
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)
+    : [];
+}
+
+/** Joins values into the storage format a `{ multiple: true }` column expects. */
+export function toSet(values: readonly string[]): string {
+  return values.join(",");
+}
+
+const ENUMABLE_TYPES = new Set<string>(["text", "varchar"] satisfies EnumableType[]);
 
 function makeCol<T extends SQLType>(type: T): ColumnDef<T, false, false, false> {
   const def: ColumnDef<T, false, false, false> = {
@@ -47,6 +168,9 @@ function makeCol<T extends SQLType>(type: T): ColumnDef<T, false, false, false> 
     _unique: false,
     _default: null,
     _references: null,
+    _enum: null,
+    _multiple: false,
+    _index: false,
     nullable() {
       return { ...this, _nullable: true as const } as unknown as ColumnDef<T, true, false, false>;
     },
@@ -56,16 +180,39 @@ function makeCol<T extends SQLType>(type: T): ColumnDef<T, false, false, false> 
     unique() {
       return { ...this, _unique: true };
     },
-    default(expr: string) {
-      return { ...this, _default: expr, _hasDefault: true as const } as unknown as ColumnDef<
-        T,
-        false,
-        false,
-        true
-      >;
+    default(value: unknown) {
+      return {
+        ...this,
+        _default: { kind: "value", value } satisfies ColumnDefault,
+        _hasDefault: true as const,
+      } as unknown as ColumnDef<T, false, false, true>;
     },
-    references(table: string, column: string) {
-      return { ...this, _references: { table, column } };
+    defaultSql(expr: string) {
+      return {
+        ...this,
+        _default: { kind: "sql", sql: expr } satisfies ColumnDefault,
+        _hasDefault: true as const,
+      } as unknown as ColumnDef<T, false, false, true>;
+    },
+    references(table: string, column: string, actions) {
+      return { ...this, _references: { table, column, ...actions } };
+    },
+    index() {
+      return { ...this, _index: true };
+    },
+    enum(values, options) {
+      if (!ENUMABLE_TYPES.has(this._type)) {
+        throw new Error(`.enum() is only supported on text/varchar columns, got "${this._type}"`);
+      }
+      if (values.length === 0) throw new Error(".enum() requires at least one value");
+      for (const value of values) {
+        if (value.includes(",")) {
+          throw new Error(
+            `.enum() values cannot contain a comma (got "${value}") — commas separate the parts of a { multiple: true } column`,
+          );
+        }
+      }
+      return { ...this, _enum: values, _multiple: options?.multiple === true } as any;
     },
   };
   return def;
@@ -76,10 +223,15 @@ export type TableBuilder = {
   text(): ColumnDef<"text", false, false, false>;
   varchar(): ColumnDef<"varchar", false, false, false>;
   integer(): ColumnDef<"integer", false, false, false>;
+  bigint(): ColumnDef<"bigint", false, false, false>;
+  decimal(): ColumnDef<"decimal", false, false, false>;
+  real(): ColumnDef<"real", false, false, false>;
   boolean(): ColumnDef<"boolean", false, false, false>;
   timestamp(): ColumnDef<"timestamp", false, false, false>;
+  date(): ColumnDef<"date", false, false, false>;
   jsonb(): ColumnDef<"jsonb", false, false, false>;
   uuid(): ColumnDef<"uuid", false, false, false>;
+  bytes(): ColumnDef<"bytes", false, false, false>;
 };
 
 const t: TableBuilder = {
@@ -87,11 +239,63 @@ const t: TableBuilder = {
   text: () => makeCol("text"),
   varchar: () => makeCol("varchar"),
   integer: () => makeCol("integer"),
+  bigint: () => makeCol("bigint"),
+  decimal: () => makeCol("decimal"),
+  real: () => makeCol("real"),
   boolean: () => makeCol("boolean"),
   timestamp: () => makeCol("timestamp"),
+  date: () => makeCol("date"),
   jsonb: () => makeCol("jsonb"),
   uuid: () => makeCol("uuid"),
+  bytes: () => makeCol("bytes"),
 };
+
+/**
+ * Renders a default for DDL. Literals are quoted according to the column type,
+ * so `.default("user")` becomes `'user'` and `.default(false)` becomes `false`
+ * on Postgres / `0` on SQLite. Raw SQL passes through untouched.
+ */
+export function renderDefault(
+  def: ColumnDefault,
+  type: SQLType,
+  kind: "postgres" | "sqlite",
+): string {
+  if (def.kind === "sql") return def.sql;
+  const { value } = def;
+  if (value === null) return "NULL";
+  switch (type) {
+    case "boolean":
+      // SQLite has no boolean literal — it stores 1/0.
+      return kind === "sqlite" ? (value ? "1" : "0") : value ? "true" : "false";
+    case "serial":
+    case "integer":
+    case "real":
+      return String(value);
+    case "bigint":
+    case "decimal":
+      // Kept as a string end-to-end so precision never goes through a float.
+      return quoteSql(String(value));
+    case "timestamp":
+    case "date":
+      return quoteSql(value instanceof Date ? value.toISOString() : String(value));
+    case "jsonb":
+      return quoteSql(typeof value === "string" ? value : JSON.stringify(value));
+    default:
+      return quoteSql(String(value));
+  }
+}
+
+/** Single-quoted SQL string literal with embedded quotes doubled. */
+function quoteSql(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+/** Human-readable form of a default, for `_admin.meta` and UI placeholders. */
+export function displayDefault(def: ColumnDefault | null): string | null {
+  if (!def) return null;
+  if (def.kind === "sql") return def.sql;
+  return def.value === null ? "null" : String(def.value);
+}
 
 // ── Relations ──────────────────────────────────────────────────────────────
 
@@ -159,19 +363,19 @@ function makeRelChain(fromTable: string): RelationChain {
 
 // ── Type inference ─────────────────────────────────────────────────────────
 
-export type TablesDef = Record<string, Record<string, ColumnDef>>;
+export type TablesDef = Record<string, Record<string, AnyColumn>>;
 
 // serial columns are DB-generated and optional in both insert and select contexts.
 // Columns with a DB-side default are wrapped in Kysely's `Generated<T>`: present on
 // select, optional on insert (so callers needn't pass `createdAt`/`updatedAt`).
-type InferRow<T extends Record<string, ColumnDef>> = {
+type InferRow<T extends Record<string, AnyColumn>> = {
   [K in keyof T as T[K]["_type"] extends "serial"
     ? never
     : T[K]["_nullable"] extends false
       ? T[K]["_hasDefault"] extends true
         ? never
         : K
-      : never]: SQLTypeMap[T[K]["_type"]];
+      : never]: ColumnValue<T[K]>;
 } & {
   [K in keyof T as T[K]["_type"] extends "serial"
     ? never
@@ -179,13 +383,13 @@ type InferRow<T extends Record<string, ColumnDef>> = {
       ? T[K]["_hasDefault"] extends true
         ? K
         : never
-      : never]: Generated<SQLTypeMap[T[K]["_type"]]>;
+      : never]: Generated<ColumnValue<T[K]>>;
 } & {
   [K in keyof T as T[K]["_type"] extends "serial"
     ? K
     : T[K]["_nullable"] extends true
       ? K
-      : never]?: SQLTypeMap[T[K]["_type"]] | null;
+      : never]?: ColumnValue<T[K]> | null;
 };
 
 export type InferDB<T extends TablesDef> = {
@@ -200,8 +404,8 @@ type TimestampCols = {
 /** `createdAt` / `updatedAt` with `CURRENT_TIMESTAMP` defaults — spread into a `.table()` column object. */
 export function timestamps(t: TableBuilder): TimestampCols {
   return {
-    createdAt: t.timestamp().default("CURRENT_TIMESTAMP"),
-    updatedAt: t.timestamp().default("CURRENT_TIMESTAMP"),
+    createdAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
+    updatedAt: t.timestamp().defaultSql("CURRENT_TIMESTAMP"),
   };
 }
 
@@ -213,16 +417,30 @@ export function timestamps(t: TableBuilder): TimestampCols {
  * `session.impersonatedBy`). Email OTP needs no extra columns — it uses the
  * `verification` table. Registered via `schema().auth()`.
  */
-function authTableDefs(t: TableBuilder) {
+export type AuthOptions<Roles extends readonly string[] = readonly string[]> = {
+  /**
+   * The roles your app recognises. Each part of `user.role` is validated
+   * against this list — a user may still hold several at once, since Better
+   * Auth stores them comma-separated in the one column (`"admin,support"`).
+   *
+   * Left open when omitted, so any role name is accepted.
+   */
+  roles?: Roles;
+};
+
+function authTableDefs(t: TableBuilder, roles?: readonly string[]) {
   return {
     user: {
       id: t.text().primaryKey(),
       name: t.text(),
       email: t.text().unique(),
-      emailVerified: t.boolean().default("false"),
+      emailVerified: t.boolean().default(false),
       image: t.text().nullable(),
-      role: t.text().default("'user'"),
-      banned: t.boolean().default("false"),
+      // Multi-valued: Better Auth's admin plugin stores several roles in this
+      // one column as a comma-separated list ("admin,support"), and `hasRole`
+      // reads it that way. Declaring `roles` validates each part, not the whole.
+      role: (roles ? t.text().enum(roles, { multiple: true }) : t.text()).default("user"),
+      banned: t.boolean().default(false),
       banReason: t.text().nullable(),
       banExpires: t.timestamp().nullable(),
       ...timestamps(t),
@@ -233,7 +451,7 @@ function authTableDefs(t: TableBuilder) {
       token: t.text().unique(),
       ipAddress: t.text().nullable(),
       userAgent: t.text().nullable(),
-      userId: t.text().references("user", "id"),
+      userId: t.text().references("user", "id", { onDelete: "cascade" }).index(),
       impersonatedBy: t.text().nullable(),
       ...timestamps(t),
     },
@@ -241,7 +459,7 @@ function authTableDefs(t: TableBuilder) {
       id: t.text().primaryKey(),
       accountId: t.text(),
       providerId: t.text(),
-      userId: t.text().references("user", "id"),
+      userId: t.text().references("user", "id", { onDelete: "cascade" }).index(),
       accessToken: t.text().nullable(),
       refreshToken: t.text().nullable(),
       idToken: t.text().nullable(),
@@ -261,7 +479,14 @@ function authTableDefs(t: TableBuilder) {
   };
 }
 
-export type AuthTables = ReturnType<typeof authTableDefs>;
+type AuthTableDefs = ReturnType<typeof authTableDefs>;
+
+/** The Better Auth tables. `Role` narrows `user.role` when `.auth({ roles })` is used. */
+export type AuthTables<Role extends string = string> = Omit<AuthTableDefs, "user"> & {
+  user: Omit<AuthTableDefs["user"], "role"> & {
+    role: ColumnDef<"text", false, false, true, Role>;
+  };
+};
 
 // ── File tables ────────────────────────────────────────────────────────────
 
@@ -279,7 +504,9 @@ function fileTableDef(t: TableBuilder, owned: boolean) {
     /** MIME type as reported at upload time. */
     type: t.text(),
     size: t.integer(),
-    ...(owned ? { userId: t.text().nullable().references("user", "id") } : {}),
+    ...(owned
+      ? { userId: t.text().nullable().references("user", "id", { onDelete: "set null" }).index() }
+      : {}),
     ...timestamps(t),
   };
 }
@@ -308,10 +535,10 @@ type AttachmentCols = {
 function attachmentTableDef(t: TableBuilder, entityTable: string) {
   return {
     id: t.text().primaryKey(),
-    fileId: t.text().references("file", "id"),
-    entityId: t.text().references(entityTable, "id"),
+    fileId: t.text().references("file", "id", { onDelete: "cascade" }).index(),
+    entityId: t.text().references(entityTable, "id", { onDelete: "cascade" }).index(),
     role: t.text().nullable(),
-    position: t.integer().default("0"),
+    position: t.integer().default(0),
     ...timestamps(t),
   };
 }
@@ -350,8 +577,22 @@ type SchemaBuilder<T extends TablesDef> = {
    * relations — see `AuthTables`. Extend `user` (or any auth table) by
    * re-declaring extra columns via `.table("user", ...)` after this call:
    * columns merge, with yours winning on name collisions.
+   *
+   * `roles` declares the recognised role set — equivalent to re-declaring the
+   * column with `.enum(roles, { multiple: true })`, but without restating its
+   * default:
+   *
+   * ```ts
+   * schema("1.0.0").auth({ roles: ["user", "admin", "support"] })
+   * ```
+   *
+   * A user can hold several at once: Better Auth's admin plugin stores them
+   * comma-separated in the single `role` column, so `"admin,support"` is valid
+   * while `"admin,root"` is rejected. Omit `roles` to accept any name.
    */
-  auth(): SchemaBuilder<T & AuthTables>;
+  auth<const Roles extends readonly string[] = never>(
+    options?: AuthOptions<Roles>,
+  ): SchemaBuilder<T & AuthTables<[Roles] extends [never] ? string : Roles[number]>>;
 
   /**
    * Registers a `file` metadata table for blobs kept in an object store — the bytes
@@ -369,7 +610,7 @@ type SchemaBuilder<T extends TablesDef> = {
     options?: FilesOptions<Attach> & { owner?: Owned },
   ): SchemaBuilder<T & FileTables<Attach, Owned>>;
 
-  table<Name extends string, Cols extends Record<string, ColumnDef>>(
+  table<Name extends string, Cols extends Record<string, AnyColumn>>(
     name: Name,
     define: (t: TableBuilder) => Cols,
   ): SchemaBuilder<T & Record<Name, Cols>>;
@@ -387,8 +628,8 @@ export function schema(version: string): SchemaBuilder<Record<never, never>> {
   const relations: RelationDef[] = [];
 
   const builder: SchemaBuilder<any> = {
-    auth() {
-      for (const [name, cols] of Object.entries(authTableDefs(t))) {
+    auth(options) {
+      for (const [name, cols] of Object.entries(authTableDefs(t, options?.roles))) {
         tables[name] = { ...tables[name], ...cols };
       }
       relations.push(
