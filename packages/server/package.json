@@ -42,7 +42,7 @@
   },
   "scripts": {
     "build": "tsc && tsdown",
-    "test": "bun test --parallel --timeout 20000",
+    "test": "bun test --parallel --timeout 60000",
     "test:e2e": "bun test/index.ts"
   },
   "dependencies": {

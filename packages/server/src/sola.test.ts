@@ -1,11 +1,10 @@
 import { test, describe, beforeAll, expect } from "bun:test";
 
-import { PGlite } from "@electric-sql/pglite";
-import { Kysely, PGliteDialect } from "kysely";
+import { Kysely } from "kysely";
 
-import { createMigrator } from "./migrator";
 import { schema } from "./schema";
 import { createSola } from "./sola";
+import { testDb } from "./test-utils";
 
 // ── Shared setup ──────────────────────────────────────────────────────────
 
@@ -43,10 +42,11 @@ const dbSchema = schema("1.0.0")
 
 type DB = typeof dbSchema._db;
 
+const solaDb = testDb([dbSchema]);
+
 async function makeFixture() {
-  const dialect = new PGliteDialect({ pglite: new PGlite() });
+  const { dialect } = await solaDb();
   const db = new Kysely<DB>({ dialect });
-  await createMigrator({ db, schemas: [dbSchema] }).migrateToLatest();
   const query = createSola<DB>({ db, tables: dbSchema.tables, relations: dbSchema.relations });
   return { db, query };
 }

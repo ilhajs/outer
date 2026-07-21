@@ -1,15 +1,14 @@
-import { test, describe, expect, beforeEach } from "bun:test";
+import { test, describe, expect, beforeAll } from "bun:test";
 
 import { Outer, schema, memoryStorage, type OuterStorage } from "./index";
 import { pglite } from "./pglite";
+import { testAuth, testDb } from "./test-utils";
 
 const v1 = schema("1.0.0")
   .auth()
   .table("post", (t) => ({ id: t.text().primaryKey(), title: t.text() }))
   .files({ attachTo: ["post"] })
   .build();
-
-const SECRET = "test-secret-that-is-long-enough";
 
 /**
  * Signs a user in through Better Auth and returns their cookie, so tests
@@ -32,15 +31,38 @@ async function signIn(app: any, email: string, role?: string) {
   return cookie;
 }
 
-function makeApp(config: any = {}, storage: OuterStorage = memoryStorage()) {
+/**
+ * Migrating a fresh PGlite costs ~1.4s, which dominates this suite and is what
+ * makes CI hooks time out. Apps are built once per distinct `.files()` config
+ * and shared; tests keep to their own users and rows so they stay independent.
+ */
+const appCache = new Map<string, Promise<any>>();
+
+function sharedApp(config: any = {}, storage?: OuterStorage, cacheKey?: string) {
+  const key = cacheKey ?? JSON.stringify(config);
+  let cached = appCache.get(key);
+  if (!cached) {
+    cached = (async () => {
+      const app = await makeApp(config, storage);
+      await app.migrator.migrateToLatest();
+      return app;
+    })();
+    appCache.set(key, cached);
+  }
+  return cached;
+}
+
+const filesDb = testDb([v1]);
+
+async function makeApp(config: any = {}, storage: OuterStorage = memoryStorage()) {
   return new Outer({
     name: "Files",
     baseUrl: "http://localhost",
-    db: pglite({ dataDir: "memory://" }),
+    db: await filesDb(),
     storage,
   })
     .schema(v1)
-    .auth({ secret: SECRET, emailAndPassword: { enabled: true } })
+    .auth(testAuth())
     .files(config)
     .build();
 }
@@ -82,7 +104,7 @@ describe(".files() configuration errors", () => {
     expect(() =>
       new Outer({ db: pglite({ dataDir: "memory://" }), storage: memoryStorage() })
         .schema(noFiles)
-        .auth({ secret: SECRET })
+        .auth(testAuth())
         .files()
         .build(),
     ).toThrow(/requires a `file` table/);
@@ -92,14 +114,14 @@ describe(".files() configuration errors", () => {
     expect(() =>
       new Outer({ db: pglite({ dataDir: "memory://" }) })
         .schema(v1)
-        .auth({ secret: SECRET })
+        .auth(testAuth())
         .files()
         .build(),
     ).toThrow(/needs somewhere to put the bytes/);
   });
 
   test("throws when path is missing :id", () => {
-    expect(() => makeApp({ path: "/files" })).toThrow(/must contain ":id"/);
+    expect(makeApp({ path: "/files" })).rejects.toThrow(/must contain ":id"/);
   });
 
   test("throws when a permission needs auth but .auth() was never called", () => {
@@ -114,12 +136,10 @@ describe(".files() configuration errors", () => {
 
 describe(".files() uploads", () => {
   let app: any;
-  let storage: OuterStorage;
+  const storage = memoryStorage();
 
-  beforeEach(async () => {
-    storage = memoryStorage();
-    app = makeApp({}, storage);
-    await app.migrator.migrateToLatest();
+  beforeAll(async () => {
+    app = await sharedApp({}, storage);
   });
 
   test("stores the bytes and returns a record with a url", async () => {
@@ -141,16 +161,14 @@ describe(".files() uploads", () => {
   });
 
   test("rejects uploads over maxBytes", async () => {
-    const small = makeApp({ maxBytes: 4 });
-    await small.migrator.migrateToLatest();
+    const small = await sharedApp({ maxBytes: 4 });
     const cookie = await signIn(small, "b@example.com");
     const res = await upload(small, cookie, new File(["toolong"], "b.txt", { type: "text/plain" }));
     expect(res.status).toBe(413);
   });
 
   test("rejects types outside `accept`", async () => {
-    const imagesOnly = makeApp({ accept: ["image/*"] });
-    await imagesOnly.migrator.migrateToLatest();
+    const imagesOnly = await sharedApp({ accept: ["image/*"] });
     const cookie = await signIn(imagesOnly, "c@example.com");
     const res = await upload(imagesOnly, cookie, new File(["x"], "c.txt", { type: "text/plain" }));
     expect(res.status).toBe(400);
@@ -162,9 +180,8 @@ describe(".files() uploads", () => {
 describe(".files() access control", () => {
   let app: any;
 
-  beforeEach(async () => {
-    app = makeApp();
-    await app.migrator.migrateToLatest();
+  beforeAll(async () => {
+    app = await sharedApp();
   });
 
   test("the download route serves the owner and 404s everyone else", async () => {
@@ -217,8 +234,7 @@ describe(".files() access control", () => {
   });
 
   test("permissions: { get: 'public' } serves anonymous readers", async () => {
-    const open = makeApp({ permissions: { get: "public" } });
-    await open.migrator.migrateToLatest();
+    const open = await sharedApp({ permissions: { get: "public" } });
     const cookie = await signIn(open, "pub@example.com");
     const { json: file } = await (
       await upload(open, cookie, new File(["open"], "p.txt", { type: "text/plain" }))
@@ -234,9 +250,8 @@ describe(".files() access control", () => {
 describe(".files() attachments", () => {
   let app: any;
 
-  beforeEach(async () => {
-    app = makeApp();
-    await app.migrator.migrateToLatest();
+  beforeAll(async () => {
+    app = await sharedApp();
   });
 
   test("uploads attach to a row and list filters by it", async () => {
@@ -291,8 +306,8 @@ describe(".files() attachments", () => {
 describe(".files() deletion with attachments", () => {
   test("deleting an attached file clears its pivot rows instead of failing on the FK", async () => {
     const storage = memoryStorage();
-    const app = makeApp({}, storage);
-    await app.migrator.migrateToLatest();
+    // its own app: this test asserts on the whole pivot table being empty
+    const app = await sharedApp({}, storage, "cascade");
     const cookie = await signIn(app, "cascade@example.com");
     await app.db.insertInto("post").values({ id: "p9", title: "Ninth" }).execute();
 

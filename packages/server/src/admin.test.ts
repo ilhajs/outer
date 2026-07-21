@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 
 import { Outer, schema, timestamps } from "./index";
 import { pglite } from "./pglite";
+import { fastPasswordHashing, testDb } from "./test-utils";
 
 // Better Auth core tables (via schema().auth()) plus an app table
 const adminSchema = schema("1.0.0")
@@ -18,18 +19,20 @@ const adminSchema = schema("1.0.0")
   .relation("post", (rel) => rel.belongsTo("user", { from: "userId", to: "id" }))
   .build();
 
-function makeAdminApp() {
+const adminDb = testDb([adminSchema]);
+
+async function makeAdminApp() {
   return (
     new Outer({
       name: "Admin Test",
       baseUrl: "http://localhost",
-      db: pglite({ dataDir: "memory://" }),
+      db: await adminDb(),
       cors: { origins: ["https://admin.example.com"] },
     })
       .schema(adminSchema)
       .auth({
         secret: "test-secret",
-        emailAndPassword: { enabled: true },
+        emailAndPassword: fastPasswordHashing,
         user: {
           additionalFields: { role: { type: "string", defaultValue: "user", input: false } },
         },
@@ -52,7 +55,7 @@ function makeAdminApp() {
   );
 }
 
-type App = ReturnType<typeof makeAdminApp>;
+type App = Awaited<ReturnType<typeof makeAdminApp>>;
 
 async function signUp(app: App, email: string) {
   const res = await app.handle(
@@ -128,14 +131,15 @@ describe("admin — API", () => {
   let admin: { userId: string; cookie: string };
   let regular: { userId: string; cookie: string };
 
-  // generous timeout: two sign-ups hash passwords, which is slow when the suite runs in parallel
+  // The suite-wide --timeout covers this; no local override, so there's one
+  // number to raise if CI gets slower.
   beforeAll(async () => {
-    app = makeAdminApp();
+    app = await makeAdminApp();
     await app.migrator.migrateToLatest();
     admin = await signUp(app, "admin@test.com");
     regular = await signUp(app, "user@test.com");
     await rpc(app, "test/promote", { userId: admin.userId });
-  }, 30_000);
+  });
 
   test("unauthenticated calls get 401", async () => {
     const { status } = await rpc(app, "_admin/meta");
@@ -147,7 +151,7 @@ describe("admin — API", () => {
     await rpc(app, "test/promote", { userId: multi.userId, role: "support,admin" });
     const { status } = await rpc(app, "_admin/meta", {}, multi.cookie);
     expect(status).toBe(200);
-  }, 30_000);
+  });
 
   test("non-admin users get 403", async () => {
     const { status } = await rpc(app, "_admin/meta", {}, regular.cookie);

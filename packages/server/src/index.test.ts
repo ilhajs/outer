@@ -1,4 +1,4 @@
-import { test, describe, expect } from "bun:test";
+import { test, describe, expect, beforeAll } from "bun:test";
 
 import { PGlite } from "@electric-sql/pglite";
 import { ORPCError } from "@orpc/client";
@@ -7,28 +7,31 @@ import { PGliteDialect } from "kysely";
 
 import { Outer, schema } from "./index";
 import { pglite } from "./pglite";
+import { testAuth, testDb } from "./test-utils";
 
 const s = schema("1.0.0")
   .table("post", (t) => ({ id: t.serial().primaryKey(), title: t.text() }))
   .build();
 
-function makeOuter() {
+const postDb = testDb([s]);
+
+async function makeOuter() {
   return new Outer({
     name: "Test",
     baseUrl: "http://localhost",
-    db: pglite({ dataDir: "memory://" }),
+    db: await postDb(),
   }).schema(s);
 }
 
 describe("openapi", () => {
   test("/openapi.json is not mounted by default", async () => {
-    const app = makeOuter().build();
+    const app = (await makeOuter()).build();
     const res = await app.handle(new Request("http://localhost/openapi.json"));
     expect(res.status).toBe(404);
   });
 
   test("/openapi.json is mounted when .openapi() is called with no args", async () => {
-    const app = makeOuter().openapi().build();
+    const app = (await makeOuter()).openapi().build();
     const res = await app.handle(new Request("http://localhost/openapi.json"));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -36,7 +39,7 @@ describe("openapi", () => {
   });
 
   test("/openapi.json is mounted when .openapi({ enabled: true }) is called", async () => {
-    const app = makeOuter().openapi({ enabled: true }).build();
+    const app = (await makeOuter()).openapi({ enabled: true }).build();
     const res = await app.handle(new Request("http://localhost/openapi.json"));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -44,7 +47,7 @@ describe("openapi", () => {
   });
 
   test(".openapi({ enabled: false }) keeps it disabled", async () => {
-    const app = makeOuter().openapi({ enabled: false }).build();
+    const app = (await makeOuter()).openapi({ enabled: false }).build();
     const res = await app.handle(new Request("http://localhost/openapi.json"));
     expect(res.status).toBe(404);
   });
@@ -52,7 +55,7 @@ describe("openapi", () => {
 
 describe("rest (OpenAPI handler)", () => {
   test("/rest/** serves plain-JSON requests matching the OpenAPI spec", async () => {
-    const app = makeOuter().openapi().resource("post").build();
+    const app = (await makeOuter()).openapi().resource("post").build();
     await app.migrator.migrateToLatest();
 
     const created = await app.handle(
@@ -68,14 +71,14 @@ describe("rest (OpenAPI handler)", () => {
   });
 
   test("openapi.json advertises the /rest server URL", async () => {
-    const app = makeOuter().openapi().build();
+    const app = (await makeOuter()).openapi().build();
     const res = await app.handle(new Request("http://localhost/openapi.json"));
     const body = (await res.json()) as any;
     expect(body.servers[0].url).toBe("http://localhost/rest");
   });
 
   test("/rest/** is not mounted without .openapi()", async () => {
-    const app = makeOuter().resource("post").build();
+    const app = (await makeOuter()).resource("post").build();
     const res = await app.handle(
       new Request("http://localhost/rest/post/create", {
         method: "POST",
@@ -89,7 +92,7 @@ describe("rest (OpenAPI handler)", () => {
 
 describe("client (in-process router client)", () => {
   test("calls procedures directly without HTTP", async () => {
-    const app = makeOuter()
+    const app = (await makeOuter())
       .resource("post")
       .procedure("post.shout", (base) =>
         base.handler(async ({ context }) => {
@@ -109,7 +112,7 @@ describe("client (in-process router client)", () => {
 
   test("evaluates a headers function per call", async () => {
     let calls = 0;
-    const app = makeOuter()
+    const app = (await makeOuter())
       .procedure("echo.header", (base) =>
         base.handler(({ context }) => context.headers.get("x-call")),
       )
@@ -137,7 +140,7 @@ describe("db.transact", () => {
   }
 
   test("commits writes and exposes Sola queries on the trx", async () => {
-    const app = makeOuter()
+    const app = (await makeOuter())
       .resource("post")
       .procedure("tx.commit", (base) =>
         base.handler(async ({ context }) => {
@@ -156,7 +159,7 @@ describe("db.transact", () => {
   });
 
   test("rolls back when the callback throws", async () => {
-    const app = makeOuter()
+    const app = (await makeOuter())
       .resource("post")
       .procedure("tx.rollback", (base) =>
         base.handler(async ({ context }) => {
@@ -193,7 +196,7 @@ describe("auth baseURL", () => {
     const app = new Outer({
       name: "Test",
       baseUrl: "http://ctor-default.test",
-      db: pglite({ dataDir: "memory://" }),
+      db: await postDb(),
     })
       .schema(s)
       .auth({ secret: "test-secret" })
@@ -209,7 +212,7 @@ describe("auth baseURL", () => {
     const app = new Outer({
       name: "Test",
       baseUrl: "http://ctor-default.test",
-      db: pglite({ dataDir: "memory://" }),
+      db: await postDb(),
     })
       .schema(s)
       .auth({ secret: "test-secret", baseURL: "http://override.test" })
@@ -224,7 +227,7 @@ describe("auth baseURL", () => {
 
 describe("route", () => {
   test("mounts a raw H3 route with access to context", async () => {
-    const app = makeOuter()
+    const app = (await makeOuter())
       .route("get", "/hello", (_event, context) => {
         return new Response(JSON.stringify({ hasDb: !!context.db }), {
           headers: { "content-type": "application/json" },
@@ -238,7 +241,7 @@ describe("route", () => {
   });
 
   test("takes precedence over /rpc/** on overlapping paths", async () => {
-    const app = makeOuter()
+    const app = (await makeOuter())
       .route("post", "/rpc/custom", () => new Response("custom"))
       .procedure("custom", (base) => base.handler(async () => "rpc"))
       .build();
@@ -255,17 +258,17 @@ describe("route", () => {
 });
 
 describe("build-time validation", () => {
-  test(".build() throws if a resource permission requires auth but .auth() was never called", () => {
+  test(".build() throws if a resource permission requires auth but .auth() was never called", async () => {
+    const outer = await makeOuter();
     expect(() =>
-      makeOuter()
-        .resource("post", { permissions: { create: "authenticated" } })
-        .build(),
+      outer.resource("post", { permissions: { create: "authenticated" } }).build(),
     ).toThrow(/auth/i);
   });
 
-  test("registering two procedures under the same dot-path throws", () => {
+  test("registering two procedures under the same dot-path throws", async () => {
+    const outer = await makeOuter();
     expect(() =>
-      makeOuter()
+      outer
         .procedure("dup", (base) => base.handler(async () => "a"))
         .procedure("dup", (base) => base.handler(async () => "b")),
     ).toThrow(/collision/i);
@@ -277,7 +280,7 @@ describe("cors", () => {
     const app = new Outer({
       name: "Test",
       baseUrl: "http://localhost",
-      db: pglite({ dataDir: "memory://" }),
+      db: await postDb(),
       cors: { origins: ["https://allowed.test"] },
     })
       .schema(s)
@@ -298,7 +301,7 @@ describe("cors", () => {
     const app = new Outer({
       name: "Test",
       baseUrl: "http://localhost",
-      db: pglite({ dataDir: "memory://" }),
+      db: await postDb(),
       cors: { origins: ["https://allowed.test"] },
     })
       .schema(s)
@@ -319,7 +322,7 @@ describe("cors", () => {
     const app = new Outer({
       name: "Test",
       baseUrl: "http://localhost",
-      db: pglite({ dataDir: "memory://" }),
+      db: await postDb(),
       cors: { origins: ["https://allowed.test"], credentials: true },
     })
       .schema(s)
@@ -346,7 +349,7 @@ describe("cors", () => {
     const app = new Outer({
       name: "Test",
       baseUrl: "http://localhost",
-      db: pglite({ dataDir: "memory://" }),
+      db: await postDb(),
       cors: { origins: ["https://allowed.test"] },
     })
       .schema(s)
@@ -395,19 +398,45 @@ describe("db: custom dialect", () => {
 
 describe("auth context", () => {
   const authSchema = schema("1.0.0").auth().build();
-  const SECRET = "test-secret-that-is-long-enough";
 
-  function makeAuthed(build: (o: any) => any) {
-    const app = build(
-      new Outer({ baseUrl: "http://localhost", db: pglite({ dataDir: "memory://" }) })
-        .schema(authSchema)
-        .auth({ secret: SECRET, emailAndPassword: { enabled: true } }),
-    ).build();
-    return app;
-  }
+  // One app for the whole describe: migrating a fresh PGlite costs ~1.4s, and
+  // these tests only need different procedures, not different databases.
+  const authDb = testDb([authSchema]);
+  let sessionLookups = 0;
+  let app: any;
+  let anonymous: any;
 
-  async function signUp(app: any, email: string) {
-    const res = await app.handle(
+  const makeAuthed = async () =>
+    new Outer({ baseUrl: "http://localhost", db: await authDb() })
+      .schema(authSchema)
+      .auth(testAuth())
+      .middleware(async ({ context, next }: any) => {
+        if (context.user) sessionLookups++;
+        return next();
+      })
+      .procedure("me", (base: any) =>
+        base.handler(({ context }: any) => ({
+          email: context.user?.email ?? null,
+          user: context.user,
+          session: context.session,
+          hasSession: context.session != null,
+        })),
+      )
+      .route("get", "/whoami", (_event: any, context: any) =>
+        Response.json({ email: context.user?.email ?? null }),
+      )
+      .build();
+
+  beforeAll(async () => {
+    app = await makeAuthed();
+    anonymous = new Outer({ db: await postDb() })
+      .schema(s)
+      .procedure("me", (base: any) => base.handler(({ context }: any) => context.user))
+      .build();
+  });
+
+  async function signUp(target: any, email: string) {
+    const res = await target.handle(
       new Request("http://localhost/api/auth/sign-up/email", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -417,8 +446,8 @@ describe("auth context", () => {
     return (res.headers.getSetCookie?.() ?? []).map((c: string) => c.split(";")[0]).join("; ");
   }
 
-  function call(app: any, name: string, cookie?: string) {
-    return app.handle(
+  function call(target: any, name: string, cookie?: string) {
+    return target.handle(
       new Request(`http://localhost/rpc/${name}`, {
         method: "POST",
         headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
@@ -428,90 +457,68 @@ describe("auth context", () => {
   }
 
   test("context.user is populated without a getSession middleware", async () => {
-    const app = makeAuthed((o: any) =>
-      o.procedure("me", (base: any) =>
-        base.handler(({ context }: any) => ({
-          email: context.user?.email ?? null,
-          hasSession: context.session != null,
-        })),
-      ),
-    );
-    await app.migrator.migrateToLatest();
     const cookie = await signUp(app, "ctx@example.com");
-
     const { json } = await (await call(app, "me", cookie)).json();
     expect(json.email).toBe("ctx@example.com");
     expect(json.hasSession).toBe(true);
   });
 
   test("context.user is null for anonymous callers", async () => {
-    const app = makeAuthed((o: any) =>
-      o.procedure("me", (base: any) =>
-        base.handler(({ context }: any) => ({ user: context.user, session: context.session })),
-      ),
-    );
-    await app.migrator.migrateToLatest();
     const { json } = await (await call(app, "me")).json();
     expect(json.user).toBeNull();
     expect(json.session).toBeNull();
   });
 
   test("the session is resolved once per request, not per procedure", async () => {
-    let lookups = 0;
-    const app = makeAuthed((o: any) =>
-      o
-        .middleware(async ({ context, next }: any) => {
-          if (context.user) lookups++;
-          return next();
-        })
-        .procedure("me", (base: any) => base.handler(({ context }: any) => context.user!.email)),
-    );
-    await app.migrator.migrateToLatest();
     const cookie = await signUp(app, "once@example.com");
+    sessionLookups = 0;
     await call(app, "me", cookie);
-    expect(lookups).toBe(1);
+    expect(sessionLookups).toBe(1);
   });
 
   test("raw .route() handlers get the same resolved user", async () => {
-    const app = makeAuthed((o: any) =>
-      o.route("get", "/whoami", (_event: any, context: any) =>
-        Response.json({ email: context.user?.email ?? null }),
-      ),
-    );
-    await app.migrator.migrateToLatest();
     const cookie = await signUp(app, "route@example.com");
     const res = await app.handle(new Request("http://localhost/whoami", { headers: { cookie } }));
     expect((await res.json()).email).toBe("route@example.com");
   });
 
   test("context.user is null when .auth() was never called", async () => {
-    const app = new Outer({ db: pglite({ dataDir: "memory://" }) })
-      .schema(s)
-      .procedure("me", (base: any) => base.handler(({ context }: any) => context.user))
-      .build();
-    const { json } = await (await call(app, "me")).json();
+    const { json } = await (await call(anonymous, "me")).json();
     expect(json).toBeNull();
   });
 });
 
 describe("procedure permissions", () => {
-  // `role` only reaches the session user when Better Auth's admin plugin is registered
-
   const authSchema = schema("1.0.0").auth().build();
-  const SECRET = "test-secret-that-is-long-enough";
 
-  function makeApp(permission: any, roles?: string[]) {
-    return new Outer({ baseUrl: "http://localhost", db: pglite({ dataDir: "memory://" }) })
+  // All permission variants live on one app, for the same reason as above.
+  // `role` only reaches the session user when Better Auth's admin plugin is registered.
+  const permsDb = testDb([authSchema]);
+  let app: any;
+
+  const makePerms = async () =>
+    new Outer({ baseUrl: "http://localhost", db: await permsDb() })
       .schema(authSchema)
-      .auth({ secret: SECRET, emailAndPassword: { enabled: true }, plugins: [betterAuthAdmin()] })
-      .procedure("secret", (base: any) => base.handler(() => "ok"), {
-        permission,
-        ...(roles && { roles }),
+      .auth(testAuth({ plugins: [betterAuthAdmin()] }))
+      .procedure("open", (base: any) => base.handler(() => "ok"))
+      .procedure("authed", (base: any) => base.handler(() => "ok"), {
+        permission: "authenticated",
+      })
+      .procedure("adminOnly", (base: any) => base.handler(() => "ok"), { permission: "admin" })
+      .procedure("staffOnly", (base: any) => base.handler(() => "ok"), {
+        permission: "admin",
+        roles: ["staff"],
+      })
+      .procedure("byEmail", (base: any) => base.handler(() => "ok"), {
+        permission: ({ context }: any) => context.user?.email === "allowed@example.com",
       })
       .build();
-  }
 
-  async function signUp(app: any, email: string, role?: string) {
+  beforeAll(async () => {
+    app = await makePerms();
+  });
+
+  async function signUp(email: string, role?: string) {
     const res = await app.handle(
       new Request("http://localhost/api/auth/sign-up/email", {
         method: "POST",
@@ -523,9 +530,9 @@ describe("procedure permissions", () => {
     return (res.headers.getSetCookie?.() ?? []).map((c: string) => c.split(";")[0]).join("; ");
   }
 
-  function call(app: any, cookie?: string) {
+  function call(name: string, cookie?: string) {
     return app.handle(
-      new Request("http://localhost/rpc/secret", {
+      new Request(`http://localhost/rpc/${name}`, {
         method: "POST",
         headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
         body: JSON.stringify({ json: {} }),
@@ -534,42 +541,28 @@ describe("procedure permissions", () => {
   }
 
   test("'authenticated' rejects anonymous and allows signed-in callers", async () => {
-    const app = makeApp("authenticated");
-    await app.migrator.migrateToLatest();
-    expect((await call(app)).status).toBe(401);
-    const cookie = await signUp(app, "perm@example.com");
-    expect((await call(app, cookie)).status).toBe(200);
+    expect((await call("authed")).status).toBe(401);
+    const cookie = await signUp("perm@example.com");
+    expect((await call("authed", cookie)).status).toBe(200);
   });
 
   test("'admin' rejects a plain user and allows an admin", async () => {
-    const app = makeApp("admin");
-    await app.migrator.migrateToLatest();
-    const user = await signUp(app, "plain@example.com");
-    expect((await call(app, user)).status).toBe(403);
-    const admin = await signUp(app, "boss@example.com", "admin");
-    expect((await call(app, admin)).status).toBe(200);
+    const user = await signUp("plain@example.com");
+    expect((await call("adminOnly", user)).status).toBe(403);
+    const admin = await signUp("boss@example.com", "admin");
+    expect((await call("adminOnly", admin)).status).toBe(200);
   });
 
   test("custom `roles` is respected", async () => {
-    const app = makeApp("admin", ["staff"]);
-    await app.migrator.migrateToLatest();
-    const staff = await signUp(app, "staff@example.com", "staff");
-    expect((await call(app, staff)).status).toBe(200);
+    const staff = await signUp("staff@example.com", "staff");
+    expect((await call("staffOnly", staff)).status).toBe(200);
   });
 
   test("a function permission receives the context", async () => {
-    const app = new Outer({ baseUrl: "http://localhost", db: pglite({ dataDir: "memory://" }) })
-      .schema(authSchema)
-      .auth({ secret: SECRET, emailAndPassword: { enabled: true }, plugins: [betterAuthAdmin()] })
-      .procedure("secret", (base: any) => base.handler(() => "ok"), {
-        permission: ({ context }: any) => context.user?.email === "allowed@example.com",
-      })
-      .build();
-    await app.migrator.migrateToLatest();
-    const denied = await signUp(app, "denied@example.com");
-    expect((await call(app, denied)).status).toBe(403);
-    const allowed = await signUp(app, "allowed@example.com");
-    expect((await call(app, allowed)).status).toBe(200);
+    const denied = await signUp("denied@example.com");
+    expect((await call("byEmail", denied)).status).toBe(403);
+    const allowed = await signUp("allowed@example.com");
+    expect((await call("byEmail", allowed)).status).toBe(200);
   });
 
   test("a permission requiring auth without .auth() throws at build()", () => {
@@ -584,8 +577,6 @@ describe("procedure permissions", () => {
   });
 
   test("no permission option leaves the procedure public", async () => {
-    const app = makeApp(undefined);
-    await app.migrator.migrateToLatest();
-    expect((await call(app)).status).toBe(200);
+    expect((await call("open")).status).toBe(200);
   });
 });

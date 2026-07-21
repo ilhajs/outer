@@ -3,7 +3,7 @@ import { test, describe, beforeAll, expect } from "bun:test";
 import { z } from "zod/v4";
 
 import { Outer, schema } from "./index";
-import { pglite } from "./pglite";
+import { fastPasswordHashing, testDb } from "./test-utils";
 
 const s = schema("1.0.0")
   .table("post", (t) => ({
@@ -14,11 +14,15 @@ const s = schema("1.0.0")
   }))
   .build();
 
-function makeApp(opts?: Parameters<ReturnType<typeof Outer.prototype.schema>["resource"]>[1]) {
+const postDb = testDb([s]);
+
+async function makeApp(
+  opts?: Parameters<ReturnType<typeof Outer.prototype.schema>["resource"]>[1],
+) {
   return new Outer({
     name: "Test",
     baseUrl: "http://localhost",
-    db: pglite({ dataDir: "memory://" }),
+    db: await postDb(),
   })
     .schema(s)
     .auth({ secret: "test-secret" })
@@ -48,7 +52,7 @@ describe("resource — CRUD", () => {
   let app: Awaited<ReturnType<typeof makeApp>>;
 
   beforeAll(async () => {
-    app = makeApp();
+    app = await makeApp();
     await app.migrator.migrateToLatest();
   });
 
@@ -138,11 +142,13 @@ const todoSchema = schema("1.0.0")
   }))
   .build();
 
-function makeTodoApp() {
+const todoDb = testDb([todoSchema]);
+
+async function makeTodoApp() {
   return new Outer({
     name: "Test",
     baseUrl: "http://localhost",
-    db: pglite({ dataDir: "memory://" }),
+    db: await todoDb(),
   })
     .schema(todoSchema)
     .resource("todo")
@@ -169,7 +175,7 @@ describe("resource — update boolean columns with defaults", () => {
   let app: Awaited<ReturnType<typeof makeTodoApp>>;
 
   beforeAll(async () => {
-    app = makeTodoApp();
+    app = await makeTodoApp();
     await app.migrator.migrateToLatest();
   });
 
@@ -203,7 +209,7 @@ describe("resource — update boolean columns with defaults", () => {
 
 describe("resource — list pagination cap", () => {
   test("defaults to 50 rows and rejects `take` above the max", async () => {
-    const app = makeApp({ listLimit: { default: 2, max: 3 } });
+    const app = await makeApp({ listLimit: { default: 2, max: 3 } });
     await app.migrator.migrateToLatest();
     await rpc(app, "create", { title: "A" });
     await rpc(app, "create", { title: "B" });
@@ -221,7 +227,7 @@ describe("resource — list filtering, ordering, pagination", () => {
   let app: Awaited<ReturnType<typeof makeApp>>;
 
   beforeAll(async () => {
-    app = makeApp();
+    app = await makeApp();
     await app.migrator.migrateToLatest();
     await rpc(app, "create", { title: "Alpha" });
     await rpc(app, "create", { title: "Beta" });
@@ -270,7 +276,7 @@ describe("resource — list filtering, ordering, pagination", () => {
 
 describe("resource — createMany", () => {
   test("inserts multiple rows and returns them", async () => {
-    const app = makeApp();
+    const app = await makeApp();
     await app.migrator.migrateToLatest();
     const { status, output } = await rpc(app, "createMany", {
       data: [{ title: "One" }, { title: "Two" }, { title: "Three" }],
@@ -281,7 +287,7 @@ describe("resource — createMany", () => {
   });
 
   test("empty data array returns 400", async () => {
-    const app = makeApp();
+    const app = await makeApp();
     await app.migrator.migrateToLatest();
     const { status } = await rpc(app, "createMany", { data: [] });
     expect(status).toBe(400);
@@ -304,6 +310,8 @@ const relSchema = schema("1.0.0")
   .relation("author", (rel) => rel.hasMany("book", { from: "id", to: "authorId" }))
   .build();
 
+const relDb = testDb([relSchema]);
+
 describe("resource — include", () => {
   let app: any;
   let authorId: number;
@@ -325,7 +333,7 @@ describe("resource — include", () => {
     app = new Outer({
       name: "Test",
       baseUrl: "http://localhost",
-      db: pglite({ dataDir: "memory://" }),
+      db: await relDb(),
     })
       .schema(relSchema)
       .resource("author", { includable: ["book"] })
@@ -362,17 +370,17 @@ describe("resource — include", () => {
 
 describe("resource — eager config validation", () => {
   test("'owner' permission without ownerColumn throws when .resource() is called", () => {
-    expect(() => makeApp({ permissions: { update: "owner" } })).toThrow(/ownerColumn/);
+    expect(makeApp({ permissions: { update: "owner" } })).rejects.toThrow(/ownerColumn/);
   });
 
   test("includable naming a nonexistent relation throws when .resource() is called", () => {
-    expect(() => makeApp({ includable: ["comment"] })).toThrow(/includable/);
+    expect(makeApp({ includable: ["comment"] })).rejects.toThrow(/includable/);
   });
 });
 
 describe("resource — list skip cap", () => {
   test("skip beyond maxSkip returns 400", async () => {
-    const app = makeApp();
+    const app = await makeApp();
     await app.migrator.migrateToLatest();
     const { status } = await rpc(app, "list", { skip: 10_001 });
     expect(status).toBe(400);
@@ -388,11 +396,13 @@ const uniqueSchema = schema("1.0.0")
   }))
   .build();
 
-function makeUniqueApp() {
+const uniqueDb = testDb([uniqueSchema]);
+
+async function makeUniqueApp() {
   return new Outer({
     name: "Test",
     baseUrl: "http://localhost",
-    db: pglite({ dataDir: "memory://" }),
+    db: await uniqueDb(),
   })
     .schema(uniqueSchema)
     .resource("post")
@@ -403,7 +413,7 @@ describe("resource — DB error mapping", () => {
   let app: Awaited<ReturnType<typeof makeUniqueApp>>;
 
   beforeAll(async () => {
-    app = makeUniqueApp();
+    app = await makeUniqueApp();
     await app.migrator.migrateToLatest();
   });
 
@@ -433,7 +443,7 @@ describe("resource — permissions", () => {
   let app: Awaited<ReturnType<typeof makeApp>>;
 
   beforeAll(async () => {
-    app = makeApp({
+    app = await makeApp({
       permissions: {
         list: "public",
         get: "public",
@@ -469,7 +479,7 @@ describe("resource — custom permission function", () => {
   let app: Awaited<ReturnType<typeof makeApp>>;
 
   beforeAll(async () => {
-    app = makeApp({
+    app = await makeApp({
       permissions: {
         list: () => false,
         get: () => true,
@@ -545,13 +555,17 @@ const authSchema = schema("1.0.0")
   .relation("account", (rel) => rel.belongsTo("user", { from: "userId", to: "id" }))
   .build();
 
-function makeAuthApp(opts?: Parameters<ReturnType<typeof Outer.prototype.schema>["resource"]>[1]) {
+const authDb = testDb([authSchema]);
+
+async function makeAuthApp(
+  opts?: Parameters<ReturnType<typeof Outer.prototype.schema>["resource"]>[1],
+) {
   return (
-    new Outer({ name: "Test", baseUrl: "http://localhost", db: pglite({ dataDir: "memory://" }) })
+    new Outer({ name: "Test", baseUrl: "http://localhost", db: await authDb() })
       .schema(authSchema)
       .auth({
         secret: "test-secret",
-        emailAndPassword: { enabled: true },
+        emailAndPassword: fastPasswordHashing,
         user: {
           additionalFields: { role: { type: "string", defaultValue: "user", input: false } },
         },
@@ -612,7 +626,7 @@ describe("resource — owner permission (real sessions)", () => {
   let postId: number;
 
   beforeAll(async () => {
-    app = makeAuthApp({
+    app = await makeAuthApp({
       permissions: { create: "authenticated", update: "owner", delete: "owner" },
       ownerColumn: "userId",
     });
@@ -664,7 +678,7 @@ describe("resource — owner-scoped list (real sessions)", () => {
   let bob: { userId: string; cookie: string };
 
   beforeAll(async () => {
-    app = makeAuthApp({
+    app = await makeAuthApp({
       permissions: { list: "owner", create: "authenticated" },
       ownerColumn: "userId",
     });
@@ -715,7 +729,7 @@ describe("resource — admin permission (real sessions)", () => {
   let postId: number;
 
   beforeAll(async () => {
-    app = makeAuthApp({ permissions: { delete: "admin" } });
+    app = await makeAuthApp({ permissions: { delete: "admin" } });
     await app.migrator.migrateToLatest();
     admin = await signUp(app, "admin@test.com");
     regular = await signUp(app, "regular@test.com");
