@@ -1,23 +1,25 @@
 ---
 title: MCP
-description: Serve your procedures as MCP tools with .mcp(), authenticated with API keys.
-order: 7
+description: Serve your procedures as MCP tools with .mcp(), opt in per procedure, and authenticate agents with API keys.
+order: 11
 tags: [mcp, ai, agents, tools, api-keys]
 ---
 
 # MCP
 
-`.mcp()` serves the same router you already have as an [MCP](https://modelcontextprotocol.io) server over the Streamable HTTP transport, so Claude, IDEs, and agents can call your procedures as tools. One router definition, four surfaces: RPC, REST, OpenAPI, and MCP.
+`.mcp()` serves the router you already have as an [MCP](https://modelcontextprotocol.io) server over the Streamable HTTP transport, so Claude, IDEs, and agents can call your procedures as tools. One router definition covers four surfaces: RPC, REST, OpenAPI, and MCP.
 
-It needs two optional peer dependencies:
+## Before you begin
+
+Install the two optional peer dependencies:
 
 ```bash
 bun add orpc-mcp @orpc/zod
 ```
 
-## Exposing a procedure
+## Expose a procedure
 
-Exposure is **opt-in per procedure**. Tag one with the `mcp` meta helper and it appears; leave it untagged and MCP clients never see it:
+Exposure is **opt-in per procedure**. Tag one with the `mcp` meta helper and it appears. Leave it untagged and MCP clients never see it:
 
 ```ts
 import { mcp, Outer } from "@outerjs/server";
@@ -40,15 +42,15 @@ new Outer({ db: pglite() })
   .build();
 ```
 
-`mcp.tool()`, `mcp.resource()`, and `mcp.prompt()` map a procedure to the corresponding MCP capability. The input schema becomes the tool's JSON Schema, so the description and argument names an agent sees come straight from the procedure.
+`mcp.tool()`, `mcp.resource()`, and `mcp.prompt()` map a procedure to the matching MCP capability. Your input schema becomes the tool's JSON Schema, so the description and argument names an agent sees come straight from the procedure.
 
-Because it is opt-in, the reserved `_admin` namespace — which can read, update, and delete any row in any table — and every `file.*` route stay invisible whether or not you remember to exclude them.
+Because exposure is opt-in, the reserved `_admin` namespace — which can read, update, and delete any row in any table — and every `file.*` route stay invisible whether or not you remember to exclude them.
 
-**Dots aren't legal in MCP tool names**, so a dot-namespaced procedure is exposed with underscores: `post.search` is listed and called as `post_search`.
+Dots are not legal in MCP tool names, so a dot-namespaced procedure is exposed with underscores. `post.search` is listed and called as `post_search`.
 
-## Authentication
+## Authenticate agents
 
-The MCP endpoint resolves a session exactly the way `/rpc/**` does, so permissions, `context.user`, and `ownerColumn` behave identically — an untagged permission is not a loophole, and `{ permission: "authenticated" }` on a tool means an anonymous MCP client gets rejected.
+The MCP endpoint resolves a session exactly the way `/rpc/**` does, so permissions, `context.user`, and `ownerColumn` behave identically. An untagged permission is not a loophole: `{ permission: "authenticated" }` on a tool rejects an anonymous MCP client.
 
 Browsers can authenticate with a cookie. Headless clients use an [API key](/guide/auth#api-keys):
 
@@ -57,9 +59,9 @@ POST https://your-app.com/mcp
 Authorization: Bearer <key>
 ```
 
-The key authenticates as the user it belongs to, so an agent has exactly that user's permissions — no more.
+The key authenticates as the user it belongs to, so an agent has exactly that user's permissions and no more.
 
-Clients that only support the MCP OAuth discovery flow, rather than a configurable header, need Better Auth's separate `mcp` plugin; that isn't wired into `.mcp()` today.
+Clients that support only the MCP OAuth discovery flow, rather than a configurable header, need Better Auth's separate `mcp` plugin. That is not wired into `.mcp()` today.
 
 ## Options
 
@@ -67,13 +69,18 @@ Clients that only support the MCP OAuth discovery flow, rather than a configurab
 .mcp({ path: "/mcp", instructions: "Search and summarise posts." })
 ```
 
-| Field                             | Default                                 | Description                                                         |
-| --------------------------------- | --------------------------------------- | ------------------------------------------------------------------- |
-| `enabled`                         | `true` when called                      | Set `false` to gate it behind an env flag without removing the call |
-| `path`                            | `/mcp`                                  | Where the endpoint is mounted                                       |
-| `serverInfo`                      | instance `name` + latest schema version | Identity reported to clients during `initialize`                    |
-| `instructions`                    | —                                       | Free-form guidance returned during `initialize`                     |
-| `enableDnsRebindingProtection`    | `false`                                 | Reject `Origin`/`Host` values outside the allowlists                |
-| `allowedOrigins` / `allowedHosts` | —                                       | Exact-match allowlists used when protection is on                   |
+| Field                             | Default                                 | Description                                                          |
+| --------------------------------- | --------------------------------------- | -------------------------------------------------------------------- |
+| `enabled`                         | `true` when called                      | Set `false` to gate it behind an env flag without removing the call. |
+| `path`                            | `/mcp`                                  | Where the endpoint is mounted.                                       |
+| `serverInfo`                      | instance `name` + latest schema version | Identity reported to clients during `initialize`.                    |
+| `instructions`                    | —                                       | Free-form guidance returned during `initialize`.                     |
+| `enableDnsRebindingProtection`    | `false`                                 | Reject `Origin` and `Host` values outside the allowlists.            |
+| `allowedOrigins` / `allowedHosts` | —                                       | Exact-match allowlists used when protection is on.                   |
 
-Turn on `enableDnsRebindingProtection` when the endpoint is reachable from a browser: a missing `Origin` header always passes (non-browser clients), but a present one outside the allowlist is rejected with `403`.
+Turn on `enableDnsRebindingProtection` when the endpoint is reachable from a browser. A missing `Origin` header always passes, for non-browser clients, but a present one outside the allowlist is rejected with `403`.
+
+## Next steps
+
+- [API keys](/guide/auth#api-keys) — issue tokens for headless clients
+- [Procedures](/guide/procedures) — write the procedures you expose

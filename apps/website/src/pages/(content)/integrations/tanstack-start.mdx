@@ -1,24 +1,24 @@
 ---
 title: TanStack Start
-description: Mount Outer inside a TanStack Start app — server routes for /rpc and /api/auth, a typed client with @outerjs/sdk, and server-side calls without a network hop.
+description: Mount Outer inside a TanStack Start app with two server routes, add a typed client, and call procedures from loaders without a network hop.
 order: 2
 tags: [tanstack-start, integration, server-routes, vite]
 ---
 
 # TanStack Start
 
-TanStack Start's server routes hand you the raw `Request` and expect a `Response` back — exactly the shape of Outer's `outer.handle(request)`. Two catch-all routes give you a full backend — database, auth, typed RPC, generated CRUD — inside the same Start app, and the router types flow end-to-end into your components.
+TanStack Start's server routes hand you the raw `Request` and expect a `Response` back — exactly the shape of `outer.handle(request)`. Two catch-all routes give you a full backend inside the same Start app, and the router types flow end to end into your components.
 
-## Install
+## 1. Install
 
 ```bash
 bun add @outerjs/server @outerjs/sdk
 bun add @electric-sql/pglite # for the embedded pglite() default (self-hosted deploys)
 ```
 
-## Define the server
+## 2. Define the server
 
-Create the Outer instance in a shared module. Vite re-evaluates modules on HMR in dev, and `pglite()` allows only one live instance per data directory — so cache the instance (and the migration run) on `globalThis`:
+Create the Outer instance in a shared module. Vite re-evaluates modules on HMR in dev, and `pglite()` allows only one live instance per data directory — so cache the instance and the migration run on `globalThis`:
 
 ```ts
 // src/lib/outer.ts
@@ -26,7 +26,7 @@ import { Outer, schema } from "@outerjs/server";
 import { pglite } from "@outerjs/server/pglite";
 
 const v1_0 = schema("1.0.0")
-  .auth() // Better Auth tables (user, session, account, verification) + admin plugin fields
+  .auth() // Better Auth tables: user, session, account, verification
   .table("post", (t) => ({
     id: t.serial().primaryKey(),
     title: t.text(),
@@ -55,9 +55,9 @@ if (!g.outer) {
 export const outer = g.outer;
 ```
 
-## Mount the routes
+## 3. Mount the routes
 
-Outer serves everything under `/rpc/**` and `/api/auth/**`. TanStack Start's splat segment (a file named `$.ts`) catches the rest of the path, and since Start passes the full URL through, Outer routes on it directly:
+Outer serves everything under `/rpc/**` and `/api/auth/**`. A splat segment — a file named `$.ts` — catches the rest of the path, and Start passes the full URL through, so Outer routes on it directly.
 
 ```ts
 // src/routes/rpc/$.ts
@@ -97,11 +97,11 @@ export const Route = createFileRoute("/api/auth/$")({
 });
 ```
 
-If you enable `.openapi()`, add the same delegating handler at `src/routes/openapi[.]json.ts` (`GET`) and `src/routes/rest/$.ts` (all methods) to expose the spec and the plain-JSON REST surface.
+If you enable `.openapi()`, add the same delegating handler at `src/routes/openapi[.]json.ts` for `GET` and `src/routes/rest/$.ts` for all methods.
 
-## Client
+## 4. Create a typed client
 
-`@outerjs/sdk` gives you a typed RPC + auth client. The `import type` of the server module is erased at build time, so nothing server-side leaks into the client bundle:
+`@outerjs/sdk` gives you a typed RPC and auth client. The `import type` of the server module is erased at build time, so nothing server-side leaks into the client bundle:
 
 ```ts
 // src/lib/client.ts
@@ -118,7 +118,7 @@ export const client = createClient<Router>({
   .build();
 ```
 
-Use it anywhere in your components — with TanStack Query (which Start ships with), procedures slot straight into `queryFn`/`mutationFn`:
+Procedures slot straight into TanStack Query's `queryFn` and `mutationFn`, which Start ships with:
 
 ```tsx
 // src/routes/posts.tsx
@@ -146,11 +146,13 @@ function Posts() {
 }
 ```
 
-`client.auth.*` is the full Better Auth client — `client.auth.signIn.email({ email, password })`, `client.auth.useSession()`, and so on.
+`client.auth.*` is the full Better Auth client, so you get `client.auth.signIn.email({ email, password })`, `client.auth.useSession()`, and the rest.
 
-## Server functions and loaders
+## Call procedures from server functions and loaders
 
-On the server, skip the network: Outer lives in the same process, so `outer.client()` gives you an in-process [router client](https://orpc.dev/docs/client/server-side) — the same typed surface as the SDK, but each call invokes the procedure directly, with no serialization, no fetch, no wire protocol. Forward the incoming request's headers so permissions and `context.auth` see the caller's session:
+On the server, skip the network. Outer lives in the same process, so `outer.client()` gives you an in-process [router client](https://orpc.dev/docs/client/server-side) — the same typed surface as the SDK, but each call invokes the procedure directly, with no serialization, fetch, or wire protocol.
+
+Forward the incoming request's headers so permissions and `context.auth` see the caller's session:
 
 ```ts
 // src/lib/api.server.ts
@@ -168,11 +170,11 @@ import { api } from "@/lib/api.server";
 export const listPosts = createServerFn().handler(() => api.post.list({}));
 ```
 
-Route loaders call `listPosts()` and get the in-process path during SSR and an RPC back to the server function on client-side navigation — deduplication comes free with `createServerFn`.
+Route loaders call `listPosts()`. They get the in-process path during SSR and an RPC back to the server function on client-side navigation, and `createServerFn` deduplicates for free.
 
-## Deployment
+## Deploy
 
-- **Self-hosted (VPS, Coolify, Docker)** — the `pglite()` default just works: it writes to local disk, so any long-lived Node/Bun process with a persistent filesystem is a zero-infra deploy. Mount the data directory (`.outer/pglite` by default) as a volume if you containerize.
-- **Serverless/edge targets** — no persistent disk, so swap `pglite()` for a serverless-friendly Kysely dialect: [Neon](https://neon.tech) Postgres (see `templates/vercel-neon`) or a Cloudflare Durable Object (see `templates/cloudflare`). Run migrations from a deploy-time script instead of at cold start.
+- **Self-hosted (VPS, Coolify, Docker).** The `pglite()` default works as-is: it writes to local disk, so any long-lived Node or Bun process with a persistent filesystem is a zero-infra deploy. Mount the data directory — `.outer/pglite` by default — as a volume if you containerize.
+- **Serverless and edge targets.** There is no persistent disk, so swap `pglite()` for a serverless-friendly Kysely dialect: [Neon](https://neon.tech) Postgres (see `templates/vercel-neon`) or a Cloudflare Durable Object (see `templates/cloudflare`). Run migrations from a deploy-time script instead of at cold start.
 
-The same split applies to [file uploads](/guide/files) — local disk via unstorage when self-hosted, an object store (R2, Vercel Blob, any S3-compatible bucket) when not. Pass either as `new Outer({ storage })`.
+The same split applies to [file uploads](/guide/files): local disk via unstorage when self-hosted, an object store — R2, Vercel Blob, any S3-compatible bucket — when not. Pass either as `new Outer({ storage })`.

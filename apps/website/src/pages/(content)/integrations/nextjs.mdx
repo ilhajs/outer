@@ -1,24 +1,24 @@
 ---
 title: Next.js
-description: Mount Outer inside a Next.js app — route handlers for /rpc and /api/auth, a typed client with @outerjs/sdk, and calling procedures from Server Components.
+description: Mount Outer inside a Next.js app with two route handlers, add a typed client, and call procedures from Server Components without a network hop.
 order: 1
 tags: [nextjs, integration, app-router, vercel, neon]
 ---
 
 # Next.js
 
-Outer's `outer.handle(request)` is a plain Fetch handler, so it mounts into Next.js App Router route handlers with no adapter. You get your whole backend — database, auth, typed RPC, generated CRUD — inside the same Next.js deployment, with no second service to run.
+`outer.handle(request)` is a plain Fetch handler, so it mounts into Next.js App Router route handlers with no adapter. Your whole backend — database, auth, typed RPC, generated CRUD — runs inside the same Next.js deployment, with no second service.
 
-## Install
+## 1. Install
 
 ```bash
 bun add @outerjs/server @outerjs/sdk
 bun add @electric-sql/pglite # for the embedded pglite() default (self-hosted deploys)
 ```
 
-## Define the server
+## 2. Define the server
 
-Create the Outer instance in a shared module. Next.js re-evaluates modules on HMR in dev, and `pglite()` allows only one live instance per data directory — so cache the instance (and the migration run) on `globalThis`:
+Create the Outer instance in a shared module. Next.js re-evaluates modules on HMR in dev, and `pglite()` allows only one live instance per data directory — so cache the instance and the migration run on `globalThis`:
 
 ```ts
 // src/lib/outer.ts
@@ -26,7 +26,7 @@ import { Outer, schema } from "@outerjs/server";
 import { pglite } from "@outerjs/server/pglite";
 
 const v1_0 = schema("1.0.0")
-  .auth() // Better Auth tables (user, session, account, verification) + admin plugin fields
+  .auth() // Better Auth tables: user, session, account, verification
   .table("post", (t) => ({
     id: t.serial().primaryKey(),
     title: t.text(),
@@ -55,9 +55,9 @@ if (!g.outer) {
 export const outer = g.outer;
 ```
 
-## Mount the routes
+## 3. Mount the routes
 
-Outer serves everything under `/rpc/**` and `/api/auth/**`, so two catch-all route handlers cover it. Both just delegate — Next.js passes the full request path through, and Outer routes on it:
+Outer serves everything under `/rpc/**` and `/api/auth/**`, so two catch-all handlers cover it. Both only delegate: Next.js passes the full request path through, and Outer routes on it.
 
 ```ts
 // src/app/rpc/[[...rest]]/route.ts
@@ -84,11 +84,11 @@ const handler = (req: Request) => outer.handle(req);
 export { handler as GET, handler as POST };
 ```
 
-If you enable `.openapi()`, add the same delegating handler at `src/app/openapi.json/route.ts` (`GET`) and `src/app/rest/[[...rest]]/route.ts` (all methods) to expose the spec and the plain-JSON REST surface.
+If you enable `.openapi()`, add the same delegating handler at `src/app/openapi.json/route.ts` for `GET` and `src/app/rest/[[...rest]]/route.ts` for all methods.
 
-## Client components
+## 4. Create a typed client
 
-`@outerjs/sdk` gives you a typed RPC + auth client. The `import type` of the server module is erased at build time, so nothing server-side leaks into the client bundle:
+`@outerjs/sdk` gives you a typed RPC and auth client. The `import type` of the server module is erased at build time, so nothing server-side leaks into the client bundle:
 
 ```ts
 // src/lib/client.ts
@@ -117,11 +117,13 @@ export function NewPost() {
 }
 ```
 
-`client.auth.*` is the full Better Auth client — `client.auth.signIn.email({ email, password })`, `client.auth.useSession()`, and so on.
+`client.auth.*` is the full Better Auth client, so you get `client.auth.signIn.email({ email, password })`, `client.auth.useSession()`, and the rest.
 
-## Optimize SSR
+## Call procedures during SSR
 
-Outer runs in the same process as your Server Components, so SSR should never pay HTTP overhead. `outer.client()` returns an in-process [router client](https://orpc.dev/docs/client/server-side) — the same typed surface as the SDK, but each call invokes the procedure directly, with no serialization, no fetch, no wire protocol. Pass `next/headers` so permissions and `context.auth` see the caller's session on every call:
+Outer runs in the same process as your Server Components, so SSR should never pay HTTP overhead. `outer.client()` returns an in-process [router client](https://orpc.dev/docs/client/server-side) — the same typed surface as the SDK, but each call invokes the procedure directly, with no serialization, fetch, or wire protocol.
+
+Pass `next/headers` so permissions and `context.auth` see the caller's session on every call:
 
 ```ts
 // src/lib/api.server.ts
@@ -149,12 +151,12 @@ export default async function PostsPage() {
 }
 ```
 
-If you share components between server and client rendering, you can go one step further with [oRPC's optimized SSR pattern](https://orpc.dev/docs/adapters/next): assign `outer.client(() => headers())` to `globalThis.$client` in a `server-only` module (imported from `instrumentation.ts` and your root layout), and have `src/lib/client.ts` fall back to it — one `client` import that calls in-process during SSR and over HTTP in the browser. Auth flows (`client.auth.*`) stay browser-only either way.
+If you share components between server and client rendering, go one step further with [oRPC's optimized SSR pattern](https://orpc.dev/docs/adapters/next). Assign `outer.client(() => headers())` to `globalThis.$client` in a `server-only` module, import it from `instrumentation.ts` and your root layout, and have `src/lib/client.ts` fall back to it. One `client` import then calls in-process during SSR and over HTTP in the browser. Auth flows (`client.auth.*`) stay browser-only either way.
 
-## Deployment
+## Deploy
 
-- **Self-hosted Next.js (VPS, Coolify, Docker)** — the `pglite()` default just works: it writes to local disk, so any long-lived `next start` process with a persistent filesystem is a zero-infra deploy. Mount the data directory (`.outer/pglite` by default) as a volume if you containerize.
-- **Vercel** — serverless functions have no persistent disk, so swap `pglite()` for a serverless Postgres dialect such as [Neon](https://neon.tech). Everything else stays the same:
+- **Self-hosted (VPS, Coolify, Docker).** The `pglite()` default works as-is: it writes to local disk, so any long-lived `next start` process with a persistent filesystem is a zero-infra deploy. Mount the data directory — `.outer/pglite` by default — as a volume if you containerize.
+- **Vercel.** Serverless functions have no persistent disk, so swap `pglite()` for a serverless Postgres dialect such as [Neon](https://neon.tech). Nothing else changes:
 
 ```ts
 import { neon } from "@neondatabase/serverless";
@@ -169,6 +171,6 @@ new Outer({
 });
 ```
 
-On serverless, run migrations from a script at deploy time instead of at cold start — see `templates/vercel-neon` for a working setup, including a `scripts/migrate.ts` you can copy.
+On serverless, run migrations from a deploy-time script instead of at cold start. `templates/vercel-neon` has a working setup, including a `scripts/migrate.ts` you can copy.
 
-The same split applies to [file uploads](/guide/files): self-hosted can keep bytes on local disk via unstorage, while on Vercel they belong in [Vercel Blob](https://vercel.com/docs/vercel-blob) — pass either as `new Outer({ storage })`.
+The same split applies to [file uploads](/guide/files): self-hosted can keep bytes on local disk via unstorage, while on Vercel they belong in [Vercel Blob](https://vercel.com/docs/vercel-blob). Pass either as `new Outer({ storage })`.

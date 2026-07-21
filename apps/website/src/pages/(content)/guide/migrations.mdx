@@ -1,0 +1,65 @@
+---
+title: Migrations
+description: Register schema versions with .schema(), apply them with migrateToLatest(), and understand what the diff refuses to do.
+order: 3
+tags: [migrations, schema, versions]
+---
+
+# Migrations
+
+You never write a migration file. You add a new [schema version](/guide/schema), register it, and Outer diffs it against the previous one.
+
+## Register versions
+
+Pass each schema version to `.schema()` on the builder, in order:
+
+```ts
+new Outer({ db: pglite() })
+  .schema(v1_0)
+  .schema(v1_1) // each call adds a migration step and updates the DB type
+  .build();
+```
+
+Each call also advances the type of `context.db` to `InferDB<T>`, so procedures registered after a `.schema()` call see the new columns.
+
+## Apply migrations
+
+```ts
+await server.migrator.migrateToLatest();
+```
+
+Outer diffs consecutive schema versions with a custom `SchemaMigrationProvider`. Each `schema("x.y.z")` call becomes one Kysely migration keyed by its version string.
+
+- **Up** creates new tables, adds new columns with their indexes, and drops removed columns.
+- **Down** reverses all three.
+
+Run this on startup when you self-host. On serverless, run it from a deploy-time script instead — see [Deployment](/guide/deployment).
+
+## Zero-pad version segments past 9
+
+Kysely applies migrations in lexicographic order of their version-string keys, which disagrees with numeric order once a segment reaches double digits: `"1.10.0"` sorts before `"1.2.0"`.
+
+`migrateToLatest()` detects the mismatch up front and returns an error telling you to zero-pad the segments, for example `"1.02.00"`. It never applies migrations out of order silently.
+
+## Changed columns are refused, not ignored
+
+Editing a column **in place** — its type, nullability, default, uniqueness, primary key, foreign key, or index — produces no add and no drop, so the diff has nothing to emit.
+
+Rather than migrate to nothing and leave your schema and database disagreeing, `migrateToLatest()` returns an error naming each offending table and column:
+
+```
+Schema version "2.0.0" changes existing columns, which Outer cannot migrate automatically:
+  thing
+    name: became nullable
+```
+
+Adding and dropping columns is supported. Altering one is not. Either revert the edit, or write the `ALTER` yourself with `context.db` and keep the schema in sync.
+
+## Renames destroy data
+
+A rename reads to the diff as a drop plus an add, which it performs happily — and that destroys the old column's data. Copy the data across yourself before removing the old name.
+
+## Next steps
+
+- [Resources](/guide/resources) — generate CRUD over the migrated tables
+- [Deployment](/guide/deployment) — when and where to run migrations

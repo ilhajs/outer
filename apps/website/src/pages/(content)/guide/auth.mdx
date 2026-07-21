@@ -1,53 +1,59 @@
 ---
-title: Auth & Permissions
-description: Enable Better Auth with .auth(), configure baseURL for dynamic origins, and pull the session into procedures.
-order: 3
-tags: [auth, better-auth, permissions, middleware]
+title: Auth
+description: Enable Better Auth with .auth(), read the session in procedures, issue API keys, and mount the admin API.
+order: 5
+tags: [auth, better-auth, session, api-keys, cors, admin]
 ---
 
-# Auth & Permissions
+# Auth
 
-Outer wraps [Better Auth](https://www.better-auth.com) directly — `.auth(config)` mounts the handler at `/api/auth/**` and wires Better Auth's database to whichever dialect you configured on `new Outer({ db })`.
+Outer wraps [Better Auth](https://www.better-auth.com) directly. `.auth(config)` mounts the handler at `/api/auth/**` and wires Better Auth's database to whichever dialect you configured on `new Outer({ db })`.
 
-## Enabling auth
+Who is allowed to call what is a separate topic — see [Permissions](/guide/permissions).
+
+## Before you begin
+
+Register the Better Auth core tables — `user`, `session`, `account`, and `verification` — with [`schema().auth()`](/guide/schema#auth-tables). The admin plugin's fields are included by default.
+
+## Enable auth
 
 ```ts
 new Outer({ db: pglite() }).schema(v1_0).auth({ secret: process.env.AUTH_SECRET! }).build();
 ```
 
-Better Auth needs its core tables (`user`, `session`, `account`, `verification`) in your schema — register them with [`schema().auth()`](/guide/schema#auth-tables), which includes the admin plugin's fields by default.
+`.auth()` can appear anywhere in the chain, as long as it comes before `.build()`. Its config is `Omit<BetterAuthOptions, "database"> & { secret: string }`, so every Better Auth option — `plugins`, `emailAndPassword`, `trustedOrigins`, and the rest — is accepted directly, with `secret` made required. Outer owns `database` and you cannot override it here.
 
-`.auth()` can appear anywhere in the builder chain, and must be called before `.build()`. Its `config` is `Omit<BetterAuthOptions, "database"> & { secret: string }` — every Better Auth option (`plugins`, `emailAndPassword`, `trustedOrigins`, etc.) is accepted directly, with `secret` made required. `database` is owned by Outer and cannot be overridden here.
+Calling `.auth()` returns a new `Outer` whose `context.auth` type is narrowed to non-optional for everything chained after it.
 
-Calling `.auth()` returns a new `Outer` whose `context.auth` type is narrowed to required (non-optional) for everything chained after it. When `.auth()` is **not** called, `context.auth` is `undefined` and `/api/auth/**` is not mounted. If any `.resource()` permission still requires a session (`"authenticated"`, `"admin"`, or `"owner"`), `.build()` throws immediately — naming the offending `resource.action` entries — rather than letting the first real request fail with a confusing error.
+Skip `.auth()` and `context.auth` is `undefined`, and `/api/auth/**` is not mounted. If a permission elsewhere still requires a session, `.build()` throws immediately and names the offending entries, rather than letting the first real request fail confusingly.
 
-Outer's core does not set any Better Auth defaults — no default plugins, no default email options. Configure everything explicitly.
+Outer sets no Better Auth defaults of its own — no default plugins, no default email options. Configure what you need explicitly.
 
-## `baseURL`
+## Set `baseURL` for dynamic origins
 
-`baseURL` defaults to the `baseUrl` passed to `new Outer({ baseUrl })`, but can be overridden per-call via `.auth({ baseURL })`.
+`baseURL` defaults to the `baseUrl` you passed to `new Outer({ baseUrl })`. Override it per-call with `.auth({ baseURL })`.
 
-It accepts either a static string or Better Auth's `DynamicBaseURLConfig`, which derives the correct origin per-request from the `Host` header instead of a fixed value:
+It accepts a static string, or Better Auth's `DynamicBaseURLConfig`, which derives the origin per request from the `Host` header:
 
 ```ts
 .auth({
   secret: process.env.AUTH_SECRET!,
   baseURL: {
-    // "*" allows every host — fine for scaffolding/previews, but means
+    // "*" allows every host — fine for scaffolding and previews, but it means
     // anyone can point this server at itself with a spoofed Host header.
-    // Once you have a real domain, restrict this to only the hosts you
-    // actually serve, e.g. ["yourapp.com", "*.yourapp.com"].
+    // Once you have a real domain, restrict this to the hosts you serve,
+    // e.g. ["yourapp.com", "*.yourapp.com"].
     allowedHosts: ["*"],
-    fallback: "http://localhost:3000", // must resolve to a real value — an unset env var here silently disables the fallback
+    fallback: "http://localhost:3000", // must resolve to a real value — an unset env var silently disables it
   },
 })
 ```
 
-Use this for deployments behind a dynamic or preview domain (Vercel previews, StackBlitz, Coolify preview deployments) where the real origin isn't known at build time. A fixed `baseUrl` there causes Better Auth to scope session cookies to the wrong origin, so sign-in appears to succeed but the session is never actually persisted.
+Reach for this when you deploy behind a dynamic or preview domain: Vercel previews, StackBlitz, Coolify preview deployments. A fixed `baseUrl` there makes Better Auth scope session cookies to the wrong origin, so sign-in appears to succeed but the session never persists.
 
-Patterns are matched against the full `Host` header including port — bare `"localhost"` will **not** match `"localhost:3000"`; use `"localhost:*"` if you need to restrict rather than allow all hosts.
+Patterns match the full `Host` header including the port. A bare `"localhost"` does **not** match `"localhost:3000"` — use `"localhost:*"` when you want to restrict rather than allow every host.
 
-## Reading the session in procedures
+## Read the session
 
 `.auth()` resolves the session **once per request** and shares it with every procedure, raw route, and permission check. No middleware, no `getSession` call:
 
@@ -55,37 +61,21 @@ Patterns are matched against the full `Host` header including port — bare `"lo
 .procedure("user.me", (base) => base.handler(({ context }) => context.user))
 ```
 
-`context.user` and `context.session` are `null` for anonymous callers (and always `null` when `.auth()` was never called). After `.auth()` their types narrow from optional to `SessionUser | null` / `UserSession | null`. Because the lookup is shared, a request costs exactly one session query however many procedures or checks read it.
+`context.user` and `context.session` are `null` for anonymous callers, and always `null` when you never called `.auth()`. After `.auth()`, their types narrow to `SessionUser | null` and `UserSession | null`. Because the lookup is shared, a request costs exactly one session query no matter how many procedures or checks read it.
 
-Use `.middleware()` for everything else you want on `context` — KV handles, feature flags, a tenant lookup — and let auth stay out of it:
+Use `.middleware()` for everything else you want on `context` — KV handles, feature flags, a tenant lookup — and leave auth out of it:
 
 ```ts
 .middleware(async ({ next }) => next({ context: { kv: useStorage() } }))
 ```
 
-Fields added via `next({ context: { ... } })` are merged into every subsequent `.procedure()` handler's context.
-
-## Permissions on `.procedure()`
-
-Custom procedures take the same permission vocabulary as resources, as a third argument — so the guard is declared, not written by hand in the handler:
-
-```ts
-.procedure("post.publish", (base) => base.handler(...), { permission: "authenticated" })
-.procedure("stats.purge",  (base) => base.handler(...), { permission: "admin", roles: ["staff"] })
-.procedure("team.invite",  (base) => base.handler(...), {
-  permission: ({ context }) => context.user?.email.endsWith("@acme.com") ?? false,
-})
-```
-
-`"authenticated"` returns `401` when signed out; `"admin"` and function permissions return `403`. There's no `"owner"` here — that needs a row, which a bare procedure doesn't have; use `.resource()` or check inside the handler. Non-public permissions are registered at `.build()`, so forgetting `.auth()` throws at startup rather than failing per request.
-
-## Permissions on `.resource()`
-
-`.resource()` accepts a `permissions` map per CRUD action — see [Schema & Migrations](/guide/schema#permissions) for the full table of `"public"`, `"authenticated"`, `"admin"`, and `"owner"` behavior, including automatic owner-column injection and 403 handling.
+Fields you add with `next({ context: { ... } })` are merged into the context of every procedure defined after it.
 
 ## API keys
 
-Long-lived bearer tokens for MCP clients, CI, and server-to-server calls, via Better Auth's [`@better-auth/api-key`](https://better-auth.com/docs/plugins/api-key) plugin. It is a **separate package**, not part of `better-auth` core:
+Use API keys for long-lived bearer tokens: MCP clients, CI, and server-to-server calls. They come from Better Auth's [`@better-auth/api-key`](https://better-auth.com/docs/plugins/api-key) plugin, which is a **separate package** rather than part of `better-auth` core.
+
+Install it:
 
 ```bash
 bun add @better-auth/api-key
@@ -114,13 +104,13 @@ import { apiKey } from "@better-auth/api-key";
 })
 ```
 
-A key **authenticates as the user it belongs to**. The plugin resolves it into a session before Outer builds the request context, so `context.user`, every `.procedure()` and `.resource()` permission, and `ownerColumn` behave exactly as they do for a cookie session — there is no second authorization path to keep in sync.
+A key **authenticates as the user it belongs to**. The plugin resolves it into a session before Outer builds the request context, so `context.user`, every permission, and `ownerColumn` behave exactly as they do for a cookie session. There is no second authorization path to keep in sync.
 
-Keys are managed through the plugin's own endpoints at `/api/auth/api-key/create|list|delete`. **The plaintext key is shown once, at creation, and cannot be recovered** — only its hash is stored.
+Manage keys through the plugin's own endpoints at `/api/auth/api-key/create`, `/list`, and `/delete`. The plaintext key is shown once, at creation, and cannot be recovered — only its hash is stored.
 
 ## CORS
 
-Allows browser clients on other origins to call `/rpc/**`, `/api/auth/**`, and the admin API. Configured on the constructor — the origins are also folded into Better Auth's `trustedOrigins` automatically:
+Configure CORS on the constructor to let browser clients on other origins call `/rpc/**`, `/api/auth/**`, and the admin API. The origins are also folded into Better Auth's `trustedOrigins` automatically:
 
 ```ts
 new Outer({
@@ -129,11 +119,19 @@ new Outer({
 });
 ```
 
-Without `cors`, no `Access-Control-Allow-Origin` header is set. Same-origin requests and non-browser clients are unaffected either way — this only matters when your frontend and Outer server are deployed on different origins (e.g. a static frontend calling a separately-hosted API).
+Without `cors`, no `Access-Control-Allow-Origin` header is set. Same-origin requests and non-browser clients are unaffected either way. This only matters when your frontend and your Outer server are deployed on different origins.
 
 ## Admin API
 
-`.admin()` mounts an introspection + table-CRUD API under `/rpc/_admin/**` for building admin dashboards: `_admin.meta` (schema introspection), `_admin.migrations` (migration status), and `_admin.data.list/get/create/update/delete`. It requires `.auth()`, and every procedure requires a signed-in user with an admin role (`user.role` may be comma-separated, as the Better Auth admin plugin stores it; configure accepted roles via `.admin({ roles })`).
+`.admin()` mounts an introspection and table-CRUD API under `/rpc/_admin/**` for building admin dashboards:
+
+| Procedure                                   | Purpose              |
+| ------------------------------------------- | -------------------- |
+| `_admin.meta`                               | Schema introspection |
+| `_admin.migrations`                         | Migration status     |
+| `_admin.data.list/get/create/update/delete` | CRUD on any table    |
+
+It requires `.auth()`, and every procedure requires a signed-in user with an admin role. `user.role` may be comma-separated, as the Better Auth admin plugin stores it; configure the accepted roles with `.admin({ roles })`.
 
 ```ts
 new Outer({ db: pglite(), cors: { origins: ["https://admin.example.com"] } })
@@ -144,4 +142,7 @@ new Outer({ db: pglite(), cors: { origins: ["https://admin.example.com"] } })
 
 For a dashboard hosted on another origin, list its origin in `cors` and prefer the Better Auth `bearer` plugin over cross-site cookies. See [SPEC.md](https://github.com/ilhajs/outer/blob/main/SPEC.md) for the full procedure reference.
 
-Next: register custom [Procedures](/guide/procedures), accept [File Uploads](/guide/files), or stream updates with [Realtime](/guide/realtime).
+## Next steps
+
+- [Permissions](/guide/permissions) — guard procedures and resources with the session
+- [MCP](/guide/mcp) — expose procedures to agents, authenticated with API keys

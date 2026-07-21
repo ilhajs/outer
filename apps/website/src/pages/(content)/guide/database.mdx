@@ -1,0 +1,193 @@
+---
+title: Database
+description: Read and write with context.db — raw Kysely, transactions, and the Sola ORM's finders, pagination, and live queries.
+order: 8
+tags: [context, database, kysely, sola, orm, live]
+---
+
+# Database
+
+Every handler receives `context.db`: the full Kysely instance, typed to your latest schema, plus `query` (the Sola ORM) and `transact` for transactions.
+
+## Request context
+
+```ts
+type OuterRpcContext<TDB> = {
+  headers: Headers;
+  auth?: OuterAuth; // Better Auth instance; undefined if .auth() was not called
+  db: OuterDB<TDB>; // Kysely<TDB> + .query (Sola)
+  user: SessionUser | null; // resolved once per request by .auth()
+  session: UserSession | null; // null when anonymous, or when .auth() was never called
+  storage?: OuterStorage; // the object store passed to new Outer({ storage })
+};
+```
+
+`user` and `session` need no middleware — see [Read the session](/guide/auth#read-the-session). `storage` is the same store [`.files()`](/guide/files) writes through, so a custom procedure can read and write blobs alongside the built-in file API.
+
+Add your own fields with `.middleware()`, and they are merged into the context — and the types — of every procedure defined after it.
+
+## Raw queries with Kysely
+
+```ts
+context.db.insertInto("user").values({...}).execute()
+context.db.selectFrom("session").where("userId", "=", id).selectAll().execute()
+```
+
+## Transactions
+
+`context.db.transact(fn)` runs `fn` inside a transaction and returns its result. The `trx` argument is a full `context.db`, so Kysely methods _and_ `trx.query` (Sola) both participate. Throw inside `fn` to roll everything back.
+
+```ts
+const result = await context.db.transact(async (trx) => {
+  const { id } = await trx.insertInto("order").values({...}).returning("id").executeTakeFirstOrThrow();
+  await trx.updateTable("inventory").set(...).execute();
+  return trx.query.order.findFirst({ where: { id } });
+});
+```
+
+## The Sola ORM
+
+`context.db.query` is a read-focused API over the same Kysely instance. Table names match the schema exactly, and stay singular: `user`, `session`.
+
+### `findMany(args?)`
+
+```ts
+const users = await context.db.query.user.findMany({
+  where: { email: { contains: "acme.com" } },
+  include: { session: { orderBy: [{ createdAt: "desc" }], take: 5 } },
+  orderBy: [{ createdAt: "desc" }],
+  take: 20,
+  skip: 0,
+});
+```
+
+### `findFirst(args?)`
+
+Same as `findMany`, but applies `LIMIT 1` and returns `T | null`.
+
+### `findUnique({ where })`
+
+Looks a row up by exact field value and throws if none is found. `where` accepts direct values only, with no filter operators.
+
+```ts
+const user = await context.db.query.user.findUnique({ where: { id: "abc" } });
+```
+
+### `count(args?)` and `exists(args?)`
+
+```ts
+const n = await context.db.query.user.count({ where: { emailVerified: true } });
+const taken = await context.db.query.user.exists({ where: { email: "x@y.com" } });
+```
+
+Prefer `exists` when you only need a yes or no — it runs `SELECT 1 ... LIMIT 1`.
+
+### `paginate(args)`
+
+`orderBy` and `take` are required. Pass `skip` for offset mode:
+
+```ts
+const page = await context.db.query.user.paginate({
+  orderBy: [{ createdAt: "desc" }],
+  take: 20,
+  skip: 40,
+});
+```
+
+Pass `after` or `before` for cursor mode:
+
+```ts
+const page1 = await context.db.query.user.paginate({ orderBy: [{ id: "desc" }], take: 20 });
+const page2 = await context.db.query.user.paginate({
+  orderBy: [{ id: "desc" }],
+  take: 20,
+  after: page1.pagination.endCursor!,
+});
+```
+
+Both modes return the same shape:
+
+```ts
+{
+  data: T[],
+  pagination: {
+    count:       number,   // total matching rows
+    hasNext:     boolean,
+    hasPrevious: boolean,
+    startCursor: string | null,  // null in offset mode
+    endCursor:   string | null,  // null in offset mode
+  }
+}
+```
+
+Cursors are opaque base64 strings derived from the `orderBy` column values. Multi-column `orderBy` uses correct row-comparison keyset semantics — always end `orderBy` with a unique column such as `id` to guarantee stable pages. A malformed or tampered cursor is rejected with `400 BAD_REQUEST` rather than throwing.
+
+### `where` operators
+
+| Operator                    | Types        | SQL                                          |
+| --------------------------- | ------------ | -------------------------------------------- |
+| `equals`                    | all          | `= val`                                      |
+| `not`                       | all          | `!= val`                                     |
+| `in`                        | all          | `IN (...)`                                   |
+| `notIn`                     | all          | `NOT IN (...)`                               |
+| `lt` / `lte` / `gt` / `gte` | number, Date | `< <= > >=`                                  |
+| `contains`                  | string       | `LIKE %val%`                                 |
+| `startsWith`                | string       | `LIKE val%`                                  |
+| `endsWith`                  | string       | `LIKE %val`                                  |
+| `isNull: true`              | nullable     | `IS NULL`                                    |
+| `isNull: false`             | nullable     | `IS NOT NULL`                                |
+| `AND`                       | —            | implicit (multiple fields) or explicit array |
+| `OR`                        | —            | `OR(...)`                                    |
+| `NOT`                       | —            | `NOT(...)`                                   |
+
+### `include`
+
+`include` loads relations you declared with [`.relation()`](/guide/schema#relations). It runs one extra query per relation and merges the results in JS, Prisma-style.
+
+- `hasMany` and `manyToMany` return an array.
+- `belongsTo` and `hasOne` return a single object or `null`.
+
+Nested include is not supported — one level of relations per query. `manyToMany` includes require `pivotTable` on the relation definition, and Outer performs the two-hop join through the pivot automatically.
+
+## Live queries
+
+`live()` is `findMany()` as a stream: the full result set immediately, then again on every change that affects it. It takes identical arguments, and the SQL comes from the same code path, so a live stream and a one-shot read cannot drift apart.
+
+It returns an `AsyncIterable`, so a handler returns it directly and oRPC streams it over SSE:
+
+```ts
+.procedure("post.live", (base) =>
+  base.handler(({ context, signal }) =>
+    context.db.query.post.live(
+      { where: { done: false }, orderBy: [{ id: "desc" }], take: 20 },
+      { signal },
+    ),
+  ),
+)
+```
+
+That is the whole subscription. There is no publisher and no mutation path that has to remember to publish — the database is the source of truth, so a row changed by a migration, an admin action, or `psql` reaches subscribers just the same.
+
+| Method                        | Emits     |
+| ----------------------------- | --------- |
+| `live(args?, options?)`       | `T[]`     |
+| `liveCount(args?, options?)`  | `number`  |
+| `liveExists(args?, options?)` | `boolean` |
+
+Pass the procedure's `signal` as `options.signal` so a disconnecting client releases its subscription. Breaking out of a `for await` loop releases it too.
+
+Emissions **coalesce**. The payload is a snapshot, not an event log, so ticks that arrive while the consumer is busy collapse into the newest one, and a slow client cannot build a backlog.
+
+Two limits to know before you lean on live queries:
+
+- **It needs a `LiveProvider`.** `pglite()` ships one. Other dialects throw `NOT_IMPLEMENTED` rather than quietly degrading to a one-shot read. Supply your own — Postgres `LISTEN`/`NOTIFY`, or polling — by passing `live` alongside `dialect` in `new Outer({ db })`.
+- **`include` is not supported.** Relations load as separate queries, which one subscription cannot watch, so passing `include` throws. Subscribe to the related table separately.
+
+Each subscription costs real database resources, and PGlite is a single embedded instance, so subscription count scales with connected clients. Prefer one broad subscription fanned out in your app over one per client.
+
+To expose a live query without writing a procedure, use [`live: true` on a resource](/guide/resources#stream-a-list-with-live).
+
+## Next steps
+
+- [Realtime](/guide/realtime) — stream application events instead of rows
+- [Resources](/guide/resources) — the same query surface, generated

@@ -1,0 +1,107 @@
+---
+title: Resources
+description: Generate typed CRUD procedures for a table with .resource(), including filtering, relations, streaming, and error mapping.
+order: 4
+tags: [resource, crud, list, live]
+---
+
+# Resources
+
+`.resource(name, options?)` generates typed CRUD procedures for a table defined in the last `.schema()` call. It covers the endpoints you would otherwise write by hand for every table.
+
+```ts
+.resource("post", {
+  permissions: {
+    list: "public",
+    get: "public",
+    create: "authenticated",
+    update: "owner",
+    delete: "owner",
+  },
+  ownerColumn: "userId",
+})
+// Registers: post.list, post.get, post.create, post.createMany, post.update, post.delete
+```
+
+## What gets generated
+
+| Procedure           | Input                                             | Output        | Description                    |
+| ------------------- | ------------------------------------------------- | ------------- | ------------------------------ |
+| `{name}.list`       | `{ where?, orderBy?, take?, skip?, include? }`    | `Row[]`       | Filtered, ordered `SELECT`     |
+| `{name}.get`        | `{ <pk>: ..., include? }`                         | `Row \| null` | Fetch by primary key           |
+| `{name}.create`     | Row minus serial PK, defaults, and `ownerColumn`  | `Row`         | `INSERT ... RETURNING *`       |
+| `{name}.createMany` | `{ data: createInput[] }` (1–1000 rows)           | `Row[]`       | Batch `INSERT ... RETURNING *` |
+| `{name}.update`     | `{ where: { <pk> }, data: Partial<createInput> }` | `Row`         | `UPDATE ... RETURNING *`       |
+| `{name}.delete`     | `{ <pk>: ... }`                                   | `Row`         | `DELETE ... RETURNING *`       |
+
+Outer derives the input types from your column definitions at build time. Serial primary keys and the `ownerColumn` are omitted from create input, because the database and the session own those. Columns with `.default()` are **optional**: omit one and the default applies, pass one and it wins.
+
+Every client inherits these types — `@outerjs/sdk` in the browser and `outer.client()` on the server alike.
+
+## Query a list
+
+`list` accepts the same query surface as the Sola ORM, described in [Database](/guide/database#where-operators):
+
+- `where` — plain equality values or filter objects (`equals`, `not`, `in`, `notIn`, `isNull`, plus `lt`/`lte`/`gt`/`gte` on numeric and timestamp columns and `contains`/`startsWith`/`endsWith` on text columns), combinable with `AND`, `OR`, and `NOT`.
+- `orderBy` — an array of `{ column: "asc" | "desc" }`.
+- `skip` — an offset.
+- `include` — see [Include relations](#include-relations).
+
+`list` returns 50 rows by default and rejects a `take` above 100 with `400 BAD_REQUEST`. Pass `listLimit: { default, max }` to change either bound. The cap keeps an unqualified `.resource()` call from becoming an unbounded `SELECT *`.
+
+For cursor pagination with metadata, call `context.db.query[table].paginate(...)` in a custom [procedure](/guide/procedures) instead.
+
+## Include relations
+
+`list` and `get` accept `include: { relatedTable: true }` for any relation declared on the table with `.relation()`. `hasMany` and `manyToMany` relations come back as arrays; `hasOne` and `belongsTo` come back as an object or `null`.
+
+Unknown relation names are rejected with a `400`. When the table has no relations, `include` is not part of the input schema.
+
+Included rows are **not** checked against the related resource's permissions. Use the `includable` option to allow only the relations that are safe to expose.
+
+## Stream a list with `live`
+
+Pass `live: true` to also register `{name}.live` — the same query as `list`, streamed, re-emitting on every change that affects the result set:
+
+```ts
+.resource("post", {
+  permissions: { list: "owner" },
+  ownerColumn: "userId",
+  live: true,
+})
+```
+
+It reuses the **`list`** permission, owner scoping included. There is no separate `live` permission to forget, and the owner filter is applied in SQL, so a subscriber only ever receives their own rows. It needs a dialect with a `LiveProvider`; `pglite()` has one. See [live queries](/guide/database#live-queries) for the underlying Sola API.
+
+Weigh two things before you expose it publicly:
+
+- **A subscription outlives the check that opened it.** An SSE connection can stay open for hours, so a user who signs out, is banned, or loses a role would keep receiving rows. `revalidateMs` (default `30000`) re-runs the permission check on that interval and ends the stream with `401` or `403` when it fails. The timer races the wait for the next change, so an idle subscription is cut as promptly as a busy one. It is skipped entirely when `list` is `"public"`.
+- **Owner scoping filters rows, not wakeups.** A write by any user re-runs every subscriber's query. Nothing leaks, but a busy table wakes every subscription — which is why `max` (default `100`) caps concurrent subscribers per resource.
+
+`include` and `skip` are not available on `live`.
+
+## Errors
+
+`create` and `update` map common Postgres constraint violations to clean errors instead of a raw 500:
+
+| Situation                         | Response          |
+| --------------------------------- | ----------------- |
+| Unique or foreign-key violation   | `409 CONFLICT`    |
+| Not-null or check violation       | `400 BAD_REQUEST` |
+| Row not found on update or delete | `404 NOT_FOUND`   |
+| `update` with empty `data`        | `400 BAD_REQUEST` |
+
+Unrecognized database errors still surface as a generic `500`, with no internal details leaked.
+
+## Configuration is validated at build time
+
+Mistakes throw while you build the chain, not on the first request:
+
+- Using `"owner"` on any action without `ownerColumn` throws as soon as `.resource()` is called.
+- If any action's permission requires a session but `.auth()` was never called, `.build()` throws and lists the offending `resource.action` names.
+
+## Next steps
+
+- [Permissions](/guide/permissions) — what `"owner"` and the rest actually enforce
+- [Database](/guide/database) — the query surface `list` exposes
+- [Procedures](/guide/procedures) — write the endpoints CRUD does not cover

@@ -1,17 +1,28 @@
 ---
 title: Realtime
-description: Stream updates over SSE with oRPC's event iterators, fan out events with EventPublisher, and resume dropped connections.
-order: 5
+description: Stream updates over SSE with oRPC event iterators, fan out application events with EventPublisher, and resume dropped connections.
+order: 9
 tags: [realtime, sse, event-iterator, eventpublisher]
 ---
 
 # Realtime
 
-Outer supports realtime streaming via oRPC's built-in event iterator (SSE) support. No additional infrastructure is needed — the existing `/rpc/**` handler streams async generators automatically.
+Outer streams over SSE using oRPC's built-in event iterators. The existing `/rpc/**` handler streams async generators, so you add no infrastructure.
 
-Two ways to stream, depending on where the truth lives. **[Live queries](/guide/procedures#live-queries)** (`context.db.query.post.live()`) follow the _database_ — you subscribe to a query and every change reaches subscribers, whatever caused it. **`EventPublisher`**, below, follows your _application_ — you publish explicitly, which is what you want for events that aren't a row change (a job finishing, a notification, a presence ping).
+## Choose a streaming approach
 
-## Basic event stream
+Pick based on where the truth lives.
+
+| Approach                                         | Follows          | Use it for                                                         |
+| ------------------------------------------------ | ---------------- | ------------------------------------------------------------------ |
+| [Live queries](/guide/database#live-queries)     | The database     | Anything that is a row: lists, counts, dashboards.                 |
+| [`EventPublisher`](#fan-out-with-eventpublisher) | Your application | Events that are not row changes: a job finishing, a presence ping. |
+
+With a live query, you subscribe to a query and every change reaches subscribers whatever caused it. With `EventPublisher`, you publish explicitly.
+
+## Stream from a procedure
+
+Declare the payload with `eventIterator` and return an async generator:
 
 ```ts
 import { eventIterator } from "@orpc/server";
@@ -28,9 +39,11 @@ import { eventIterator } from "@orpc/server";
 )
 ```
 
-## Fan-out with `EventPublisher`
+Check `signal` in the loop condition so a disconnecting client ends the generator.
 
-For broadcasting events across procedures (e.g. subscribe to mutations triggered by other users), instantiate an `EventPublisher` at module scope and reference it in your procedures:
+## Fan out with `EventPublisher`
+
+To broadcast events across procedures — for example, so one user's mutation reaches every subscriber — create an `EventPublisher` at module scope and reference it from your procedures:
 
 ```ts
 import { EventPublisher, withEventMeta } from "@orpc/server";
@@ -57,13 +70,15 @@ const server = new Outer(...)
   .build();
 ```
 
-## Resume support
+Every write path has to remember to publish. When that is a burden, use a live query instead.
 
-Use `withEventMeta` to attach an event `id` to each yield. On reconnect, oRPC passes the last seen ID as `lastEventId` so the handler can resume from a known position:
+## Resume after a dropped connection
+
+Attach an event `id` to each yield with `withEventMeta`. On reconnect, oRPC passes the last seen ID to the handler as `lastEventId`, so you can replay what the client missed:
 
 ```ts
 .handler(async function* ({ lastEventId }) {
-  // fetch missed events from DB if lastEventId is set
+  // fetch missed events from the DB when lastEventId is set
   if (lastEventId) { /* replay from DB */ }
   for await (const event of publisher.subscribe("updated", { signal })) {
     yield withEventMeta(event, { id: event.id });
@@ -71,8 +86,13 @@ Use `withEventMeta` to attach an event `id` to each yield. On reconnect, oRPC pa
 })
 ```
 
-## Serverless caveat
+## `EventPublisher` and multiple instances
 
-`EventPublisher` is in-memory and tied to a single process. It works correctly on VPS, Coolify, or any long-lived single-instance deployment. On multi-instance platforms (Cloudflare Workers, Vercel serverless functions, horizontally scaled Node), events published in one instance are not visible to subscribers in other instances. For those environments, route events through an external pub/sub system (Redis, Cloudflare Durable Objects, etc.) and subscribe from there instead of from a module-level `EventPublisher`.
+`EventPublisher` is in-memory and tied to a single process. It works correctly on a VPS, on Coolify, or on any long-lived single-instance deployment.
 
-Next: see [Deployment](/guide/deployment) for hosting options and how this caveat interacts with each platform.
+On multi-instance platforms — Cloudflare Workers, Vercel serverless functions, horizontally scaled Node — events published in one instance never reach subscribers in another. There, route events through external pub/sub (Redis, Cloudflare Durable Objects) and subscribe from that instead of from a module-level publisher.
+
+## Next steps
+
+- [Live queries](/guide/database#live-queries) — subscribe to the database instead
+- [Deployment](/guide/deployment) — how this interacts with each host

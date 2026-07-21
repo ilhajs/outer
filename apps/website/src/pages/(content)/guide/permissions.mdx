@@ -1,0 +1,89 @@
+---
+title: Permissions
+description: Guard procedures, resources, and file routes with one declarative vocabulary — public, authenticated, admin, owner, or your own function.
+order: 6
+tags: [permissions, authorization, owner, admin, roles]
+---
+
+# Permissions
+
+Outer uses one permission vocabulary everywhere: on [procedures](/guide/procedures), on [resources](/guide/resources), and on [file uploads](/guide/files). You declare the guard next to the endpoint instead of writing the check inside the handler.
+
+## Before you begin
+
+Every value except `"public"` needs a session, so call [`.auth()`](/guide/auth) somewhere in the chain. Forget it and `.build()` throws at startup, listing the endpoints that need it.
+
+## The values
+
+| Value             | Meaning                                                                        | Rejects with |
+| ----------------- | ------------------------------------------------------------------------------ | ------------ |
+| `"public"`        | No restriction. The default.                                                   | —            |
+| `"authenticated"` | The caller must be signed in.                                                  | `401`        |
+| `"admin"`         | The caller must hold an admin role. `user.role` may be a comma-separated list. | `403`        |
+| `"owner"`         | The caller must own the row. Requires `ownerColumn`, and needs a row.          | `403`        |
+| A function        | `({ context, row? }) => boolean \| Promise<boolean>`                           | `403`        |
+
+Pass `roles` alongside a permission to change which roles `"admin"` accepts. It defaults to `["admin"]`.
+
+## On procedures
+
+Pass the guard as the third argument to `.procedure()`:
+
+```ts
+.procedure("post.publish", (base) => base.handler(...), { permission: "authenticated" })
+.procedure("stats.purge",  (base) => base.handler(...), { permission: "admin", roles: ["staff"] })
+.procedure("team.invite",  (base) => base.handler(...), {
+  permission: ({ context }) => context.user?.email.endsWith("@acme.com") ?? false,
+})
+```
+
+There is no `"owner"` here, because an owner check needs a row and a bare procedure has none. Use a resource, or check inside the handler.
+
+## On resources
+
+`.resource()` takes a permission per CRUD action, plus the `ownerColumn` that `"owner"` compares against:
+
+```ts
+.resource("post", {
+  permissions: {
+    list: "public",          // anyone can list
+    get: "public",           // anyone can read
+    create: "authenticated", // must be signed in; userId auto-filled
+    update: "owner",         // only the creator can edit
+    delete: "admin",         // only admins can delete
+  },
+  ownerColumn: "userId",
+})
+```
+
+### What `ownerColumn` does
+
+Three behaviors follow from it:
+
+- When `create` is `"authenticated"` and `ownerColumn` is set, Outer injects the current user's ID into the insert. `createMany` injects it into every row, and you never pass it in the request.
+- When `list` is `"owner"`, results are scoped to the signed-in user's rows and AND-composed with any caller-supplied `where`. The filter runs in SQL, so nothing extra is fetched and then discarded. Unauthenticated calls get a `401`.
+- When `update` or `delete` is `"owner"`, Outer fetches the row first and compares `row[ownerColumn]` to the session user's ID. A mismatch returns `403`.
+
+`"owner"` is not valid on `create`, since there is no row yet.
+
+### Streaming resources
+
+`{name}.live` reuses the `list` permission rather than adding one of its own, so a stream can never be looser than the one-shot read. See [Stream a list with `live`](/guide/resources#stream-a-list-with-live) for how long-lived subscriptions are re-checked.
+
+## On file routes
+
+`.files()` takes the same vocabulary for `upload`, `list`, `get`, and `delete`. It defaults to `"authenticated"` for `upload` and `list`, and `"owner"` for `get` and `delete`.
+
+One difference is worth knowing: an `"owner"`-guarded download answers **`404`, not `403`**, so file IDs cannot be probed for existence. See [File uploads](/guide/files#files-are-private-by-default).
+
+## Checks happen at build time
+
+Outer validates your permission configuration while you build the chain, not on the first request:
+
+- `"owner"` on any action without `ownerColumn` throws as soon as `.resource()` is called.
+- Any non-public permission without `.auth()` anywhere in the chain throws at `.build()`, listing the offending names.
+
+## Next steps
+
+- [Auth](/guide/auth) — where the session these checks read comes from
+- [Resources](/guide/resources) — the actions you are guarding

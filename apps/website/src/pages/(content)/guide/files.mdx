@@ -1,13 +1,24 @@
 ---
-title: File Uploads
-description: Register the file tables with schema().files(), mount the upload surface with .files(), and back the bytes with unstorage, S3/R2, or Vercel Blob.
-order: 6
+title: File uploads
+description: Register the file tables with schema().files(), mount the upload surface with .files(), and store the bytes in unstorage, S3/R2, or Vercel Blob.
+order: 10
 tags: [files, uploads, storage, unstorage, s3, blob]
 ---
 
-# File Uploads
+# File uploads
 
-Uploads are two calls: `schema().files()` registers the tables, `.files()` on the builder chain mounts the procedures and the download route. The bytes never live in Postgres — they go to an object store you pass as `storage`, and the database keeps only the pointer and its ownership.
+Uploads take two calls. `schema().files()` registers the tables, and `.files()` on the builder chain mounts the procedures and the download route.
+
+The bytes never live in Postgres. They go to an object store you pass as `storage`, and the database keeps only the pointer and its ownership.
+
+## Before you begin
+
+You need two things in place:
+
+- The `file` tables on your schema, via [`schema().files()`](/guide/schema#file-tables).
+- An `OuterStorage` on the constructor. `.files()` throws without one.
+
+## Set up uploads
 
 ```ts
 import { fromUnstorage, Outer, schema } from "@outerjs/server";
@@ -31,7 +42,7 @@ const outer = new Outer({
   .build();
 ```
 
-`.files()` can appear anywhere in the chain before `.build()`. It requires an `OuterStorage` on the constructor and the `file` tables on the schema.
+`.files()` can appear anywhere in the chain before `.build()`.
 
 ## What gets registered
 
@@ -45,9 +56,9 @@ const outer = new Outer({
 | `file.detach`    | `{ id, table, entityId }`                   | Unlinks it                                     |
 | `GET /files/:id` | —                                           | Serves the bytes; path configurable via `path` |
 
-## Uploading from the client
+## Upload from the client
 
-Uploads travel the ordinary typed SDK — no separate endpoint, no manual `FormData`. oRPC's codec detects the `File` field and switches the request to `multipart/form-data` on its own:
+Uploads travel the ordinary typed SDK. There is no separate endpoint and no manual `FormData` — oRPC's codec detects the `File` field and switches the request to `multipart/form-data` on its own:
 
 ```ts
 const { id, url } = await client.file.upload({ file: input.files[0] });
@@ -56,14 +67,16 @@ const { id, url } = await client.file.upload({ file: input.files[0] });
 await client.file.upload({ file, attach: { table: "post", entityId: post.id } });
 ```
 
-## Private by default
+## Files are private by default
 
-The default permissions are `upload`/`list` → `"authenticated"` and `get`/`delete` → `"owner"`. `"owner"` means only the user in `file.userId` can read or delete a file, and the download route answers **`404`, not `403`**, to everyone else — so file IDs can't be probed for existence. Admins bypass ownership, so moderation tooling needs no second code path.
+The default permissions are `"authenticated"` for `upload` and `list`, and `"owner"` for `get` and `delete`.
+
+`"owner"` means only the user in `file.userId` can read or delete a file. The download route answers **`404`, not `403`**, to everyone else, so file IDs cannot be probed for existence. Admins bypass ownership, so moderation tooling needs no second code path.
 
 For avatars and other world-readable assets, opt in explicitly:
 
 ```ts
-.files({ permissions: { get: "public" } })   // route switches to Cache-Control: public
+.files({ permissions: { get: "public" } })   // the route switches to Cache-Control: public
 ```
 
 ## Options
@@ -77,15 +90,17 @@ For avatars and other world-readable assets, opt in explicitly:
 | `path`        | `string` containing `:id`        | `"/files/:id"`                                      |
 | `roles`       | `string[]`                       | `["admin"]`                                         |
 
-## Attaching files to rows
+## Attach files to rows
 
-`attachTo` on the schema builder creates a pivot table per name — `post` gets `post_file`, with `fileId`, `entityId`, a nullable `role` (so one table can carry several kinds of attachment: `"avatar"`, `"cover"`, …) and an integer `position` for ordered galleries. Both foreign keys are enforced at the database level, and a `manyToMany` relation is declared in both directions, so `context.db.query` traverses `post → file` and `file → post`.
+`attachTo` on the schema builder creates one pivot table per name. `post` gets `post_file`, with `fileId`, `entityId`, a nullable `role` so one table can carry several kinds of attachment (`"avatar"`, `"cover"`, and so on), and an integer `position` for ordered galleries.
 
-`attachTo` only accepts tables already declared on the builder — unknown names are a type error. Attaching at runtime to a table that wasn't listed is a `400` that names the fix.
+Both foreign keys are enforced in the database, and a `manyToMany` relation is declared in both directions, so `context.db.query` traverses `post → file` and `file → post`.
+
+`attachTo` only accepts tables already declared on the builder — unknown names are a type error. Attaching at runtime to a table you did not list returns a `400` that names the fix.
 
 ## Storage adapters
 
-`OuterStorage` is deliberately three methods, so Outer's core never depends on unstorage, S3, or a filesystem:
+`OuterStorage` is three methods, so Outer's core never depends on unstorage, S3, or a filesystem:
 
 ```ts
 type OuterStorage = {
@@ -95,7 +110,7 @@ type OuterStorage = {
 };
 ```
 
-Two adapters ship with the package — `fromUnstorage(storage)` for any [unstorage](https://unstorage.unjs.io) instance (including Nitro's `useStorage()`), and `fromS3(client, commands, bucket)` for `@aws-sdk/client-s3`. `memoryStorage()` is a `Map`, for tests. Anything else is a small object literal, as the templates show:
+Two adapters ship with the package: `fromUnstorage(storage)` for any [unstorage](https://unstorage.unjs.io) instance, including Nitro's `useStorage()`, and `fromS3(client, commands, bucket)` for `@aws-sdk/client-s3`. `memoryStorage()` is a `Map`, for tests. Anything else is a small object literal, as the templates show:
 
 | Host                        | Backing store                                      | Adapter                              |
 | --------------------------- | -------------------------------------------------- | ------------------------------------ |
@@ -105,12 +120,15 @@ Two adapters ship with the package — `fromUnstorage(storage)` for any [unstora
 | Vercel Functions            | [Vercel Blob](https://vercel.com/docs/vercel-blob) | literal over `put` / `get` / `del`   |
 | Anything S3-compatible      | S3, R2, Backblaze B2, MinIO                        | `fromS3(client, commands, bucket)`   |
 
-Under Nitro, reach for `useStorage()` rather than constructing your own `createStorage()` — a second instance would ignore `devStorage` overrides and any runtime `storage.mount()`. That also makes production a config change: put the `s3` driver under `storage` and keep `fs-lite` under `devStorage`, and no application code moves.
+Under Nitro, reach for `useStorage()` rather than constructing your own `createStorage()`. A second instance ignores `devStorage` overrides and any runtime `storage.mount()`. Using the mount also makes production a config change: put the `s3` driver under `storage`, keep `fs-lite` under `devStorage`, and no application code moves.
 
 ## Write ordering
 
-On upload the database row commits **before** the bytes are written; on delete the row is removed **before** the bytes. A failure therefore leaves at worst a retryable orphaned blob — never a row pointing at bytes that aren't there.
+On upload the database row commits **before** the bytes are written. On delete the row is removed **before** the bytes. A failure therefore leaves at worst a retryable orphaned blob, never a row pointing at bytes that are not there.
 
-Uploads are buffered in memory, so `maxBytes` is a real ceiling rather than a suggestion. For large media, issue presigned URLs (or use your platform's client-upload flow) and send bytes straight to the bucket instead of through the Outer process.
+Uploads are buffered in memory, so `maxBytes` is a real ceiling rather than a suggestion. For large media, issue presigned URLs — or use your platform's client-upload flow — and send bytes straight to the bucket instead of through the Outer process.
 
-Next: [Deployment](/guide/deployment) — matching the storage backend to your host.
+## Next steps
+
+- [Deployment](/guide/deployment) — match the storage backend to your host
+- [Permissions](/guide/permissions) — the vocabulary `.files()` reuses

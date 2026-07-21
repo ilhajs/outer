@@ -1,17 +1,25 @@
 ---
-title: Getting Started
-description: Scaffold an Outer server, wire up schema, auth, and procedures, and run migrations.
+title: Getting started
+description: Create an Outer server, define a schema, enable auth, add a procedure, and run your first migration.
 order: 1
 tags: [setup, quickstart]
 ---
 
 import { ClipboardText } from "areia";
 
-# Getting Started
+# Getting started
 
-Outer is a batteries-included TypeScript backend framework built on Kysely, oRPC, and Better Auth, with [PGlite](https://pglite.dev) as the recommended zero-infra default database. It exposes a builder-chain API that produces a fetch-compatible HTTP handler.
+Outer is a TypeScript backend framework built on Kysely, oRPC, and Better Auth. You describe your database, auth, and API in one builder chain, and get back a fetch-compatible handler you can mount anywhere.
+
+By default it runs on [PGlite](https://pglite.dev) — real Postgres, embedded, writing to local disk — so you need no external services to start.
+
+## Before you begin
+
+You need Node.js 20 or later and a package manager. The template installs everything else.
 
 ## Create a server
+
+Scaffold a project and start it:
 
 ```bash
 npx giget@latest gh:ilhajs/outer/templates/minimal my-outer-app
@@ -20,23 +28,27 @@ npm install
 npm run dev
 ```
 
-## Templates
+The server listens on `http://localhost:3000`. Call `POST /rpc/user/me` to check that it responds.
 
-| Template      | Description                                                                                                                          | Command                                                                                                       |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `minimal`     | The smallest possible Outer server — no frontend, just `new Outer(...).build()` behind [srvx](https://srvx.h3.dev).                  | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/minimal my-outer-app" class="max-w-xs" />     |
-| `ilha`        | Full-stack starter: Outer mounted as a [Nitro](https://nitro.build) server entry with an [Ilha](https://ilha.build) + Vite frontend. | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/ilha my-outer-app" class="max-w-xs" />        |
-| `cloudflare`  | Outer on Cloudflare Workers — a Durable Object's SQLite for data, R2 for uploads, instead of PGlite.                                 | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/cloudflare my-outer-app" class="max-w-xs" />  |
-| `vercel-neon` | Outer on Vercel functions — [Neon](https://neon.tech) Postgres for data, Vercel Blob for uploads, instead of PGlite.                 | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/vercel-neon my-outer-app" class="max-w-xs" /> |
+### Pick a different template
 
-## The builder chain
+| Template      | What you get                                                                                                                 | Command                                                                                                       |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `minimal`     | The smallest Outer server — `new Outer(...).build()` behind [srvx](https://srvx.h3.dev), no frontend.                        | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/minimal my-outer-app" class="max-w-xs" />     |
+| `ilha`        | Full-stack starter: Outer as a [Nitro](https://nitro.build) server entry, [Ilha](https://ilha.build) + Vite on the frontend. | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/ilha my-outer-app" class="max-w-xs" />        |
+| `cloudflare`  | Outer on Cloudflare Workers — a Durable Object's SQLite for data, R2 for uploads, instead of PGlite.                         | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/cloudflare my-outer-app" class="max-w-xs" />  |
+| `vercel-neon` | Outer on Vercel Functions — [Neon](https://neon.tech) Postgres for data, Vercel Blob for uploads, instead of PGlite.         | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/vercel-neon my-outer-app" class="max-w-xs" /> |
+
+## Write your first server
+
+Every Outer app is one chain. Read it top to bottom: a schema version, auth, then the procedures your clients call.
 
 ```ts
 import { Outer, schema } from "@outerjs/server";
 import { pglite } from "@outerjs/server/pglite";
 
 const v1_0 = schema("1.0.0")
-  .auth() // Better Auth tables (user, session, account, verification) + admin plugin fields
+  .auth() // Better Auth tables: user, session, account, verification
   .table("post", (t) => ({
     id: t.serial().primaryKey(),
     title: t.text(),
@@ -47,7 +59,6 @@ const v1_0 = schema("1.0.0")
 const server = new Outer({ name: "My API", baseUrl: "http://localhost:3000", db: pglite() })
   .schema(v1_0)
   .auth({ secret: process.env.AUTH_SECRET! })
-  // .auth() resolves the session once per request — no getSession middleware needed
   .procedure("user.me", (base) => base.handler(({ context }) => context.user), {
     permission: "authenticated",
   })
@@ -57,7 +68,23 @@ await server.migrator.migrateToLatest();
 serve({ fetch: (req) => server.handle(req) });
 ```
 
-Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`. `.auth()`, `.openapi()`, `.admin()`, and `.files()` can appear anywhere in the chain.
+This server exposes `POST /rpc/user/me` plus the Better Auth routes under `/api/auth/**`. `.auth()` resolves the session once per request, so `context.user` is already there — you never write a `getSession` middleware.
+
+### Order the chain correctly
+
+Call the methods in this order: `.schema()` → `.middleware()` → `.procedure()` → `.build()`. Each call types the next one, so a procedure only sees the tables and context fields declared above it.
+
+`.auth()`, `.openapi()`, `.mcp()`, `.admin()`, and `.files()` can appear anywhere before `.build()`.
+
+### Run migrations
+
+`migrateToLatest()` diffs the schema versions you registered and applies the missing ones:
+
+```ts
+await server.migrator.migrateToLatest();
+```
+
+Run it on startup when you self-host. On serverless, run it from a deploy script instead — see [Deployment](/guide/deployment).
 
 ## Project structure
 
@@ -69,11 +96,15 @@ my-outer-app/
 └── package.json
 ```
 
-## Where to next
+Keep schema versions in their own file. You add versions over time and never edit old ones.
 
-- [Schema & Migrations](/guide/schema) — define tables, relations, and auto-generated CRUD with `.resource()`
-- [Auth & Permissions](/guide/auth) — enable Better Auth and read the session in procedures
-- [Procedures & Context](/guide/procedures) — register custom procedures, raw routes, and query with the Sola ORM
-- [File Uploads](/guide/files) — register the file tables, mount `.files()`, and pick a storage backend
-- [Realtime](/guide/realtime) — stream updates over SSE with oRPC's event iterators
-- [Deployment](/guide/deployment) — the `pglite()` default, custom dialects, and embedding in a host framework
+## Next steps
+
+- [Schema](/guide/schema) — define tables, columns, and relations
+- [Migrations](/guide/migrations) — register versions and apply them
+- [Resources](/guide/resources) — generate CRUD for a table
+- [Auth](/guide/auth) — Better Auth, sessions, and API keys
+- [Permissions](/guide/permissions) — guard procedures and resources
+- [Procedures](/guide/procedures) — write the endpoints CRUD does not cover
+- [Database](/guide/database) — query with Kysely and the Sola ORM
+- [Deployment](/guide/deployment) — pick a database and a host

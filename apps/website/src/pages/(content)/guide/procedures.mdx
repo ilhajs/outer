@@ -1,30 +1,34 @@
 ---
-title: Procedures & Context
-description: Register oRPC procedures with .procedure(), mount raw routes with .route(), and query the DB with context.db and the Sola ORM.
-order: 4
-tags: [procedure, route, context, orm, sola]
+title: Procedures
+description: Register RPC procedures with .procedure(), mount raw routes with .route(), extract router types, and expose OpenAPI and REST.
+order: 7
+tags: [procedure, route, orpc, openapi, rest]
 ---
 
-# Procedures & Context
+# Procedures
 
-## `.procedure(name, cb, options?)`
+[Resources](/guide/resources) cover CRUD. Everything else — a search endpoint, a webhook, a job trigger — is a procedure or a raw route.
 
-Registers an oRPC procedure. `name` supports dot-notation — `"user.me"` nests the procedure as `{ user: { me: proc } }`, served at `POST /rpc/user/me`. Multiple procedures under the same namespace are deep-merged.
+## Register a procedure
+
+`.procedure(name, cb, options?)` registers an oRPC procedure. `name` supports dot notation: `"user.me"` nests the procedure as `{ user: { me: proc } }` and serves it at `POST /rpc/user/me`. Procedures under the same namespace are deep-merged.
 
 ```ts
 .procedure("user.me",     (base) => base.handler(...))
 .procedure("user.update", (base) => base.input(z.object({...})).handler(...))
 ```
 
-`.procedure()` fully infers each procedure's `.input()`/`.output()` types into the router, so `client.foo(...)`, `client.user.me(...)`, etc. are properly typed on `RouterClient<Router>` — see [`outer.router`](#outerrouter-type-extraction) below.
+The callback receives the oRPC base builder, so chain `.input()`, `.output()`, and `.handler()` on it. Handlers get the [request context](/guide/database#request-context), including `context.db` and the resolved session.
 
-An optional third argument guards the procedure declaratively — `{ permission: "authenticated" | "admin" | fn, roles? }`; see [Permissions on `.procedure()`](/guide/auth#permissions-on-procedure).
+Outer infers each procedure's input and output types into the router, so `client.user.me(...)` is fully typed. See [Extract the router type](#extract-the-router-type).
 
-Registering the same dot-path twice — whether via two `.procedure()` calls, or a `.procedure()` name colliding with a `.resource()`-generated action — throws immediately rather than silently letting the second registration overwrite the first.
+Guard a procedure with the optional third argument, `{ permission, roles? }` — see [Permissions](/guide/permissions#on-procedures).
 
-## `.route(method, path, handler)`
+Registering the same dot-path twice throws immediately. That covers two `.procedure()` calls and a name colliding with a resource-generated action, so a second registration never silently overwrites the first.
 
-Mounts a raw H3 route alongside `.procedure()`-defined RPC routes — for webhooks, custom REST endpoints, or anything that doesn't fit the oRPC shape. `handler` receives the H3 `event` and the same `context` (`headers`, `db`, `auth`, `user`, `session`, `storage`) available in procedure handlers — including the already-resolved session, so raw routes authorize the same way procedures do. Registered before `/rpc/**`, so it takes precedence on overlapping paths.
+## Mount a raw route
+
+`.route(method, path, handler)` mounts a raw H3 route for webhooks, custom REST endpoints, or anything that does not fit the oRPC shape.
 
 ```ts
 .route("post", "/webhooks/stripe", async (event, { db }) => {
@@ -34,186 +38,11 @@ Mounts a raw H3 route alongside `.procedure()`-defined RPC routes — for webhoo
 })
 ```
 
-## Request context
+`handler` receives the H3 `event` and the same context procedures get, including the already-resolved session, so raw routes authorize the same way. Raw routes are registered before `/rpc/**` and win on overlapping paths.
 
-Available in every procedure handler:
+## Extract the router type
 
-```ts
-type OuterRpcContext<TDB> = {
-  headers: Headers;
-  auth?: OuterAuth; // Better Auth instance; undefined if .auth() was not called
-  db: OuterDB<TDB>; // Kysely<TDB> + .query (Sola)
-  user: SessionUser | null; // resolved once per request by .auth()
-  session: UserSession | null; // null when anonymous, or when .auth() was never called
-  storage?: OuterStorage; // the object store passed to new Outer({ storage })
-};
-```
-
-`user` and `session` need no middleware — see [Auth & Permissions](/guide/auth#reading-the-session-in-procedures). `storage` is the same store [`.files()`](/guide/files) writes through, so a custom procedure can read or write blobs alongside the built-in file API.
-
-### `context.db`
-
-The full Kysely instance, typed to the latest schema. Use it for raw queries and writes:
-
-```ts
-context.db.insertInto("user").values({...}).execute()
-context.db.selectFrom("session").where("userId", "=", id).selectAll().execute()
-```
-
-### `context.db.transact(fn)`
-
-Runs `fn` inside a database transaction and returns its result. The `trx` argument is a full `context.db` — Kysely methods _and_ `trx.query` (Sola) both participate in the transaction. Throwing inside `fn` rolls everything back.
-
-```ts
-const result = await context.db.transact(async (trx) => {
-  const { id } = await trx.insertInto("order").values({...}).returning("id").executeTakeFirstOrThrow();
-  await trx.updateTable("inventory").set(...).execute();
-  return trx.query.order.findFirst({ where: { id } });
-});
-```
-
-### `context.db.query` — the Sola ORM
-
-A read-focused, ergonomic API over the same Kysely instance. Table names match the schema exactly (singular: `user`, `session`).
-
-**`findMany(args?)`**
-
-```ts
-const users = await context.db.query.user.findMany({
-  where: { email: { contains: "acme.com" } },
-  include: { session: { orderBy: [{ createdAt: "desc" }], take: 5 } },
-  orderBy: [{ createdAt: "desc" }],
-  take: 20,
-  skip: 0,
-});
-```
-
-**`findFirst(args?)`** — same as `findMany` but returns `T | null` (applies `LIMIT 1` internally).
-
-**`findUnique({ where })`** — lookup by exact field value. Throws if no record found. `where` accepts direct values only (no filter operators).
-
-```ts
-const user = await context.db.query.user.findUnique({ where: { id: "abc" } });
-```
-
-**`count(args?)`**
-
-```ts
-const n = await context.db.query.user.count({ where: { emailVerified: true } });
-```
-
-**`exists(args?)`** — cheaper than `count`, uses `SELECT 1 ... LIMIT 1`.
-
-```ts
-const taken = await context.db.query.user.exists({ where: { email: "x@y.com" } });
-```
-
-**`paginate(args)`** — `orderBy` and `take` are required.
-
-Offset mode (pass `skip`):
-
-```ts
-const page = await context.db.query.user.paginate({
-  orderBy: [{ createdAt: "desc" }],
-  take: 20,
-  skip: 40,
-});
-```
-
-Cursor mode (pass `after` or `before`):
-
-```ts
-const page1 = await context.db.query.user.paginate({ orderBy: [{ id: "desc" }], take: 20 });
-const page2 = await context.db.query.user.paginate({
-  orderBy: [{ id: "desc" }],
-  take: 20,
-  after: page1.pagination.endCursor!,
-});
-```
-
-Result shape:
-
-```ts
-{
-  data: T[],
-  pagination: {
-    count:       number,   // total matching rows
-    hasNext:     boolean,
-    hasPrevious: boolean,
-    startCursor: string | null,  // null in offset mode
-    endCursor:   string | null,  // null in offset mode
-  }
-}
-```
-
-Cursors are opaque base64-encoded strings derived from `orderBy` column values. Multi-column `orderBy` uses correct row-comparison keyset semantics — always include a unique column (e.g. `id`) as the final `orderBy` entry to guarantee stable pages. A malformed or tampered `after`/`before` cursor is rejected with `400 BAD_REQUEST` rather than throwing an unhandled error.
-
-### Live queries
-
-`live()` is `findMany()` as a stream: the full result set immediately, then again on every change that affects it. Identical arguments, and the SQL comes from the same code path — a live stream and a one-shot read can't drift apart.
-
-Because it returns an `AsyncIterable`, a handler returns it directly and oRPC streams it over SSE:
-
-```ts
-.procedure("post.live", (base) =>
-  base.handler(({ context, signal }) =>
-    context.db.query.post.live(
-      { where: { done: false }, orderBy: [{ id: "desc" }], take: 20 },
-      { signal },
-    ),
-  ),
-)
-```
-
-That's the whole subscription. No `EventPublisher`, and no mutation path that has to remember to publish — the database is the source of truth, so a row changed by a migration, an admin action, or `psql` reaches subscribers just the same.
-
-| Method                        | Emits     |
-| ----------------------------- | --------- |
-| `live(args?, options?)`       | `T[]`     |
-| `liveCount(args?, options?)`  | `number`  |
-| `liveExists(args?, options?)` | `boolean` |
-
-Pass a procedure's `signal` as `options.signal` so a disconnecting client releases its subscription; breaking out of a `for await` loop releases it too.
-
-Emissions **coalesce** — the payload is a snapshot, not an event log, so ticks that arrive while the consumer is busy collapse into the newest one. A slow client can't build a backlog.
-
-Two limits worth knowing before you lean on it:
-
-- **Needs a `LiveProvider`.** `pglite()` ships one; other dialects throw `NOT_IMPLEMENTED` rather than quietly degrading to a one-shot read. Supply your own (Postgres `LISTEN`/`NOTIFY`, or polling) by passing `live` alongside `dialect` in `new Outer({ db })`.
-- **No `include`.** Relations load as separate queries, which one subscription can't watch — passing `include` throws. Subscribe to the related table separately.
-
-Each subscription costs real database resources, and PGlite is a single embedded instance, so subscription count scales with connected clients. Prefer one broad subscription fanned out in your app over one per client.
-
-### `where` operators
-
-| Operator                    | Types        | SQL                                          |
-| --------------------------- | ------------ | -------------------------------------------- |
-| `equals`                    | all          | `= val`                                      |
-| `not`                       | all          | `!= val`                                     |
-| `in`                        | all          | `IN (...)`                                   |
-| `notIn`                     | all          | `NOT IN (...)`                               |
-| `lt` / `lte` / `gt` / `gte` | number, Date | `< <= > >=`                                  |
-| `contains`                  | string       | `LIKE %val%`                                 |
-| `startsWith`                | string       | `LIKE val%`                                  |
-| `endsWith`                  | string       | `LIKE %val`                                  |
-| `isNull: true`              | nullable     | `IS NULL`                                    |
-| `isNull: false`             | nullable     | `IS NOT NULL`                                |
-| `AND`                       | —            | implicit (multiple fields) or explicit array |
-| `OR`                        | —            | `OR(...)`                                    |
-| `NOT`                       | —            | `NOT(...)`                                   |
-
-### `include`
-
-Loads related tables defined via `.relation()` in the schema. Uses separate queries per relation (Prisma-style) — one extra query per included relation, results merged in JS.
-
-- `hasMany` / `manyToMany` → array on the result
-- `belongsTo` / `hasOne` → single object or `null`
-
-Nested include is not supported — max one level of relations per query. `manyToMany` includes require `pivotTable` to be set on the relation definition; Outer performs a two-hop join through the pivot table automatically.
-
-## `outer.router` (type extraction)
-
-Both the `Outer` instance and `BuiltOuter` (the return value of `.build()`) expose a `router` property with the internal oRPC router type. Use the exported `InferRouter<T>` helper to extract it:
+Both the `Outer` instance and `BuiltOuter` expose a `router` property carrying the internal oRPC router type. Extract it with the exported `InferRouter<T>` helper:
 
 ```ts
 // src/index.ts
@@ -233,25 +62,27 @@ export type Router = InferRouter<typeof outer>;
 export type AppClient = RouterClient<Router>;
 ```
 
-Outer's core has no CLI — write the file above by hand, or generate it with your own script if you want automation.
+Outer's core has no CLI. Write that file by hand, or generate it with your own script.
 
-## OpenAPI
+## Serve OpenAPI and REST
 
-`.openapi(config?)` toggles `GET /openapi.json` **and** the plain-JSON REST surface at `/rest/**` — not mounted unless this is called, and calling it with no args enables it. Must be called before `.build()`, but can appear anywhere in the chain.
-
-The `/rpc/**` handler speaks oRPC's own wire protocol, which generic OpenAPI clients can't use — so when `.openapi()` is enabled, the same router is also served through oRPC's `OpenAPIHandler` under `/rest/**`, matching the generated spec exactly (the spec's `servers[0].url` points at `<baseUrl>/rest`).
-
-| Option    | Type      | Default | Description                                   |
-| --------- | --------- | ------- | --------------------------------------------- |
-| `enabled` | `boolean` | `true`  | Whether to mount `/openapi.json` + `/rest/**` |
+`.openapi(config?)` mounts `GET /openapi.json` **and** a plain-JSON REST surface at `/rest/**`. Neither is mounted unless you call it, and calling it with no arguments enables both. It can appear anywhere before `.build()`.
 
 ```ts
 .openapi() // always enabled
-.openapi({ enabled: import.meta.env.DEV }) // enable on dev/staging only, keep it off in prod
+.openapi({ enabled: import.meta.env.DEV }) // dev and staging only
 ```
 
-`GET /openapi.json` returns an OpenAPI 3.x document generated by `@orpc/openapi`. Title comes from the `name` param, version from the last registered schema. Procedures with `.input(zodSchema)` / `.output(zodSchema)` are fully documented — output schema is not inferred from handler return types, so explicit `.output()` is required for response documentation.
+| Option    | Type      | Default | Description                                     |
+| --------- | --------- | ------- | ----------------------------------------------- |
+| `enabled` | `boolean` | `true`  | Whether to mount `/openapi.json` and `/rest/**` |
 
-Enabling `.openapi()` also mounts the router at `/rest/**` via oRPC's `OpenAPIHandler`, so the spec is directly callable with plain JSON (e.g. `POST /rest/post/create` with `{"title": "..."}`), and the spec advertises `<baseUrl>/rest` as its server URL. `/rpc/**` remains the typed-SDK transport.
+The `/rpc/**` handler speaks oRPC's own wire protocol, which generic OpenAPI clients cannot use. So when `.openapi()` is enabled, the same router is also served through oRPC's `OpenAPIHandler` under `/rest/**`, matching the generated spec exactly. Call it with plain JSON, for example `POST /rest/post/create` with `{"title": "..."}`. The spec advertises `<baseUrl>/rest` as its server URL, and `/rpc/**` remains the typed-SDK transport.
 
-Next: stream updates with [Realtime](/guide/realtime), accept [File Uploads](/guide/files), or see [Deployment](/guide/deployment) for hosting options.
+The generated document is OpenAPI 3.x, from `@orpc/openapi`. Its title comes from the `name` param and its version from the last registered schema. Procedures with `.input(zodSchema)` and `.output(zodSchema)` are fully documented. Output schemas are not inferred from handler return types, so add an explicit `.output()` when you want responses documented.
+
+## Next steps
+
+- [Database](/guide/database) — query inside your handlers
+- [Permissions](/guide/permissions) — guard what you just registered
+- [MCP](/guide/mcp) — expose procedures as agent tools

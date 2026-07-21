@@ -1,15 +1,17 @@
 ---
-title: Schema & Migrations
-description: Define tables and relations with schema(), register versions with .schema(), and auto-generate CRUD with .resource().
+title: Schema
+description: Define tables, columns, and relations with the schema() builder, including the built-in auth and file tables.
 order: 2
-tags: [schema, migrations, resource, crud]
+tags: [schema, tables, columns, relations]
 ---
 
-# Schema & Migrations
+# Schema
 
-Outer's schema builder defines tables and relations, and doubles as your migration history: every `.schema()` call registered on the builder chain becomes one migration step.
+The `schema()` builder describes your tables and the links between them. It is also your migration history: every version you register becomes one migration step, which [Migrations](/guide/migrations) covers.
 
-## Defining a schema version
+## Define a schema version
+
+Describe tables with `.table()` and links between them with `.relation()`:
 
 ```ts
 import { schema } from "@outerjs/server";
@@ -32,9 +34,11 @@ const v1_0 = schema("1.0.0")
   .build();
 ```
 
-### Auth tables
+Keep schema versions in their own file. You add versions over time and never edit old ones.
 
-`.auth()` on the schema builder registers the [Better Auth core schema](https://better-auth.com/docs/concepts/database) — `user`, `session`, `account`, `verification` — with the admin plugin's fields included by default (`user.role`/`banned`/`banReason`/`banExpires`, `session.impersonatedBy`), plus the `user` ↔ `session`/`account` relations. Email OTP needs no extra columns (it uses the `verification` table).
+## Auth tables
+
+Call `.auth()` to register the [Better Auth core schema](https://better-auth.com/docs/concepts/database) — `user`, `session`, `account`, and `verification`. It includes the admin plugin's fields by default (`user.role`, `banned`, `banReason`, `banExpires`, and `session.impersonatedBy`) plus the `user` ↔ `session`/`account` relations. Email OTP needs no extra columns, since it uses the `verification` table.
 
 ```ts
 const v1_0 = schema("1.0.0")
@@ -43,7 +47,7 @@ const v1_0 = schema("1.0.0")
   .build();
 ```
 
-Re-declaring a table merges columns (later definition wins on name collisions), so auth tables can be extended:
+Re-declaring a table merges columns, and the later definition wins on name collisions. Use that to extend an auth table:
 
 ```ts
 schema("1.0.0")
@@ -51,20 +55,22 @@ schema("1.0.0")
   .table("user", (t) => ({ plan: t.text().default("free") })); // adds to the auth user table
 ```
 
-The tables are typed like hand-written ones (exported as `AuthTables`), so `context.db.query.user` etc. stay fully typed.
+These tables are typed like hand-written ones and exported as `AuthTables`, so `context.db.query.user` stays fully typed.
 
-`user.role` is left unconstrained by default, because Better Auth's admin plugin allows custom role names and comma-separated lists (`"support,admin"`). Pass `roles` to declare the set your app recognises — a user may still hold several at once:
+`user.role` is unconstrained by default, because Better Auth's admin plugin allows custom role names and comma-separated lists such as `"support,admin"`. Pass `roles` to declare the set your app recognizes. A user can still hold several roles at once:
 
 ```ts
 schema("1.0.0").auth({ roles: ["user", "admin", "support"] });
 // "admin,support" ✓   "admin,root" ✗ rejected
 ```
 
-`.auth({ apiKeys: true })` additionally declares the `apikey` table needed by [API keys](/guide/auth#api-keys).
+Pass `.auth({ apiKeys: true })` to also declare the `apikey` table that [API keys](/guide/auth#api-keys) need.
 
-### File tables
+`session.userId` and `account.userId` cascade on delete, so removing a user is never blocked by their sessions.
 
-`.files()` is the same idea for uploads: it registers a `file` metadata table — `id`, `key` (unique, the storage key the bytes live under), `name`, `type`, `size`, `userId`, plus `timestamps(t)` — for blobs kept in an object store. Only the pointer and its ownership live in the database.
+## File tables
+
+`.files()` does the same for uploads. It registers a `file` metadata table — `id`, `key` (unique, the storage key the bytes live under), `name`, `type`, `size`, `userId`, and `timestamps(t)`. Only the pointer and its ownership live in the database.
 
 ```ts
 const v1_0 = schema("1.0.0")
@@ -74,33 +80,33 @@ const v1_0 = schema("1.0.0")
   .build();
 ```
 
-`attachTo` links files to existing tables — each name `x` gets a pivot `x_file` (`fileId`, `entityId`, a nullable `role` so one table can carry several kinds of attachment, and an integer `position` for ordered galleries) plus a `manyToMany` relation both ways. It only accepts tables already declared on the builder; unknown names are a type error.
+`attachTo` links files to existing tables. Each name `x` gets a pivot table `x_file` with `fileId`, `entityId`, a nullable `role` so one table can carry several kinds of attachment, and an integer `position` for ordered galleries. It also declares a `manyToMany` relation both ways. Only tables already declared on the builder are accepted; unknown names are a type error.
 
-`owner` (default `true`) adds `file.userId` and the `user` ↔ `file` relations, so it requires `.auth()`. Pass `owner: false` for files with no per-user owner. The tables are exported as `FileTables`.
+`owner` defaults to `true` and adds `file.userId` plus the `user` ↔ `file` relations, so it requires `.auth()`. Pass `owner: false` for files with no per-user owner. The tables are exported as `FileTables`.
 
-Registering the tables is all the schema does — serving the bytes is [`.files()`](/guide/files) on the builder chain.
+The schema only registers the tables. To serve the bytes, call [`.files()`](/guide/files) on the builder chain.
 
-### Column types
+## Column types
 
 `text` · `varchar` · `integer` · `serial` · `bigint` · `decimal` · `real` · `boolean` · `timestamp` · `date` · `jsonb` · `uuid` · `bytes`
 
-`timestamp` maps to `timestamptz` in the generated DDL.
+`timestamp` maps to `timestamptz` in the generated DDL. The types worth a second look:
 
-| Column    | Postgres           | SQLite    | TS type      | Notes                                                                                    |
-| --------- | ------------------ | --------- | ------------ | ---------------------------------------------------------------------------------------- |
-| `bigint`  | `bigint`           | `integer` | `string`     | 64-bit — a JS `number` loses precision past 2^53, so it is read and written as a string  |
-| `decimal` | `numeric`          | `text`    | `string`     | Exact. SQLite maps to `text`, not `NUMERIC`, whose float affinity would defeat the point |
-| `real`    | `double precision` | `real`    | `number`     | Approximate — don't store money in it                                                    |
-| `date`    | `date`             | `text`    | `Date`       | Calendar date, no time component                                                         |
-| `bytes`   | `bytea`            | `blob`    | `Uint8Array` | Raw bytes                                                                                |
+| Column    | Postgres           | SQLite    | TS type      | Notes                                                                                     |
+| --------- | ------------------ | --------- | ------------ | ----------------------------------------------------------------------------------------- |
+| `bigint`  | `bigint`           | `integer` | `string`     | 64-bit. A JS `number` loses precision past 2^53, so it is read and written as a string.   |
+| `decimal` | `numeric`          | `text`    | `string`     | Exact. SQLite maps to `text`, not `NUMERIC`, whose float affinity would defeat the point. |
+| `real`    | `double precision` | `real`    | `number`     | Approximate. Do not store money in it.                                                    |
+| `date`    | `date`             | `text`    | `Date`       | Calendar date, no time component.                                                         |
+| `bytes`   | `bytea`            | `blob`    | `Uint8Array` | Raw bytes.                                                                                |
 
-### Column modifiers
+## Column modifiers
 
 `.primaryKey()` · `.unique()` · `.nullable()` · `.index()` · `.default(value)` · `.defaultSql(expr)` · `.references(table, column, actions?)` · `.enum(values, options?)`
 
-#### Defaults
+### Defaults
 
-`.default()` takes the **value**, quoted for you by column type — not a SQL fragment:
+`.default()` takes the **value**, quoted for you by column type. It is not a SQL fragment:
 
 ```ts
 t.text().default("user"); // → default 'user'
@@ -108,179 +114,62 @@ t.boolean().default(false); // → default false (postgres) / default 0 (sqlite)
 t.integer().default(0); // → default 0
 ```
 
-Embedded quotes are escaped for you. For expressions, use `.defaultSql("CURRENT_TIMESTAMP")`, which is emitted verbatim.
+Embedded quotes are escaped for you. For an expression, use `.defaultSql("CURRENT_TIMESTAMP")`, which is emitted verbatim.
 
-#### Foreign keys
+The `timestamps(t)` helper returns `createdAt` and `updatedAt` columns already set up that way. Spread it into a column object.
+
+### Foreign keys
 
 ```ts
 userId: t.text().references("user", "id", { onDelete: "cascade" });
 ```
 
-`onDelete` / `onUpdate` accept `"cascade"`, `"set null"`, `"restrict"`, or `"no action"`. **Without one, deleting a referenced row fails with a foreign-key violation** — which is why the built-in [`auth()`](#auth-tables) tables cascade `session.userId` and `account.userId`, and `files()` cascades its pivots.
+`onDelete` and `onUpdate` accept `"cascade"`, `"set null"`, `"restrict"`, or `"no action"`.
 
-#### Indexes
+Without one, deleting a referenced row fails with a foreign-key violation. That is why the built-in [auth tables](#auth-tables) cascade `session.userId` and `account.userId`, and [file tables](#file-tables) cascade their pivots.
+
+### Indexes
 
 `.index()` adds a non-unique index named `{table}_{column}_idx`. On a `.unique()` column it is a no-op rather than a duplicate index.
 
-#### Enums
+### Enums
 
-`.enum(values)` restricts a `text`/`varchar` column to a fixed set. The TS type narrows from `string` to the union, resource inputs validate against it with `z.enum`, and `_admin.meta` reports the values so the Hub renders a select instead of a text box:
+`.enum(values)` restricts a `text` or `varchar` column to a fixed set. The TS type narrows from `string` to the union, resource inputs validate with `z.enum`, and `_admin.meta` reports the values so the Hub renders a select instead of a text box:
 
 ```ts
 status: t.text().enum(["draft", "published"]).default("draft");
 ```
 
-The SQL type is unchanged — no `CREATE TYPE`, no `CHECK` constraint. The constraint lives in Outer, so editing the value list never produces a migration, and values written by raw SQL are not validated.
+The SQL type is unchanged — no `CREATE TYPE`, no `CHECK` constraint. The constraint lives in Outer, so editing the value list never produces a migration. Values written by raw SQL are not validated.
 
-`{ multiple: true }` stores a **set** of the declared values in one text column, comma-separated:
+`{ multiple: true }` stores a **set** of the declared values in one comma-separated text column:
 
 ```ts
 role: t.text().enum(["user", "admin", "support"], { multiple: true });
 // "admin,support" ✓   "admin,root" ✗ unknown   "admin,admin" ✗ duplicate
 ```
 
-Each part is validated independently. The TS type stays `string` — enumerating every legal combination would be combinatorial — so read one with `parseSet(value)` and build one with `toSet([...])`, both exported from `@outerjs/server`.
+Each part is validated independently. The TS type stays `string`, because enumerating every legal combination would be combinatorial. Read a set with `parseSet(value)` and build one with `toSet([...])`, both exported from `@outerjs/server`.
 
-### Relation kinds
+## Relations
 
-`hasMany` · `hasOne` · `belongsTo` · `manyToMany`
+Four kinds are available: `hasMany`, `hasOne`, `belongsTo`, and `manyToMany`.
 
-### Type inference
+```ts
+.relation("user", (rel) => rel.hasMany("post", { from: "id", to: "authorId" }))
+.relation("post", (rel) => rel.manyToMany("tag", "post_tag", {
+  from: "id", to: "id", pivotFrom: "postId", pivotTo: "tagId",
+}))
+```
+
+Relations drive `include` in both the [Sola ORM](/guide/database#include) and [resources](/guide/resources#include-relations).
+
+## Type inference
 
 `SchemaResult<T>["_db"]` is the fully inferred Kysely database type — `{ [tableName]: { [column]: TSType } }`. Nullable columns become `TSType | null | undefined`.
 
-## Registering versions
+## Next steps
 
-Pass each schema version to `.schema()` on the builder, in order:
-
-```ts
-new Outer({ db: pglite() })
-  .schema(v1_0)
-  .schema(v1_1) // each call adds a migration step and updates the DB type
-  .build();
-```
-
-Each call also advances `context.db`'s type to `InferDB<T>`, so procedures registered after a `.schema()` call see the new columns.
-
-## Running migrations
-
-```ts
-await server.migrator.migrateToLatest();
-```
-
-Outer uses a custom `SchemaMigrationProvider` that diffs consecutive schema versions. Each `schema("x.y.z")` call becomes one Kysely migration keyed by its version string. Kysely applies migrations in plain lexicographic order of those version-string keys, which can disagree with numeric order once a segment reaches double digits (`"1.10.0"` sorts before `"1.2.0"` as a string). `migrateToLatest()` detects this mismatch up front and returns an error telling you to zero-pad segments (e.g. `"1.02.00"`) instead of silently applying migrations out of order.
-
-- **Up** — creates new tables, adds new columns (with their indexes), drops removed columns.
-- **Down** — reverses: drops added tables/columns, restores dropped ones.
-
-### Changed columns are refused, not ignored
-
-Editing a column **in place** — its type, nullability, default, uniqueness, primary key, foreign key, or index — produces no add and no drop, so the diff has nothing to emit. Rather than migrate to nothing and leave your schema and database silently disagreeing, `migrateToLatest()` returns an error naming each offending table and column:
-
-```
-Schema version "2.0.0" changes existing columns, which Outer cannot migrate automatically:
-  thing
-    name: became nullable
-```
-
-Adding and dropping columns is supported; altering one is not. Either revert the edit, or write the `ALTER` yourself with `context.db` and keep the schema in sync.
-
-**Renaming a column is a drop plus an add**, which the diff will happily perform — and that destroys the old column's data. Copy it across yourself before removing the old name.
-
-## Auto-generated CRUD with `.resource()`
-
-`.resource(name, options?)` generates six procedures for a table defined in the last `.schema()` call:
-
-```ts
-.resource("post", {
-  permissions: {
-    list: "public",
-    get: "public",
-    create: "authenticated",
-    update: "owner",
-    delete: "owner",
-  },
-  ownerColumn: "userId",
-})
-// Registers: post.list, post.get, post.create, post.createMany, post.update, post.delete
-```
-
-| Procedure           | Input                                             | Output        | Description                    |
-| ------------------- | ------------------------------------------------- | ------------- | ------------------------------ |
-| `{name}.list`       | `{ where?, orderBy?, take?, skip?, include? }`    | `Row[]`       | Filtered/ordered `SELECT`      |
-| `{name}.get`        | `{ <pk>: ..., include? }`                         | `Row \| null` | Fetch by primary key           |
-| `{name}.create`     | Row minus serial PK, defaults, and `ownerColumn`  | `Row`         | `INSERT ... RETURNING *`       |
-| `{name}.createMany` | `{ data: createInput[] }` (1–1000 rows)           | `Row[]`       | Batch `INSERT ... RETURNING *` |
-| `{name}.update`     | `{ where: { <pk> }, data: Partial<createInput> }` | `Row`         | `UPDATE ... RETURNING *`       |
-| `{name}.delete`     | `{ <pk>: ... }`                                   | `Row`         | `DELETE ... RETURNING *`       |
-
-Input types are derived from column definitions at build time. `serial` primary key columns and `ownerColumn` are omitted from create input — the database and the session own those. Columns with `.default()` are **optional**: omit one and the default applies, pass one and it wins.
-
-`list` accepts the same Prisma-style query surface described in [Procedures & Context](/guide/procedures#where-operators):
-
-- `where` — plain equality values or filter objects (`equals`/`not`/`in`/`notIn`/`isNull`, plus `lt`/`lte`/`gt`/`gte` on numeric/timestamp columns and `contains`/`startsWith`/`endsWith` on text columns), combinable with `AND`/`OR`/`NOT`.
-- `orderBy` — array of `{ column: "asc" | "desc" }`.
-- `skip` — offset.
-- `include` — see below.
-
-`list` defaults to 50 rows and rejects a `take` above 100 (`400 BAD_REQUEST`) — pass `listLimit: { default, max }` in `options` to change either bound. This keeps an unqualified `.resource()` call from becoming an unbounded `SELECT *` on a large table; reach for `context.db.query[table].paginate(...)` directly in a custom `.procedure()` when you need cursor pagination with metadata.
-
-### Live resources
-
-Pass `live: true` to also register `{name}.live` — the same query as `list`, streamed, re-emitting on every change that affects the result set:
-
-```ts
-.resource("post", {
-  permissions: { list: "owner" },
-  ownerColumn: "userId",
-  live: true,
-})
-```
-
-It reuses the **`list`** permission, owner scoping included — there's no separate `live` permission to forget to set, and the owner filter is applied in SQL, so a subscriber is only ever sent their own rows. Needs a dialect with a `LiveProvider`; `pglite()` has one. See [live queries](/guide/procedures#live-queries) for the underlying Sola API.
-
-Two things to weigh before exposing it publicly:
-
-- **A subscription outlives the check that opened it.** An SSE connection can stay open for hours, so a user who signs out, is banned, or loses a role would keep receiving rows. `revalidateMs` (default `30000`) re-runs the permission check on that interval and ends the stream with `401`/`403` when it fails. The timer races the wait for the next change, so an idle subscription is cut just as promptly as a busy one — a revoked session can't sit on an open connection until the table happens to change. It's skipped entirely when `list` is `"public"`, where there's nothing to check.
-- **Owner scoping filters rows, not wakeups.** A write by any user re-runs every subscriber's query. Nothing leaks, but a busy table wakes every subscription — which is why `max` (default `100`) caps concurrent subscribers per resource.
-
-`include` and `skip` aren't available on `live`.
-
-`list` and `get` accept `include: { relatedTable: true }` for any relation declared on the table via `.relation()` — `hasMany`/`manyToMany` relations come back as arrays, `hasOne`/`belongsTo` as an object or `null`. Unknown relation names are rejected with a `400`. When the table has no relations, `include` is not part of the input schema.
-
-`create`/`update` map common Postgres constraint violations to clean errors instead of a raw 500: unique/foreign-key violations → `409 CONFLICT`, not-null/check violations → `400 BAD_REQUEST`. `update`/`delete` on a row that doesn't exist → `404 NOT_FOUND`. `update` with an empty `data` object → `400 BAD_REQUEST`. Unrecognized DB errors still surface as a generic `500` with no internal details leaked.
-
-`.resource()` and `.build()` validate configuration eagerly instead of failing on the first request: using `"owner"` on any action without `ownerColumn` throws as soon as `.resource()` is called, and if any action's permission requires a session (`"authenticated"`, `"admin"`, or `"owner"`) but `.auth()` was never called anywhere in the chain, `.build()` throws listing the offending `resource.action` names.
-
-### Permissions
-
-| Value             | Description                                                               |
-| ----------------- | ------------------------------------------------------------------------- |
-| `"public"`        | No restriction (default)                                                  |
-| `"authenticated"` | User must be signed in — calls `context.auth.api.getSession()` internally |
-| `"admin"`         | User must have an admin role — `user.role` may be a comma-separated list  |
-| `"owner"`         | User must own the row — requires `ownerColumn`; not valid for `create`    |
-
-When `create` is `"authenticated"` and `ownerColumn` is set, the current user's ID is automatically injected into the insert (`createMany` injects it into every row) — no need to pass it in the request.
-
-When `list` is `"owner"`, results are implicitly scoped to the signed-in user's rows (`ownerColumn = user.id`), AND-composed with any caller-supplied `where` filter. Unauthenticated calls get a `401`.
-
-When `update` or `delete` is `"owner"`, the existing row is fetched first and `row[ownerColumn]` is compared to the session user's ID. Returns `403 FORBIDDEN` if they do not match.
-
-```ts
-// Full example
-.resource("post", {
-  permissions: {
-    list: "public",         // anyone can list
-    get: "public",          // anyone can read
-    create: "authenticated", // must be signed in; userId auto-filled
-    update: "owner",        // only the creator can edit
-    delete: "admin",        // only admins can delete
-  },
-  ownerColumn: "userId",
-})
-```
-
-The six generated procedures are strictly typed from the table's columns: rows come back with each column's TS type, `create` inputs omit the serial primary key, defaulted columns, and the `ownerColumn` (auto-filled from the session), and `get`/`update`/`delete` take `{ <pk>: value }` typed from the declared primary key. Every client — `@outerjs/sdk` in the browser or `outer.client()` on the server — inherits these types.
-
-Next: wire up [Auth & Permissions](/guide/auth), write custom [Procedures](/guide/procedures), or accept [File Uploads](/guide/files).
+- [Migrations](/guide/migrations) — register versions and apply them
+- [Resources](/guide/resources) — generate CRUD for a table
+- [Database](/guide/database) — query the tables you just defined

@@ -1,13 +1,15 @@
 ---
-title: API Reference
-description: Every option you can pass to new Outer(...), its builder methods, and the schema() builder.
-order: 9
+title: API reference
+description: Every option you can pass to new Outer(...), every builder method, the schema() builder, and the built server.
+order: 13
 tags: [api, reference, outer, schema, resource, auth, admin]
 ---
 
-# API Reference
+# API reference
 
-Complete reference for `@outerjs/server` — the `Outer` constructor, every builder method and its config, the `schema()` builder, and the built server.
+Complete reference for `@outerjs/server`: the `Outer` constructor, every builder method and its config, the `schema()` builder, and the object `.build()` returns.
+
+For task-oriented explanations, start with the guides — [Schema](/guide/schema), [Permissions](/guide/permissions), and [Procedures](/guide/procedures).
 
 ## `new Outer(params)`
 
@@ -23,16 +25,16 @@ const outer = new Outer({
 });
 ```
 
-| Param       | Type                                                                      | Required | Description                                                                                                                                                                                                                                                                                                                                          |
-| ----------- | ------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`      | `string`                                                                  | no       | Display name. Used as the OpenAPI spec title and shown by the admin API (`_admin.meta`).                                                                                                                                                                                                                                                             |
-| `baseUrl`   | `string`                                                                  | no       | Public origin of the server. Used as Better Auth's default `baseURL` and as the `servers[].url` (`<baseUrl>/rest`) in the OpenAPI spec.                                                                                                                                                                                                              |
-| `db`        | `{ dialect: Dialect; kind: "postgres" \| "sqlite"; live?: LiveProvider }` | **yes**  | A Kysely `Dialect` plus the dialect family it belongs to. Optional `live` enables [live queries](/guide/procedures#live-queries). `kind` drives DDL generation, Better Auth's schema, and DB error mapping, so it must match the dialect. Use `pglite()` for the zero-infra default; construct the `Dialect` yourself for network Postgres, D1, etc. |
-| `cors`      | `CorsConfig`                                                              | no       | Cross-origin browser callers allowed to reach `/rpc/**`, `/api/auth/**`, and the admin API. Also merged into Better Auth's `trustedOrigins` when `.auth()` is used. Without it, no `Access-Control-Allow-Origin` header is set.                                                                                                                      |
-| `storage`   | `OuterStorage`                                                            | no       | Object store for file bytes. Surfaced as `context.storage` and used by [`.files()`](#filesconfig), which throws without it. See [File Uploads](/guide/files#storage-adapters).                                                                                                                                                                       |
-| `onError`   | `(error, info) => void`                                                   | no       | Called for unexpected failures — never for deliberate `ORPCError` responses (400/401/403/404/409…), which are application behavior. `info.source` is `"rpc" \| "rest" \| "route" \| "mcp"`. Defaults to `console.error`; pass `() => {}` to silence.                                                                                                 |
-| `health`    | `boolean \| { path?: string }`                                            | no       | Mounts `GET /health` with a `select 1` probe — `200 {"status":"ok","database":"up"}`, or `503` when the probe fails. Enabled by default; `false` omits it. A `.route()` on the same path wins. Not rate limited.                                                                                                                                     |
-| `rateLimit` | `RateLimitConfig`                                                         | no       | Per-caller limit on `/rpc/**` and `/rest/**`. Off by default. `/api/auth/**` is excluded (Better Auth has its own).                                                                                                                                                                                                                                  |
+| Param       | Type                                                                      | Required | Description                                                                                                                                                                                                                                                       |
+| ----------- | ------------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`      | `string`                                                                  | no       | Display name. Used as the OpenAPI spec title and reported by `_admin.meta`.                                                                                                                                                                                       |
+| `baseUrl`   | `string`                                                                  | no       | Public origin of the server. Used as Better Auth's default `baseURL` and as `servers[].url` (`<baseUrl>/rest`) in the OpenAPI spec.                                                                                                                               |
+| `db`        | `{ dialect: Dialect; kind: "postgres" \| "sqlite"; live?: LiveProvider }` | **yes**  | A Kysely `Dialect` plus its family. `kind` drives DDL generation, Better Auth's schema, and error mapping, so it must match the dialect. Optional `live` enables [live queries](/guide/database#live-queries). Use `pglite()` for the zero-infra default.         |
+| `cors`      | `CorsConfig`                                                              | no       | Cross-origin browser callers allowed to reach `/rpc/**`, `/api/auth/**`, and the admin API. Merged into Better Auth's `trustedOrigins` when `.auth()` is used. Without it, no `Access-Control-Allow-Origin` header is set.                                        |
+| `storage`   | `OuterStorage`                                                            | no       | Object store for file bytes. Surfaced as `context.storage` and used by [`.files()`](#filesconfig), which throws without it. See [File uploads](/guide/files#storage-adapters).                                                                                    |
+| `onError`   | `(error, info) => void`                                                   | no       | Called for unexpected failures only, never for deliberate `ORPCError` responses (400, 401, 403, 404, 409, …), which are application behavior. `info.source` is `"rpc" \| "rest" \| "route" \| "mcp"`. Defaults to `console.error`; pass `() => {}` to silence it. |
+| `health`    | `boolean \| { path?: string }`                                            | no       | Mounts `GET /health` with a `select 1` probe — `200 {"status":"ok","database":"up"}`, or `503` when the probe fails. Enabled by default; `false` omits it. A `.route()` on the same path wins. Not rate limited.                                                  |
+| `rateLimit` | `RateLimitConfig`                                                         | no       | Per-caller limit on `/rpc/**` and `/rest/**`. Off by default. `/api/auth/**` is excluded, since Better Auth has its own.                                                                                                                                          |
 
 ### `RateLimitConfig`
 
@@ -42,99 +44,103 @@ const outer = new Outer({
 | `windowMs` | `number`                  | —                        | Window length in ms. Fixed window, not sliding.                                   |
 | `key`      | `(event, user) => string` | user id, else client IP  | Identifies the caller. The default falls back to `x-forwarded-for` / `x-real-ip`. |
 | `skip`     | `(event) => boolean`      | —                        | Return `true` to bypass the limit for a request.                                  |
-| `store`    | `RateLimitStore`          | `memoryRateLimitStore()` | Swap in Redis/Upstash to share counters across replicas.                          |
+| `store`    | `RateLimitStore`          | `memoryRateLimitStore()` | Swap in Redis or Upstash to share counters across replicas.                       |
 
-Over-limit requests get `429` with `Retry-After` and `RateLimit-*` headers. **The default store is in-process**, so each replica counts separately — behind a load balancer the effective limit is `max × replicas`. If your proxy strips both forwarded-IP headers, every anonymous caller shares one bucket; pass `key` explicitly there.
+Over-limit requests get `429` with `Retry-After` and `RateLimit-*` headers.
+
+The default store is in-process, so each replica counts separately: behind a load balancer, the effective limit is `max × replicas`. If your proxy strips both forwarded-IP headers, every anonymous caller shares one bucket — pass `key` explicitly there.
 
 ### `CorsConfig`
 
-| Prop          | Type       | Default | Description                                                                                       |
-| ------------- | ---------- | ------- | ------------------------------------------------------------------------------------------------- |
-| `origins`     | `string[]` | —       | Allowed origins, matched exactly against the request's `Origin` header.                           |
-| `credentials` | `boolean`  | `false` | Sets `Access-Control-Allow-Credentials: true` (needed for cookie-based auth from another origin). |
+| Prop          | Type       | Default | Description                                                                                      |
+| ------------- | ---------- | ------- | ------------------------------------------------------------------------------------------------ |
+| `origins`     | `string[]` | —       | Allowed origins, matched exactly against the request's `Origin` header.                          |
+| `credentials` | `boolean`  | `false` | Sets `Access-Control-Allow-Credentials: true`, needed for cookie-based auth from another origin. |
 
 ### `pglite(config?)`
 
 Embedded, zero-infra Postgres from `@outerjs/server/pglite`. Returns a `{ dialect, kind: "postgres" }` pair to pass as `db`.
 
-| Prop      | Type     | Default               | Description                                                                                             |
-| --------- | -------- | --------------------- | ------------------------------------------------------------------------------------------------------- |
-| `dataDir` | `string` | `<cwd>/.outer/pglite` | Data directory, created if missing. Pass a `memory://` URL for an in-memory instance (handy for tests). |
+| Prop      | Type     | Default               | Description                                                                                              |
+| --------- | -------- | --------------------- | -------------------------------------------------------------------------------------------------------- |
+| `dataDir` | `string` | `<cwd>/.outer/pglite` | Data directory, created if missing. Pass a `memory://` URL for an in-memory instance, which suits tests. |
 
 #### Bundled extensions
 
-`pglite()` loads two PGlite extensions into the instance it builds, so lower-level Postgres features are there without constructing your own client. It returns `{ dialect, kind, live, client }` — `live` backs Sola's live queries, and `client` is the PGlite instance for anything neither the query builder nor Sola covers.
+`pglite()` loads two PGlite extensions into the instance it builds. It returns `{ dialect, kind, live, client }` — `live` backs Sola's live queries, and `client` is the PGlite instance for anything neither the query builder nor Sola covers.
 
-| Extension | Package                         | Reachable from                                                                                     |
-| --------- | ------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `vector`  | `@electric-sql/pglite-pgvector` | Plain SQL — `CREATE EXTENSION IF NOT EXISTS vector` runs before any query                          |
-| `live`    | `@electric-sql/pglite/live`     | [`context.db.query.<table>.live()`](/guide/procedures#live-queries) — wired up as a `LiveProvider` |
+| Extension | Package                         | Reachable from                                                                                   |
+| --------- | ------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `vector`  | `@electric-sql/pglite-pgvector` | Plain SQL — `CREATE EXTENSION IF NOT EXISTS vector` runs before any query                        |
+| `live`    | `@electric-sql/pglite/live`     | [`context.db.query.<table>.live()`](/guide/database#live-queries) — wired up as a `LiveProvider` |
 
-Both packages are optional peers you install yourself (`bun add @electric-sql/pglite @electric-sql/pglite-pgvector`).
+Both packages are optional peers you install yourself: `bun add @electric-sql/pglite @electric-sql/pglite-pgvector`.
 
 ## Builder methods
 
-Documented order: `.schema()` → `.middleware()` → `.procedure()` → `.build()`. `.auth()`, `.openapi()`, `.mcp()`, `.admin()`, `.files()`, `.route()`, and `.resource()` can appear anywhere before `.build()` (`.resource()` needs a prior `.schema()` that defines the table).
+Call them in this order: `.schema()` → `.middleware()` → `.procedure()` → `.build()`.
+
+`.auth()`, `.openapi()`, `.mcp()`, `.admin()`, `.files()`, `.route()`, and `.resource()` can appear anywhere before `.build()`. `.resource()` needs a prior `.schema()` that defines its table.
 
 ### `.schema(schemaResult)`
 
-Registers a schema version built with [`schema()`](#schema-builder). Every `.schema()` call becomes one migration step, and the latest version types `context.db`. Takes a single `SchemaResult` argument — no options.
+Registers a schema version built with [`schema()`](#schema-builder). Every call becomes one migration step, and the latest version types `context.db`. It takes a single `SchemaResult` argument and no options.
 
 ### `.auth(config)`
 
-Enables Better Auth and mounts `ALL /api/auth/**`. Narrows `context.auth` to non-null, and resolves the session **once per request** into `context.user` / `context.session` — no `getSession` middleware needed, and no extra query no matter how many procedures or permission checks read it.
+Enables Better Auth and mounts `ALL /api/auth/**`. It narrows `context.auth` to non-null and resolves the session **once per request** into `context.user` and `context.session` — no `getSession` middleware, and no extra query however many procedures or checks read it.
 
-`AuthConfig` is Better Auth's full `BetterAuthOptions` minus `database` (Outer wires the database itself from your `db` dialect), with these Outer-specific notes:
+`AuthConfig` is Better Auth's full `BetterAuthOptions` minus `database`, which Outer wires from your `db` dialect:
 
-| Prop             | Type                           | Required | Description                                                                                                                                                                                  |
-| ---------------- | ------------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `secret`         | `string`                       | **yes**  | Secret used to sign/encrypt sessions, cookies, and tokens. At least 32 random characters in production.                                                                                      |
-| `baseURL`        | `BetterAuthOptions["baseURL"]` | no       | Defaults to the constructor's `baseUrl`. Set to override just for auth. Accepts Better Auth's `DynamicBaseURLConfig` (`{ allowedHosts, fallback?, protocol? }`) for preview/dynamic domains. |
-| `trustedOrigins` | `string[]`                     | no       | Merged with `cors.origins` from the constructor — CORS origins are always trusted regardless of call order.                                                                                  |
-| ...rest          | `BetterAuthOptions`            | no       | Everything else Better Auth accepts: `emailAndPassword`, `socialProviders`, `plugins`, `session`, etc.                                                                                       |
+| Prop             | Type                           | Required | Description                                                                                                                                                      |
+| ---------------- | ------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `secret`         | `string`                       | **yes**  | Signs and encrypts sessions, cookies, and tokens. Use at least 32 random characters in production.                                                               |
+| `baseURL`        | `BetterAuthOptions["baseURL"]` | no       | Defaults to the constructor's `baseUrl`. Accepts Better Auth's `DynamicBaseURLConfig` (`{ allowedHosts, fallback?, protocol? }`) for preview or dynamic domains. |
+| `trustedOrigins` | `string[]`                     | no       | Merged with `cors.origins` from the constructor. CORS origins are always trusted, regardless of call order.                                                      |
+| …rest            | `BetterAuthOptions`            | no       | Everything else Better Auth accepts: `emailAndPassword`, `socialProviders`, `plugins`, `session`, and so on.                                                     |
 
 ### `.middleware(mw)`
 
-Adds an oRPC middleware to the base context. Whatever the middleware returns via `next({ context })` is merged into `context` for all subsequently defined procedures (and their types).
+Adds an oRPC middleware to the base context. Whatever it returns via `next({ context })` is merged into `context` — and into the types — for every procedure defined after it.
 
 ### `.procedure(name, cb, options?)`
 
-Registers an RPC procedure. Dot notation nests namespaces: `"user.me"` is served at `POST /rpc/user/me`. The callback receives the oRPC base builder — chain `.input()`, `.output()`, `.handler()` on it. Names must be unique; the `_admin` namespace is reserved.
+Registers an RPC procedure. Dot notation nests namespaces: `"user.me"` is served at `POST /rpc/user/me`. The callback receives the oRPC base builder, so chain `.input()`, `.output()`, and `.handler()` on it. Names must be unique, and the `_admin` namespace is reserved.
 
-`options` guards the procedure without writing the check by hand:
+`options` guards the procedure without a hand-written check:
 
 | Prop         | Type                                                          | Default     | Description                                                                                       |
 | ------------ | ------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------- |
-| `permission` | `"public" \| "authenticated" \| "admin" \| (args) => boolean` | `"public"`  | `"authenticated"` returns `401` when signed out; `"admin"` and function permissions return `403`. |
+| `permission` | `"public" \| "authenticated" \| "admin" \| (args) => boolean` | `"public"`  | `"authenticated"` returns `401` when signed out. `"admin"` and function permissions return `403`. |
 | `roles`      | `string[]`                                                    | `["admin"]` | Roles accepted by `"admin"`.                                                                      |
 
-There's no `"owner"` — that needs a row, which a bare procedure doesn't have; use `.resource()` or check inside the handler. Any non-public permission is registered at `.build()`, so forgetting `.auth()` throws at startup instead of failing per request.
+There is no `"owner"` — that needs a row, which a bare procedure has none of. Use `.resource()`, or check inside the handler. Any non-public permission is registered at `.build()`, so forgetting `.auth()` throws at startup instead of failing per request.
 
 ### `.route(method, path, handler)`
 
-Mounts a raw H3 route (webhooks, custom REST endpoints) alongside RPC routes. `handler(event, context)` receives the H3 event and the same `context` as procedures (`headers`, `db`, `auth`, `user`, `session`, `storage`) — including the already-resolved session, so raw routes authorize exactly like procedures. Registered before `/rpc/**`, so it wins on overlapping paths.
+Mounts a raw H3 route for webhooks and custom REST endpoints, alongside your RPC routes. `handler(event, context)` receives the H3 event and the same context procedures get (`headers`, `db`, `auth`, `user`, `session`, `storage`), including the already-resolved session. Raw routes are registered before `/rpc/**` and win on overlapping paths.
 
 ### `.resource(name, options?)`
 
-Auto-generates typed CRUD procedures (`list`, `get`, `create`, `update`, `delete`) for a table defined in the latest `.schema()`. Throws at build time if the table doesn't exist.
+Generates typed CRUD procedures — `list`, `get`, `create`, `update`, `delete` — for a table defined in the latest `.schema()`. Throws at build time if the table does not exist.
 
 `ResourceOptions`:
 
-| Prop          | Type                                                          | Default                | Description                                                                                                                                                                                                                                                                                         |
-| ------------- | ------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `permissions` | `ResourcePermissions`                                         | all `"public"`         | Per-action rules — see below.                                                                                                                                                                                                                                                                       |
-| `ownerColumn` | `string`                                                      | —                      | Column storing the creator's user ID. Required when any permission is `"owner"`. When `create` requires a session and this is set, the current user's ID is auto-injected into inserts.                                                                                                             |
-| `listLimit`   | `{ default?: number; max?: number; maxSkip?: number }`        | `50` / `100` / `10000` | Default and max rows per `list` call; `maxSkip` caps the offset so deep pagination can't force full scans.                                                                                                                                                                                          |
-| `includable`  | `string[]`                                                    | `[]`                   | Relations callers may `include` on `list`/`get`. Included rows are **not** checked against the related resource's permissions — only allow relations safe to expose.                                                                                                                                |
-| `live`        | `boolean \| { revalidateMs?: number \| false; max?: number }` | off                    | Registers `{name}.live` — `list` as a stream. Gated by the `list` permission, owner scoping included. `revalidateMs` (default `30000`) re-checks that permission while the stream is open; `max` (default `100`) caps concurrent subscriptions. See [live queries](/guide/procedures#live-queries). |
+| Prop          | Type                                                          | Default                | Description                                                                                                                                                                                                                                      |
+| ------------- | ------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `permissions` | `ResourcePermissions`                                         | all `"public"`         | Per-action rules — see below.                                                                                                                                                                                                                    |
+| `ownerColumn` | `string`                                                      | —                      | Column storing the creator's user ID. Required when any permission is `"owner"`. When `create` requires a session and this is set, the current user's ID is injected into inserts.                                                               |
+| `listLimit`   | `{ default?: number; max?: number; maxSkip?: number }`        | `50` / `100` / `10000` | Default and max rows per `list` call. `maxSkip` caps the offset so deep pagination cannot force full scans.                                                                                                                                      |
+| `includable`  | `string[]`                                                    | `[]`                   | Relations callers may `include` on `list` and `get`. Included rows are **not** checked against the related resource's permissions, so only allow relations that are safe to expose.                                                              |
+| `live`        | `boolean \| { revalidateMs?: number \| false; max?: number }` | off                    | Registers `{name}.live`, which is `list` as a stream, gated by the `list` permission with owner scoping included. `revalidateMs` (default `30000`) re-checks that permission while the stream is open; `max` (default `100`) caps subscriptions. |
 
-`ResourcePermissions` — each of `list`, `get`, `create`, `update`, `delete` accepts:
+`ResourcePermissions` — each of `list`, `get`, `create`, `update`, and `delete` accepts:
 
 | Value             | Meaning                                                                                                                               |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `"public"`        | No restriction (the default).                                                                                                         |
 | `"authenticated"` | Requires a signed-in session.                                                                                                         |
-| `"admin"`         | Requires the `admin` role (`user.role` may be comma-separated).                                                                       |
+| `"admin"`         | Requires the `admin` role. `user.role` may be comma-separated.                                                                        |
 | `"owner"`         | Requires the signed-in user to own the row (`ownerColumn`). Not valid for `create`; on `list` it scopes results to the caller's rows. |
 | `PermissionFn`    | Custom check: `({ context, row? }) => boolean \| Promise<boolean>`.                                                                   |
 
@@ -142,15 +148,15 @@ Auto-generates typed CRUD procedures (`list`, `get`, `create`, `update`, `delete
 
 Mounts `GET /openapi.json` and a plain-JSON REST surface under `/rest/**` matching the spec. Requires the optional peers `@orpc/openapi` and `@orpc/zod`.
 
-| Prop      | Type      | Default | Description                                                                 |
-| --------- | --------- | ------- | --------------------------------------------------------------------------- |
-| `enabled` | `boolean` | `true`  | Pass `import.meta.env.DEV` or similar to gate the spec to dev/staging only. |
+| Prop      | Type      | Default | Description                                                               |
+| --------- | --------- | ------- | ------------------------------------------------------------------------- |
+| `enabled` | `boolean` | `true`  | Pass `import.meta.env.DEV` or similar to gate the spec to non-production. |
 
 ### `.mcp(config?)`
 
 Serves the router as an [MCP](/guide/mcp) server over Streamable HTTP, so agents can call procedures as tools. Requires the optional peers `orpc-mcp` and `@orpc/zod`.
 
-**Exposure is opt-in per procedure** — only those tagged with the `mcp` meta helper (`mcp.tool()` / `mcp.resource()` / `mcp.prompt()`, re-exported from `@outerjs/server`) are visible. The `_admin` namespace and `file.*` routes never are. Dots become underscores in tool names: `post.search` → `post_search`.
+Exposure is **opt-in per procedure**: only those tagged with the `mcp` meta helper (`mcp.tool()`, `mcp.resource()`, `mcp.prompt()`, re-exported from `@outerjs/server`) are visible. The `_admin` namespace and `file.*` routes never are. Dots become underscores in tool names, so `post.search` is called as `post_search`.
 
 | Prop                              | Type                  | Default                 | Description                                                     |
 | --------------------------------- | --------------------- | ----------------------- | --------------------------------------------------------------- |
@@ -158,18 +164,18 @@ Serves the router as an [MCP](/guide/mcp) server over Streamable HTTP, so agents
 | `path`                            | `string`              | `/mcp`                  | Where the endpoint is mounted.                                  |
 | `serverInfo`                      | `{ name?, version? }` | instance name + version | Identity reported during `initialize`.                          |
 | `instructions`                    | `string`              | —                       | Guidance returned to the client during `initialize`.            |
-| `enableDnsRebindingProtection`    | `boolean`             | `false`                 | Reject `Origin`/`Host` outside the allowlists.                  |
+| `enableDnsRebindingProtection`    | `boolean`             | `false`                 | Reject `Origin` and `Host` outside the allowlists.              |
 | `allowedOrigins` / `allowedHosts` | `string[]`            | —                       | Exact-match allowlists used when protection is on.              |
 
 ### `.files(config?)`
 
-Mounts the upload surface — `file.upload` / `list` / `get` / `delete` / `attach` / `detach` plus `GET /files/:id` — over the tables [`schema().files()`](#filesoptions) registers. Requires an `OuterStorage` on the constructor (or in `config`). Full guide: [File Uploads](/guide/files).
+Mounts the upload surface — `file.upload`, `list`, `get`, `delete`, `attach`, `detach`, plus `GET /files/:id` — over the tables [`schema().files()`](#filesoptions) registers. Requires an `OuterStorage` on the constructor or in `config`. Full guide: [File uploads](/guide/files).
 
 | Prop          | Type                            | Default                                             | Description                                                                                                    |
 | ------------- | ------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `storage`     | `OuterStorage`                  | the constructor's `storage`                         | Overrides the instance-wide store for files only.                                                              |
 | `maxBytes`    | `number`                        | `10 * 1024 * 1024`                                  | Larger uploads are rejected with `413`. Bytes are buffered in memory, so this is a real ceiling.               |
-| `accept`      | `string[]`                      | all types                                           | Allowed MIME types; wildcards like `"image/*"` are accepted.                                                   |
+| `accept`      | `string[]`                      | all types                                           | Allowed MIME types. Wildcards such as `"image/*"` are accepted.                                                |
 | `permissions` | `{ upload, list, get, delete }` | upload/list `"authenticated"`, get/delete `"owner"` | Same vocabulary as `.resource()`. `"owner"` makes the download route answer `404` — not `403` — to non-owners. |
 | `path`        | `string` containing `:id`       | `"/files/:id"`                                      | Path of the download route.                                                                                    |
 | `roles`       | `string[]`                      | `["admin"]`                                         | Roles that bypass ownership.                                                                                   |
@@ -188,9 +194,7 @@ type OuterStorage = {
 
 ### `.admin(config?)`
 
-Enables the admin API — meta/schema introspection, migration status, and table CRUD — under the reserved `_admin` namespace (`/rpc/_admin/**`). Every admin procedure requires a signed-in session with an admin role, so `.auth()` must also be called or `.build()` throws.
-
-`AdminConfig`:
+Enables the admin API — meta and schema introspection, migration status, and table CRUD — under the reserved `_admin` namespace at `/rpc/_admin/**`. Every admin procedure requires a signed-in session with an admin role, so you must also call `.auth()` or `.build()` throws.
 
 | Prop        | Type                                 | Default      | Description                                                                                    |
 | ----------- | ------------------------------------ | ------------ | ---------------------------------------------------------------------------------------------- |
@@ -203,14 +207,14 @@ Finalizes the chain and returns a `BuiltOuter`. Throws if any resource permissio
 
 ## `BuiltOuter`
 
-| Member             | Description                                                                                                                                                                                                       |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `handle(request)`  | Plain Fetch handler (`Request => Promise<Response>`) — plug into `srvx`, `Bun.serve`, Next.js route handlers, etc.                                                                                                |
-| `client(headers?)` | In-process router client that skips HTTP entirely — for SSR. Pass the incoming request's `Headers` (or a function returning them, evaluated per call) so permissions and `context.auth` see the caller's session. |
-| `migrator`         | Kysely migrator over the registered schema versions — call `await outer.migrator.migrateToLatest()` on startup.                                                                                                   |
-| `router`           | The internal oRPC router. Use `InferRouter<typeof outer>` for type-safe client generation.                                                                                                                        |
-| `db`               | The same typed `context.db` handed to procedures (Kysely + `query` + `transact`) — for out-of-band work like seeding after migrations.                                                                            |
-| `close()`          | Releases the database pool (and the embedded PGlite with it) plus any rate-limit timers. Call it from your `SIGTERM`/`SIGINT` handler, and in tests that build more than one instance. Idempotent.                |
+| Member             | Description                                                                                                                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `handle(request)`  | Plain Fetch handler (`Request => Promise<Response>`). Plug it into srvx, `Bun.serve`, Next.js route handlers, and others.                                                                         |
+| `client(headers?)` | In-process router client that skips HTTP entirely, for SSR. Pass the incoming request's `Headers` — or a function returning them, evaluated per call — so permissions see the caller's session.   |
+| `migrator`         | Kysely migrator over the registered schema versions. Call `await outer.migrator.migrateToLatest()` on startup.                                                                                    |
+| `router`           | The internal oRPC router. Use `InferRouter<typeof outer>` for type-safe client generation.                                                                                                        |
+| `db`               | The same typed `context.db` handed to procedures (Kysely plus `query` and `transact`), for out-of-band work such as seeding after migrations.                                                     |
+| `close()`          | Releases the database pool — including the embedded PGlite — and any rate-limit timers. Call it from your `SIGTERM`/`SIGINT` handler, and in tests that build more than one instance. Idempotent. |
 
 ## `schema()` builder
 
@@ -233,100 +237,102 @@ export const v1_0_0 = schema("1.0.0")
 
 ### `schema(version)`
 
-Starts a schema version. `version` is a free-form string (e.g. `"1.0.0"`) shown in the OpenAPI spec and admin API.
+Starts a schema version. `version` is a free-form string, such as `"1.0.0"`, shown in the OpenAPI spec and the admin API.
 
 ### `.auth()`
 
-Registers the Better Auth core tables (`user`, `session`, `account`, `verification`) with the admin plugin's fields (`user.role/banned/banReason/banExpires`, `session.impersonatedBy`) plus their relations. Extend an auth table by re-declaring extra columns via `.table("user", ...)` after this call — columns merge, yours win on name collisions. Never remove or rename the core auth columns.
+Registers the Better Auth core tables (`user`, `session`, `account`, `verification`) with the admin plugin's fields (`user.role`, `banned`, `banReason`, `banExpires`, and `session.impersonatedBy`) plus their relations.
 
-| Option    | Type       | Default | Description                                                                                                                                                              |
-| --------- | ---------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `roles`   | `string[]` | —       | Declares the recognised role set, narrowing `user.role`. A user may hold several at once — Better Auth stores them comma-separated in the one column. Open when omitted. |
-| `apiKeys` | `boolean`  | `false` | Adds the `apikey` table required by `@better-auth/api-key` — see [API keys](/guide/auth#api-keys).                                                                       |
+Extend an auth table by re-declaring extra columns with `.table("user", ...)` after this call — columns merge, and yours win on name collisions. Never remove or rename the core auth columns.
 
-`session.userId` and `account.userId` cascade on delete, so removing a user isn't blocked by their sessions.
+| Option    | Type       | Default | Description                                                                                                                                                 |
+| --------- | ---------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `roles`   | `string[]` | —       | Declares the recognized role set, narrowing `user.role`. A user may hold several at once, since Better Auth stores them comma-separated. Open when omitted. |
+| `apiKeys` | `boolean`  | `false` | Adds the `apikey` table required by `@better-auth/api-key` — see [API keys](/guide/auth#api-keys).                                                          |
+
+`session.userId` and `account.userId` cascade on delete, so removing a user is never blocked by their sessions.
 
 ### `.files(options?)`
 
-Registers a `file` metadata table for blobs held in an object store — the counterpart to `.auth()` for uploads. Columns: `id` (PK), `key` (unique — the storage key the bytes live under, so a blob can never be double-registered), `name`, `type` (MIME), `size`, `userId` (nullable, references `user`), plus `timestamps(t)`. Exported as `FileTables`.
+Registers a `file` metadata table for blobs held in an object store — the counterpart to `.auth()` for uploads. Columns: `id` (primary key), `key` (unique, the storage key the bytes live under, so a blob can never be double-registered), `name`, `type` (MIME), `size`, `userId` (nullable, references `user`), plus `timestamps(t)`. Exported as `FileTables`.
 
-| Prop       | Type       | Default | Description                                                                                                                                                                                        |
-| ---------- | ---------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `owner`    | `boolean`  | `true`  | Adds `file.userId` plus the `user hasMany file` / `file belongsTo user` relations — so it requires `.auth()`. Pass `false` for files with no per-user owner; the column and relations are omitted. |
-| `attachTo` | `string[]` | `[]`    | Tables files can attach to. Each name `x` gets a pivot `x_file` (`fileId`, `entityId`, nullable `role`, integer `position`) and a `manyToMany` relation both ways. Unknown names are a type error. |
+| Prop       | Type       | Default | Description                                                                                                                                                                                         |
+| ---------- | ---------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `owner`    | `boolean`  | `true`  | Adds `file.userId` plus the `user hasMany file` and `file belongsTo user` relations, so it requires `.auth()`. Pass `false` for files with no per-user owner; the column and relations are omitted. |
+| `attachTo` | `string[]` | `[]`    | Tables files can attach to. Each name `x` gets a pivot `x_file` (`fileId`, `entityId`, nullable `role`, integer `position`) and a `manyToMany` relation both ways. Unknown names are a type error.  |
 
-Outer deliberately stops at the schema here: it does not read, write, or serve the bytes. That's [`.files()`](#filesconfig) on the builder chain.
+The schema stops there: it does not read, write, or serve the bytes. That is [`.files()`](#filesconfig) on the builder chain.
 
 ### `.table(name, define)`
 
-Defines (or extends — re-declaring merges, later wins) a table. `define` receives the column builder `t`:
+Defines a table, or extends one — re-declaring merges columns, and the later definition wins. `define` receives the column builder `t`:
 
-| Column type     | TS type (select) | Notes                                                                                      |
-| --------------- | ---------------- | ------------------------------------------------------------------------------------------ |
-| `t.serial()`    | `number`         | DB-generated; omitted from create inputs.                                                  |
-| `t.text()`      | `string`         |                                                                                            |
-| `t.varchar()`   | `string`         |                                                                                            |
-| `t.integer()`   | `number`         |                                                                                            |
-| `t.boolean()`   | `boolean`        |                                                                                            |
-| `t.timestamp()` | `Date`           | Resource inputs take ISO strings; outputs are `Date \| string` depending on dialect.       |
-| `t.bigint()`    | `string`         | 64-bit; a string, since a JS `number` loses precision past 2^53.                           |
-| `t.decimal()`   | `string`         | Exact numeric (`numeric`/`text` on SQLite). A string, so cents never pass through a float. |
-| `t.real()`      | `number`         | Approximate — don't store money in it.                                                     |
-| `t.date()`      | `Date`           | Calendar date, no time component.                                                          |
-| `t.jsonb()`     | `unknown`        |                                                                                            |
-| `t.uuid()`      | `string`         |                                                                                            |
-| `t.bytes()`     | `Uint8Array`     | Raw bytes (`bytea` / `BLOB`).                                                              |
+| Column type     | TS type (select) | Notes                                                                                          |
+| --------------- | ---------------- | ---------------------------------------------------------------------------------------------- |
+| `t.serial()`    | `number`         | Database-generated; omitted from create inputs.                                                |
+| `t.text()`      | `string`         |                                                                                                |
+| `t.varchar()`   | `string`         |                                                                                                |
+| `t.integer()`   | `number`         |                                                                                                |
+| `t.boolean()`   | `boolean`        |                                                                                                |
+| `t.timestamp()` | `Date`           | Resource inputs take ISO strings; outputs are `Date \| string` depending on the dialect.       |
+| `t.bigint()`    | `string`         | 64-bit. A string, since a JS `number` loses precision past 2^53.                               |
+| `t.decimal()`   | `string`         | Exact numeric (`numeric`, or `text` on SQLite). A string, so cents never pass through a float. |
+| `t.real()`      | `number`         | Approximate. Do not store money in it.                                                         |
+| `t.date()`      | `Date`           | Calendar date, no time component.                                                              |
+| `t.jsonb()`     | `unknown`        |                                                                                                |
+| `t.uuid()`      | `string`         |                                                                                                |
+| `t.bytes()`     | `Uint8Array`     | Raw bytes (`bytea` or `BLOB`).                                                                 |
 
-Column modifiers (chainable, each returns the column):
+Column modifiers chain, and each returns the column:
 
-| Modifier                               | Effect                                                                                                                                                                                                       |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `.nullable()`                          | Column allows `NULL`; optional in inserts and typed `\| null`.                                                                                                                                               |
-| `.primaryKey()`                        | Marks the primary key — drives the `where` type of resource `get`/`update`/`delete`.                                                                                                                         |
-| `.unique()`                            | Adds a unique constraint.                                                                                                                                                                                    |
-| `.index()`                             | Non-unique index named `{table}_{column}_idx`. A no-op on `.unique()` columns.                                                                                                                               |
-| `.default(value)`                      | Literal default, quoted for you by column type: `.default("user")`, `.default(false)`, `.default(0)`. Defaulted columns are **optional** in resource create inputs — omit for the default, pass to override. |
-| `.defaultSql(expr)`                    | Raw SQL default, emitted verbatim: `.defaultSql("CURRENT_TIMESTAMP")`.                                                                                                                                       |
-| `.references(table, column, actions?)` | Foreign key. `actions` takes `onDelete`/`onUpdate` — `"cascade" \| "set null" \| "restrict" \| "no action"`. Without one, deleting a referenced row fails with an FK violation.                              |
-| `.enum(values, options?)`              | Restricts a `text`/`varchar` column to a fixed set, narrowing the TS type to the union. `{ multiple: true }` stores a comma-separated **set** instead — see [Schema](/guide/schema#enums).                   |
+| Modifier                               | Effect                                                                                                                                                                                |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.nullable()`                          | Allows `NULL`. Optional in inserts and typed `\| null`.                                                                                                                               |
+| `.primaryKey()`                        | Marks the primary key, which drives the `where` type of resource `get`, `update`, and `delete`.                                                                                       |
+| `.unique()`                            | Adds a unique constraint.                                                                                                                                                             |
+| `.index()`                             | Non-unique index named `{table}_{column}_idx`. A no-op on `.unique()` columns.                                                                                                        |
+| `.default(value)`                      | Literal default, quoted for you by column type: `.default("user")`, `.default(false)`, `.default(0)`. Defaulted columns are **optional** in resource create inputs.                   |
+| `.defaultSql(expr)`                    | Raw SQL default, emitted verbatim: `.defaultSql("CURRENT_TIMESTAMP")`.                                                                                                                |
+| `.references(table, column, actions?)` | Foreign key. `actions` takes `onDelete` and `onUpdate` — `"cascade" \| "set null" \| "restrict" \| "no action"`. Without one, deleting a referenced row fails with an FK violation.   |
+| `.enum(values, options?)`              | Restricts a `text` or `varchar` column to a fixed set, narrowing the TS type to the union. `{ multiple: true }` stores a comma-separated **set** — see [Schema](/guide/schema#enums). |
 
 ### `timestamps(t)`
 
-Helper returning `createdAt` / `updatedAt` timestamp columns with `.defaultSql("CURRENT_TIMESTAMP")` — spread into a `.table()` column object.
+Returns `createdAt` and `updatedAt` timestamp columns with `.defaultSql("CURRENT_TIMESTAMP")`. Spread it into a `.table()` column object.
 
 ### `.relation(fromTable, define)`
 
-Declares a relation used by `context.db.query` (Sola) and resource `include`. `define` receives a chain with:
+Declares a relation used by `context.db.query` (Sola) and by resource `include`. `define` receives a chain with:
 
-| Kind         | Signature                                                                                                                                                  |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hasMany`    | `rel.hasMany(to, { from, to })`                                                                                                                            |
-| `hasOne`     | `rel.hasOne(to, { from, to })`                                                                                                                             |
-| `belongsTo`  | `rel.belongsTo(to, { from, to })`                                                                                                                          |
-| `manyToMany` | `rel.manyToMany(to, via, { from, to, pivotFrom, pivotTo })` — `via` is the pivot table; `pivotFrom`/`pivotTo` are the pivot columns referencing each side. |
+| Kind         | Signature                                                                                                                                                      |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hasMany`    | `rel.hasMany(to, { from, to })`                                                                                                                                |
+| `hasOne`     | `rel.hasOne(to, { from, to })`                                                                                                                                 |
+| `belongsTo`  | `rel.belongsTo(to, { from, to })`                                                                                                                              |
+| `manyToMany` | `rel.manyToMany(to, via, { from, to, pivotFrom, pivotTo })` — `via` is the pivot table; `pivotFrom` and `pivotTo` are the pivot columns referencing each side. |
 
 ### `.build()`
 
-Freezes and returns the `SchemaResult` to pass into `.schema()`.
+Freezes and returns the `SchemaResult` you pass to `.schema()`.
 
 ## Type helpers
 
-| Export                 | Description                                                                                                                                                    |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `InferRouter<T>`       | Extracts the oRPC router type from an `Outer` or `BuiltOuter` instance — the input to oRPC client creation.                                                    |
-| `OuterAdminRouter`     | `{ _admin: AdminRouter }` — the router shape for a type-safe admin-only client: `createClient<OuterAdminRouter>({ baseUrl })`.                                 |
-| `InferDB<T>`           | Maps a schema's tables to Kysely row types.                                                                                                                    |
-| `AuthTables`           | The table shape `.auth()` registers on the schema builder.                                                                                                     |
-| `FileTables`           | The table shape `schema().files()` registers — the `file` table plus any `attachTo` pivots.                                                                    |
-| `OuterStorage`         | The three-method object store contract (`get` / `set` / `delete`) accepted by `new Outer({ storage })`.                                                        |
-| `OuterRpcContext<TDB>` | The base procedure context: `{ headers, db, auth?, user, session, storage? }`. `context.db` is Kysely plus `query` (Sola) and `transact(fn)` for transactions. |
+| Export                 | Description                                                                                                                                   |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `InferRouter<T>`       | Extracts the oRPC router type from an `Outer` or `BuiltOuter` instance — the input to oRPC client creation.                                   |
+| `OuterAdminRouter`     | `{ _admin: AdminRouter }` — the router shape for a type-safe admin-only client: `createClient<OuterAdminRouter>({ baseUrl })`.                |
+| `InferDB<T>`           | Maps a schema's tables to Kysely row types.                                                                                                   |
+| `AuthTables`           | The table shape `.auth()` registers on the schema builder.                                                                                    |
+| `FileTables`           | The table shape `schema().files()` registers — the `file` table plus any `attachTo` pivots.                                                   |
+| `OuterStorage`         | The three-method object store contract accepted by `new Outer({ storage })`.                                                                  |
+| `OuterRpcContext<TDB>` | The base procedure context: `{ headers, db, auth?, user, session, storage? }`. `context.db` is Kysely plus `query` (Sola) and `transact(fn)`. |
 
-### `context.user` / `context.session`
+### `context.user` and `context.session`
 
-After `.auth()`, both are resolved once per request and shared with every procedure, raw route, and permission check — the types narrow from optional to `SessionUser | null` / `UserSession | null`, so no `?.` dance:
+After `.auth()`, both are resolved once per request and shared with every procedure, raw route, and permission check. Their types narrow from optional to `SessionUser | null` and `UserSession | null`, so you skip the `?.` dance:
 
 ```ts
 .procedure("user.me", (base) => base.handler(({ context }) => context.user))
 ```
 
-Both are `null` for anonymous callers, and always `null` when `.auth()` was never called.
+Both are `null` for anonymous callers, and always `null` when you never called `.auth()`.
