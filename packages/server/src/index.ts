@@ -398,12 +398,17 @@ function createMcpMetaPlugin(incoming: any): any {
  * `orpc-mcp` and `@orpc/zod` are optional peer dependencies — only needed when
  * `.mcp()` is enabled, so they're loaded lazily on the first request.
  */
+/**
+ * Built at runtime so bundlers (esbuild/wrangler) can't statically resolve the
+ * `import()` below. Without this, targets that don't install the optional
+ * `orpc-mcp` peer — e.g. the Cloudflare Workers template — fail to build.
+ */
+const mcpFetchSpecifier = ["orpc", "mcp", "fetch"].join("-").replace("-fetch", "/fetch");
+
 async function loadMcpModules() {
   try {
     const [mcpFetch, orpcZod] = await Promise.all([
-      // Indirection keeps bundlers (esbuild/wrangler) from statically resolving
-      // this optional peer when `.mcp()` is unused.
-      import(/* @vite-ignore */ `${"orpc-mcp"}/fetch`),
+      import(/* @vite-ignore */ mcpFetchSpecifier),
       import("@orpc/zod"),
     ]);
     return {
