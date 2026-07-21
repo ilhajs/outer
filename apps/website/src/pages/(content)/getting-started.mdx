@@ -26,8 +26,8 @@ npm run dev
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
 | `minimal`     | The smallest possible Outer server — no frontend, just `new Outer(...).build()` behind [srvx](https://srvx.h3.dev).                  | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/minimal my-outer-app" class="max-w-xs" />     |
 | `ilha`        | Full-stack starter: Outer mounted as a [Nitro](https://nitro.build) server entry with an [Ilha](https://ilha.build) + Vite frontend. | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/ilha my-outer-app" class="max-w-xs" />        |
-| `cloudflare`  | Outer on Cloudflare Workers, backed by a Durable Object's SQLite storage instead of PGlite.                                          | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/cloudflare my-outer-app" class="max-w-xs" />  |
-| `vercel-neon` | Outer on Vercel serverless functions, backed by [Neon](https://neon.tech) Postgres instead of PGlite.                                | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/vercel-neon my-outer-app" class="max-w-xs" /> |
+| `cloudflare`  | Outer on Cloudflare Workers — a Durable Object's SQLite for data, R2 for uploads, instead of PGlite.                                 | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/cloudflare my-outer-app" class="max-w-xs" />  |
+| `vercel-neon` | Outer on Vercel functions — [Neon](https://neon.tech) Postgres for data, Vercel Blob for uploads, instead of PGlite.                 | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/vercel-neon my-outer-app" class="max-w-xs" /> |
 
 ## The builder chain
 
@@ -47,18 +47,17 @@ const v1_0 = schema("1.0.0")
 const server = new Outer({ name: "My API", baseUrl: "http://localhost:3000", db: pglite() })
   .schema(v1_0)
   .auth({ secret: process.env.AUTH_SECRET! })
-  .middleware(async ({ context, next }) => {
-    const session = await context.auth.api.getSession({ headers: context.headers });
-    return next({ context: { user: session?.user } });
+  // .auth() resolves the session once per request — no getSession middleware needed
+  .procedure("user.me", (base) => base.handler(({ context }) => context.user), {
+    permission: "authenticated",
   })
-  .procedure("user.me", (base) => base.handler(({ context }) => context.user))
   .build();
 
 await server.migrator.migrateToLatest();
 serve({ fetch: (req) => server.handle(req) });
 ```
 
-Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`. `.auth()` and `.openapi()` can appear anywhere in the chain.
+Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`. `.auth()`, `.openapi()`, `.admin()`, and `.files()` can appear anywhere in the chain.
 
 ## Project structure
 
@@ -75,5 +74,6 @@ my-outer-app/
 - [Schema & Migrations](/guide/schema) — define tables, relations, and auto-generated CRUD with `.resource()`
 - [Auth & Permissions](/guide/auth) — enable Better Auth and read the session in procedures
 - [Procedures & Context](/guide/procedures) — register custom procedures, raw routes, and query with the Sola ORM
+- [File Uploads](/guide/files) — register the file tables, mount `.files()`, and pick a storage backend
 - [Realtime](/guide/realtime) — stream updates over SSE with oRPC's event iterators
 - [Deployment](/guide/deployment) — the `pglite()` default, custom dialects, and embedding in a host framework

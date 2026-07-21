@@ -1,6 +1,6 @@
 # Outer
 
-**Own your backend.** Outer is an open-source alternative to Supabase, PocketBase, and Firebase where you own 100% of the solution and the data — no hosted control plane, no per-project pricing, nothing leaving your box. One TypeScript builder chain gives you a real Postgres database, auth, typed RPC, auto-generated CRUD with row-level permissions, migrations, realtime, and OpenAPI — compiled into a single fetch-compatible handler you can deploy to a $5 VPS, Coolify, Cloudflare Workers, or Vercel.
+**Own your backend.** Outer is an open-source alternative to Supabase, PocketBase, and Firebase where you own 100% of the solution and the data — no hosted control plane, no per-project pricing, nothing leaving your box. One TypeScript builder chain gives you a real Postgres database, auth, typed RPC, auto-generated CRUD with row-level permissions, file uploads, migrations, realtime, and OpenAPI — compiled into a single fetch-compatible handler you can deploy to a $5 VPS, Coolify, Cloudflare Workers, or Vercel.
 
 Built on proven pieces — [Kysely](https://kysely.dev), [oRPC](https://orpc.unnoq.com), [Better Auth](https://better-auth.com), and [PGlite](https://pglite.dev) — instead of reinventing them.
 
@@ -13,9 +13,11 @@ npx giget@latest gh:ilhajs/outer/templates/minimal my-outer-app
 Or from scratch — this is a complete backend:
 
 ```ts
-import { Outer, schema } from "@outerjs/server";
+import { fromUnstorage, Outer, schema } from "@outerjs/server";
 import { pglite } from "@outerjs/server/pglite";
 import { serve } from "srvx";
+import { createStorage } from "unstorage";
+import fsLite from "unstorage/drivers/fs-lite";
 
 const v1_0 = schema("1.0.0")
   .auth() // Better Auth tables (user, session, account, verification) + admin plugin fields
@@ -25,13 +27,20 @@ const v1_0 = schema("1.0.0")
     body: t.text().nullable(),
     userId: t.text().references("user", "id"),
   }))
+  .files({ attachTo: ["post"] }) // `file` metadata table + a `post_file` pivot
   .build();
 
-const outer = new Outer({ name: "My API", baseUrl: "http://localhost:3000", db: pglite() })
+const outer = new Outer({
+  name: "My API",
+  baseUrl: "http://localhost:3000",
+  db: pglite(),
+  storage: fromUnstorage(createStorage({ driver: fsLite({ base: ".outer/files" }) })),
+})
   .schema(v1_0)
   .auth({ secret: process.env.AUTH_SECRET! })
   .openapi()
   .admin()
+  .files() // file.upload / list / get / delete / attach / detach + GET /files/:id
   .resource("post", {
     permissions: { create: "authenticated", update: "owner", delete: "owner" },
     ownerColumn: "userId",
@@ -49,6 +58,7 @@ With zero extra setup, that's:
 - **Auth** — sign-up, sign-in, sessions, social providers — via Better Auth at `/api/auth/**`, with the auth tables registered in one call (`schema().auth()`)
 - Auto-generated **CRUD procedures** per table via `.resource()`, with per-action permissions: `public` / `authenticated` / `admin` / `owner` / your own function
 - **Type-safe RPC** at `/rpc/**`, plus opt-in **OpenAPI** (`/openapi.json`) with a spec-accurate plain-JSON surface at `/rest/**`
+- **File uploads** via `.files()` — a typed `file.upload` and a `GET /files/:id` download route, private to the uploader by default, with the bytes in unstorage, S3/R2, or Vercel Blob and only the metadata in Postgres
 - An **admin API** via `.admin()` — schema introspection, migration status, and table CRUD under `/rpc/_admin/**`, guarded by the admin role, ready for a dashboard to consume
 - **Realtime streaming** (SSE) via oRPC event iterators — no extra infrastructure
 
@@ -84,8 +94,8 @@ The `pglite()` default writes to local disk, which makes persistent hosts (VPS, 
 | ------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | `minimal`     | Bare Outer server behind [srvx](https://srvx.h3.dev)                                            | `npx giget@latest gh:ilhajs/outer/templates/minimal my-app`     |
 | `ilha`        | Full-stack: Outer in a [Nitro](https://nitro.build) entry + [Ilha](https://ilha.build) frontend | `npx giget@latest gh:ilhajs/outer/templates/ilha my-app`        |
-| `cloudflare`  | Cloudflare Workers, backed by a Durable Object's SQLite storage                                 | `npx giget@latest gh:ilhajs/outer/templates/cloudflare my-app`  |
-| `vercel-neon` | Vercel serverless functions, backed by [Neon](https://neon.tech) Postgres                       | `npx giget@latest gh:ilhajs/outer/templates/vercel-neon my-app` |
+| `cloudflare`  | Cloudflare Workers — Durable Object SQLite for data, R2 for uploads                             | `npx giget@latest gh:ilhajs/outer/templates/cloudflare my-app`  |
+| `vercel-neon` | Vercel functions — [Neon](https://neon.tech) Postgres for data, Vercel Blob for uploads         | `npx giget@latest gh:ilhajs/outer/templates/vercel-neon my-app` |
 
 Heavy or platform-specific dependencies are optional peers, so a Workers deploy never downloads PGlite's WASM and a server that skips `.openapi()` never installs the OpenAPI toolchain.
 

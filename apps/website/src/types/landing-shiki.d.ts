@@ -5,4 +5,5 @@ declare module "imprensa/landing-shiki" {
   export const realtimeHtml: string;
   export const heroHtml: string;
   export const clientHtml: string;
+  export const filesHtml: string;
 }

@@ -21,11 +21,12 @@ Because Neon is real Postgres, `kind: "postgres"` is the exact same path the def
 
 ## Getting started
 
-You'll need a Neon database first — either provision one directly at [neon.tech](https://neon.tech), or through [Vercel's Neon integration](https://vercel.com/marketplace/neon) if you want the connection string wired into your Vercel project automatically.
+You'll need two stores: a Neon database — either provision one directly at [neon.tech](https://neon.tech), or through [Vercel's Neon integration](https://vercel.com/marketplace/neon) if you want the connection string wired into your Vercel project automatically — and a **private** [Vercel Blob](https://vercel.com/docs/vercel-blob) store for `.files()` uploads (Storage → Create Database → Blob → access **Private**; see below).
 
 ```bash
 cp .env.example .env
 # paste your Neon connection string into DATABASE_URL in .env
+# creating the Blob store sets BLOB_READ_WRITE_TOKEN on the project — `vercel env pull` copies it locally
 
 npm install
 npm run migrate   # applies the schema to your Neon database — vercel dev doesn't run buildCommand
@@ -38,7 +39,26 @@ Open [http://localhost:3000/openapi.json](http://localhost:3000/openapi.json) to
 npm run deploy   # vercel deploy --prod — buildCommand runs `npm run migrate` automatically
 ```
 
-Set `DATABASE_URL` in your Vercel project's environment variables too — `.env` is only read locally by `vercel dev`/`npm run migrate`, and `buildCommand` needs `DATABASE_URL` available at build time (Vercel exposes project env vars to both build and runtime by default, so this should just work once it's set).
+## File uploads
+
+Same split as the database: Vercel functions have no persistent disk, so the bytes go to [Vercel Blob](https://vercel.com/docs/vercel-blob). `schema().files({ attachTo: ["post"] })` adds the `file` metadata table and a `post_file` pivot to Neon, and `.files()` on the chain adds `file.upload` / `list` / `get` / `delete` / `attach` / `detach` plus `GET /files/:id`.
+
+`OuterStorage` is three methods (`get` / `set` / `delete`), so Blob's pathname-addressed SDK needs no adapter package — `vercelBlob` in `api/index.ts` is the whole integration:
+
+```ts
+storage: vercelBlob; // put/get/del from @vercel/blob, keyed by Outer's storage key
+```
+
+Two details worth keeping if you edit it:
+
+- **`access: "private"`.** Bytes reach the browser only through Outer's own `GET /files/:id`, which applies the `.files()` permissions — only the uploader (or an admin) can read a file, and the route returns `404` to everyone else. A public Blob store would hand out a directly-readable URL alongside it, bypassing that check. Switch to a public store only if you also set `permissions: { get: "public" }` on `.files()`.
+- **`addRandomSuffix: false`.** Outer's storage keys are already unique and are what it looks the blob up by later; letting Blob rewrite the pathname would strand the bytes.
+
+Uploads travel the normal typed client (`client.file.upload({ file })`) — oRPC switches the request to `multipart/form-data` on its own.
+
+Uploads are buffered in the function's memory, so `maxBytes` (10 MB here) is a real ceiling — and one worth keeping well under Vercel's function memory and request-body limits. For large media, use Blob's [client uploads](https://vercel.com/docs/vercel-blob/client-upload) to send bytes straight to the store instead of through the function.
+
+Set `DATABASE_URL` in your Vercel project's environment variables too (`BLOB_READ_WRITE_TOKEN` is added for you when the Blob store is created) — `.env` is only read locally by `vercel dev`/`npm run migrate`, and `buildCommand` needs `DATABASE_URL` available at build time (Vercel exposes project env vars to both build and runtime by default, so this should just work once it's set).
 
 ## Scripts
 

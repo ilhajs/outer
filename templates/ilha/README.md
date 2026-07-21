@@ -50,7 +50,7 @@ The demo includes email-OTP sign-in and a `foo` procedure backed by Nitro's KV s
 
 ```ts
 new Outer({ db: pglite(), storage: fromUnstorage(useStorage("fs")) })
-  .schema(v1_1_0)   // schema(...).auth().files({ attachTo: ["todo"] })
+  .schema(v1_0_0)   // schema(...).auth().files({ attachTo: ["todo"] })
   .auth({ ... })
   .files({ maxBytes: 10 * 1024 * 1024 })
 ```
@@ -73,7 +73,7 @@ const { url } = await client.file.upload({ file: input.files[0] });
 
 Files are **private by default**: only the uploader can read or delete them, and the download route returns `404` to everyone else. Pass `permissions: { get: "public" }` to `.files()` for avatars and other world-readable assets.
 
-Bytes live in [unstorage](https://unstorage.unjs.io) under the `fs` mount configured in `vite.config.ts`; the `file` table (schema `1.1.0`) holds only metadata and ownership. Swapping `fs-lite` for the `s3` driver in that config is the only change needed to move uploads to object storage in production.
+Bytes live in [unstorage](https://unstorage.unjs.io) under the `fs` mount that `vite.config.ts` declares; the `file` table holds only metadata and ownership. Because the mount is reached through Nitro's own [`useStorage("fs")`](https://nitro.build/docs/storage), moving uploads to object storage in production is a config change and nothing more — swap the driver for `s3`, or keep `fs-lite` locally by putting the `s3` driver under `storage` and the `fs-lite` one under `devStorage`. No application code moves either way.
 
 ## Auth
 

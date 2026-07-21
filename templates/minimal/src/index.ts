@@ -1,9 +1,11 @@
 import { existsSync } from "node:fs";
 
-import { Outer, type InferRouter } from "@outerjs/server";
+import { fromUnstorage, Outer, type InferRouter } from "@outerjs/server";
 import { pglite } from "@outerjs/server/pglite";
 import { emailOTP } from "better-auth/plugins";
 import { serve } from "srvx";
+import { createStorage } from "unstorage";
+import fsLite from "unstorage/drivers/fs-lite";
 import { z } from "zod";
 
 import { v1_0_0 } from "./schema";
@@ -41,6 +43,9 @@ const outer = new Outer({
   baseUrl: env.BASE_URL,
   // credentials lets browsers send the session cookie cross-origin — pair with `credentials: "include"` on the client
   cors: { origins: env.CORS_ORIGINS, credentials: true },
+  // Where uploaded bytes live. `fs-lite` writes next to the PGlite data dir; swap the
+  // driver for `s3` (or use `fromS3`) in production and nothing below changes.
+  storage: fromUnstorage(createStorage({ driver: fsLite({ base: ".outer/files" }) })),
 })
   .schema(v1_0_0)
   .auth({
@@ -63,6 +68,9 @@ const outer = new Outer({
   })
   .openapi()
   .admin()
+  // Adds file.upload / list / get / delete / attach / detach plus GET /files/:id.
+  // Files default to private: only the uploader can read or delete them.
+  .files({ maxBytes: 10 * 1024 * 1024 })
   .resource("post")
   .procedure("post.count", (base) =>
     base.output(z.object({ count: z.number() })).handler(async ({ context }) => {

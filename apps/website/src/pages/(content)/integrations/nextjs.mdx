@@ -170,3 +170,5 @@ new Outer({
 ```
 
 On serverless, run migrations from a script at deploy time instead of at cold start — see `templates/vercel-neon` for a working setup, including a `scripts/migrate.ts` you can copy.
+
+The same split applies to [file uploads](/guide/files): self-hosted can keep bytes on local disk via unstorage, while on Vercel they belong in [Vercel Blob](https://vercel.com/docs/vercel-blob) — pass either as `new Outer({ storage })`.

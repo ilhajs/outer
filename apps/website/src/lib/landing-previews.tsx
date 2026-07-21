@@ -2,6 +2,7 @@ import { raw } from "ilha";
 import {
   buildHtml,
   clientHtml,
+  filesHtml,
   fileTreeHtml,
   heroHtml,
   mdxHtml,
@@ -22,6 +23,10 @@ export function LandingFileTreePreview() {
 
 export function LandingMdxPreview() {
   return raw(mdxHtml);
+}
+
+export function LandingFilesPreview() {
+  return raw(filesHtml);
 }
 
 export function LandingBuildPreview() {

@@ -4,6 +4,7 @@ import { Topbar } from "$lib/components/topbar";
 import {
   LandingBuildPreview,
   LandingClientPreview,
+  LandingFilesPreview,
   LandingFileTreePreview,
   LandingHeroPreview,
   LandingMdxPreview,
@@ -12,7 +13,37 @@ import {
 import { Badge, ClipboardText, Icon, LinkButton, LayerCard } from "areia";
 import ilha from "ilha";
 import { Icon as SocialIcon } from "imprensa/icons";
-import { CircleCheck, CircleX, Database, KeyRound, Radio, Server, ShieldCheck } from "lucide";
+import {
+  CircleCheck,
+  CircleX,
+  CloudUpload,
+  Database,
+  HardDrive,
+  KeyRound,
+  Lock,
+  Radio,
+  Server,
+  ShieldCheck,
+  Upload,
+} from "lucide";
+
+const uploadTraits: { icon: typeof Lock; title: string; description: string }[] = [
+  {
+    icon: Lock,
+    title: "Private by default",
+    description: "Only the uploader reads a file. Everyone else gets a 404, never a 403.",
+  },
+  {
+    icon: HardDrive,
+    title: "Bytes stay yours",
+    description: "Local disk on a VPS, R2, S3, or Vercel Blob — the database holds only metadata.",
+  },
+  {
+    icon: CloudUpload,
+    title: "Typed, like the rest",
+    description: "Pass a File to the SDK and the request becomes multipart on its own.",
+  },
+];
 
 const compareRows: { pain: string; relief: string }[] = [
   {
@@ -200,6 +231,48 @@ export default ilha
                   same builder chain.
                 </p>
                 <LandingBuildPreview />
+              </LayerCard.Content>
+            </LayerCard>
+
+            <LayerCard class="h-full overflow-hidden md:col-span-2">
+              <LayerCard.Title>
+                <span class="flex items-start gap-2.5 text-left leading-snug sm:items-center sm:gap-3">
+                  <span class="bg-areia-control flex size-6 shrink-0 items-center justify-center rounded-lg">
+                    <Icon icon={Upload} class="size-4" />
+                  </span>
+                  File uploads, without a second service
+                </span>
+              </LayerCard.Title>
+              <LayerCard.Content class="flex-1 text-[0.9375rem] leading-relaxed sm:text-base sm:leading-7">
+                <div class="grid gap-6 md:grid-cols-2 md:items-center md:gap-8">
+                  <div class="space-y-5">
+                    <p class="m-0">
+                      <code>.files()</code> mounts upload, download, listing, and attachments over
+                      the storage you already have — no signed-URL dance, no bucket SDK leaking into
+                      your handlers.
+                    </p>
+                    <ul class="m-0 grid list-none gap-3.5 p-0">
+                      {uploadTraits.map((trait) => (
+                        <li class="flex items-start gap-3">
+                          <span class="bg-areia-control mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg">
+                            <Icon icon={trait.icon} class="size-3.5" />
+                          </span>
+                          <span class="min-w-0">
+                            <span class="text-areia-foreground block text-sm leading-snug font-medium">
+                              {trait.title}
+                            </span>
+                            <span class="text-areia-subtle block text-sm leading-relaxed">
+                              {trait.description}
+                            </span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div class="min-w-0">
+                    <LandingFilesPreview />
+                  </div>
+                </div>
               </LayerCard.Content>
             </LayerCard>
           </div>

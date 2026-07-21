@@ -53,6 +53,24 @@ schema("1.0.0")
 
 The tables are typed like hand-written ones (exported as `AuthTables`), so `context.db.query.user` etc. stay fully typed.
 
+### File tables
+
+`.files()` is the same idea for uploads: it registers a `file` metadata table — `id`, `key` (unique, the storage key the bytes live under), `name`, `type`, `size`, `userId`, plus `timestamps(t)` — for blobs kept in an object store. Only the pointer and its ownership live in the database.
+
+```ts
+const v1_0 = schema("1.0.0")
+  .auth()
+  .table("post", (t) => ({ id: t.text().primaryKey(), title: t.text() }))
+  .files({ attachTo: ["post"] })
+  .build();
+```
+
+`attachTo` links files to existing tables — each name `x` gets a pivot `x_file` (`fileId`, `entityId`, a nullable `role` so one table can carry several kinds of attachment, and an integer `position` for ordered galleries) plus a `manyToMany` relation both ways. It only accepts tables already declared on the builder; unknown names are a type error.
+
+`owner` (default `true`) adds `file.userId` and the `user` ↔ `file` relations, so it requires `.auth()`. Pass `owner: false` for files with no per-user owner. The tables are exported as `FileTables`.
+
+Registering the tables is all the schema does — serving the bytes is [`.files()`](/guide/files) on the builder chain.
+
 ### Column types
 
 `text` · `varchar` · `integer` · `serial` · `boolean` · `timestamp` · `jsonb` · `uuid`
@@ -172,4 +190,4 @@ When `update` or `delete` is `"owner"`, the existing row is fetched first and `r
 
 The six generated procedures are strictly typed from the table's columns: rows come back with each column's TS type, `create` inputs omit the serial primary key, defaulted columns, and the `ownerColumn` (auto-filled from the session), and `get`/`update`/`delete` take `{ <pk>: value }` typed from the declared primary key. Every client — `@outerjs/sdk` in the browser or `outer.client()` on the server — inherits these types.
 
-Next: wire up [Auth & Permissions](/guide/auth), or write custom [Procedures](/guide/procedures).
+Next: wire up [Auth & Permissions](/guide/auth), write custom [Procedures](/guide/procedures), or accept [File Uploads](/guide/files).

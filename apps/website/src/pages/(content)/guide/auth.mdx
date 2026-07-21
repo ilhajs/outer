@@ -49,17 +49,35 @@ Patterns are matched against the full `Host` header including port — bare `"lo
 
 ## Reading the session in procedures
 
-Use `.middleware()` to load the session once and add it to `context`:
+`.auth()` resolves the session **once per request** and shares it with every procedure, raw route, and permission check. No middleware, no `getSession` call:
 
 ```ts
-.auth()
-.middleware(async ({ context, next }) => {
-  const session = await context.auth.api.getSession({ headers: context.headers });
-  return next({ context: { user: session?.user } });
-})
+.procedure("user.me", (base) => base.handler(({ context }) => context.user))
+```
+
+`context.user` and `context.session` are `null` for anonymous callers (and always `null` when `.auth()` was never called). After `.auth()` their types narrow from optional to `SessionUser | null` / `UserSession | null`. Because the lookup is shared, a request costs exactly one session query however many procedures or checks read it.
+
+Use `.middleware()` for everything else you want on `context` — KV handles, feature flags, a tenant lookup — and let auth stay out of it:
+
+```ts
+.middleware(async ({ next }) => next({ context: { kv: useStorage() } }))
 ```
 
 Fields added via `next({ context: { ... } })` are merged into every subsequent `.procedure()` handler's context.
+
+## Permissions on `.procedure()`
+
+Custom procedures take the same permission vocabulary as resources, as a third argument — so the guard is declared, not written by hand in the handler:
+
+```ts
+.procedure("post.publish", (base) => base.handler(...), { permission: "authenticated" })
+.procedure("stats.purge",  (base) => base.handler(...), { permission: "admin", roles: ["staff"] })
+.procedure("team.invite",  (base) => base.handler(...), {
+  permission: ({ context }) => context.user?.email.endsWith("@acme.com") ?? false,
+})
+```
+
+`"authenticated"` returns `401` when signed out; `"admin"` and function permissions return `403`. There's no `"owner"` here — that needs a row, which a bare procedure doesn't have; use `.resource()` or check inside the handler. Non-public permissions are registered at `.build()`, so forgetting `.auth()` throws at startup rather than failing per request.
 
 ## Permissions on `.resource()`
 
@@ -91,4 +109,4 @@ new Outer({ db: pglite(), cors: { origins: ["https://admin.example.com"] } })
 
 For a dashboard hosted on another origin, list its origin in `cors` and prefer the Better Auth `bearer` plugin over cross-site cookies. See [SPEC.md](https://github.com/ilhajs/outer/blob/main/SPEC.md) for the full procedure reference.
 
-Next: register custom [Procedures](/guide/procedures), or stream updates with [Realtime](/guide/realtime).
+Next: register custom [Procedures](/guide/procedures), accept [File Uploads](/guide/files), or stream updates with [Realtime](/guide/realtime).

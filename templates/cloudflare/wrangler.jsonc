@@ -8,4 +8,6 @@
     "bindings": [{ "name": "OUTER_DO", "class_name": "OuterDO" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["OuterDO"] }],
+  // Bytes for `.files()` uploads. Create it once with `wrangler r2 bucket create outer-files`.
+  "r2_buckets": [{ "binding": "OUTER_FILES", "bucket_name": "outer-files" }],
 }

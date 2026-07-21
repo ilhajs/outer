@@ -7,7 +7,7 @@ tags: [procedure, route, context, orm, sola]
 
 # Procedures & Context
 
-## `.procedure(name, cb)`
+## `.procedure(name, cb, options?)`
 
 Registers an oRPC procedure. `name` supports dot-notation — `"user.me"` nests the procedure as `{ user: { me: proc } }`, served at `POST /rpc/user/me`. Multiple procedures under the same namespace are deep-merged.
 
@@ -18,11 +18,13 @@ Registers an oRPC procedure. `name` supports dot-notation — `"user.me"` nests 
 
 `.procedure()` fully infers each procedure's `.input()`/`.output()` types into the router, so `client.foo(...)`, `client.user.me(...)`, etc. are properly typed on `RouterClient<Router>` — see [`outer.router`](#outerrouter-type-extraction) below.
 
+An optional third argument guards the procedure declaratively — `{ permission: "authenticated" | "admin" | fn, roles? }`; see [Permissions on `.procedure()`](/guide/auth#permissions-on-procedure).
+
 Registering the same dot-path twice — whether via two `.procedure()` calls, or a `.procedure()` name colliding with a `.resource()`-generated action — throws immediately rather than silently letting the second registration overwrite the first.
 
 ## `.route(method, path, handler)`
 
-Mounts a raw H3 route alongside `.procedure()`-defined RPC routes — for webhooks, custom REST endpoints, or anything that doesn't fit the oRPC shape. `handler` receives the H3 `event` and the same `context` (`headers`, `db`, `auth`) available in procedure handlers. Registered before `/rpc/**`, so it takes precedence on overlapping paths.
+Mounts a raw H3 route alongside `.procedure()`-defined RPC routes — for webhooks, custom REST endpoints, or anything that doesn't fit the oRPC shape. `handler` receives the H3 `event` and the same `context` (`headers`, `db`, `auth`, `user`, `session`, `storage`) available in procedure handlers — including the already-resolved session, so raw routes authorize the same way procedures do. Registered before `/rpc/**`, so it takes precedence on overlapping paths.
 
 ```ts
 .route("post", "/webhooks/stripe", async (event, { db }) => {
@@ -41,8 +43,13 @@ type OuterRpcContext<TDB> = {
   headers: Headers;
   auth?: OuterAuth; // Better Auth instance; undefined if .auth() was not called
   db: OuterDB<TDB>; // Kysely<TDB> + .query (Sola)
+  user: SessionUser | null; // resolved once per request by .auth()
+  session: UserSession | null; // null when anonymous, or when .auth() was never called
+  storage?: OuterStorage; // the object store passed to new Outer({ storage })
 };
 ```
+
+`user` and `session` need no middleware — see [Auth & Permissions](/guide/auth#reading-the-session-in-procedures). `storage` is the same store [`.files()`](/guide/files) writes through, so a custom procedure can read or write blobs alongside the built-in file API.
 
 ### `context.db`
 
@@ -211,4 +218,4 @@ The `/rpc/**` handler speaks oRPC's own wire protocol, which generic OpenAPI cli
 
 Enabling `.openapi()` also mounts the router at `/rest/**` via oRPC's `OpenAPIHandler`, so the spec is directly callable with plain JSON (e.g. `POST /rest/post/create` with `{"title": "..."}`), and the spec advertises `<baseUrl>/rest` as its server URL. `/rpc/**` remains the typed-SDK transport.
 
-Next: stream updates with [Realtime](/guide/realtime), or see [Deployment](/guide/deployment) for hosting options.
+Next: stream updates with [Realtime](/guide/realtime), accept [File Uploads](/guide/files), or see [Deployment](/guide/deployment) for hosting options.

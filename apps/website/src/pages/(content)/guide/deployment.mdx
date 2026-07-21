@@ -1,7 +1,7 @@
 ---
 title: Deployment
 description: Deploy Outer with the zero-infra pglite() default, swap in custom Kysely dialects for serverless platforms, and embed the handler in any host framework.
-order: 6
+order: 7
 tags: [deploy, pglite, dialects, vps, serverless]
 ---
 
@@ -47,8 +47,8 @@ Kysely also ships `mysql`/`mssql` dialects, and Better Auth supports them — bu
 
 ### Verified templates
 
-- `templates/cloudflare` — Cloudflare Workers with Durable Objects
-- `templates/vercel-neon` — Vercel Functions with Neon Postgres
+- `templates/cloudflare` — Cloudflare Workers with Durable Objects (R2 for uploads)
+- `templates/vercel-neon` — Vercel Functions with Neon Postgres (Vercel Blob for uploads)
 
 Both ship with a `deploy` script:
 
@@ -58,6 +58,20 @@ $ npm run deploy
 # templates/cloudflare   -> wrangler deploy
 # templates/vercel-neon  -> vercel deploy --prod
 ```
+
+## Storage for uploads
+
+The same persistence question applies to file bytes: [`.files()`](/guide/files) needs an `OuterStorage` on the constructor, and the right backing store is the one your host actually persists.
+
+| Host                   | Backing store                                      | Adapter                               |
+| ---------------------- | -------------------------------------------------- | ------------------------------------- |
+| VPS / Coolify / Docker | Local disk via unstorage `fs-lite`                 | `fromUnstorage(createStorage(...))`   |
+| Nitro                  | A Nitro storage mount                              | `fromUnstorage(useStorage("fs"))`     |
+| Cloudflare Workers     | R2 bucket binding                                  | small object literal over the binding |
+| Vercel Functions       | [Vercel Blob](https://vercel.com/docs/vercel-blob) | small object literal over the SDK     |
+| Anything S3-compatible | S3, R2, Backblaze B2, MinIO                        | `fromS3(client, commands, bucket)`    |
+
+On a VPS the local-disk driver is the zero-infra match for `pglite()` — mount the directory as a volume if you containerize. On serverless, local disk is as unavailable for bytes as it is for the database, so an object store isn't optional there.
 
 ## Embedding in a host framework
 
@@ -77,10 +91,9 @@ import { runTask } from "nitro/task";
 const outer = new Outer(...)
   .schema(v1_0)
   .auth({ secret: useRuntimeConfig().authSecret })
-  .middleware(async ({ context, next }) => {
-    const kv = useStorage();
-    return next({ context: { kv, runTask } });
-  })
+  // .auth() already resolves context.user/context.session — middleware is for
+  // host utilities, not for the session
+  .middleware(async ({ next }) => next({ context: { kv: useStorage(), runTask } }))
   .procedure("foo", (base) =>
     base.handler(async ({ context }) => {
       await context.kv.setItem("foo", "bar");
@@ -102,6 +115,7 @@ If your frontend is deployed on a different origin than the Outer server (a stat
 | `ALL`  | `/api/auth/**`  | Better Auth handler (only mounted when `.auth()` was called)                  |
 | `ALL`  | `/rpc/**`       | oRPC handler (prefix `/rpc`)                                                  |
 | `ALL`  | `/rest/**`      | Plain-JSON OpenAPI handler (only mounted when `.openapi()` was called)        |
+| `GET`  | `/files/:id`    | File download (only mounted when `.files()` was called; path configurable)    |
 
 ## Roadmap
 

@@ -1,5 +1,6 @@
 import { neon } from "@neondatabase/serverless";
-import { Outer, schema, type InferRouter, timestamps } from "@outerjs/server";
+import { Outer, schema, type InferRouter, type OuterStorage, timestamps } from "@outerjs/server";
+import { del, get, put } from "@vercel/blob";
 import { NeonDialect } from "kysely-neon";
 import { z } from "zod";
 
@@ -9,8 +10,38 @@ const env = z
     DATABASE_URL: z.string(),
     BASE_URL: z.string().default("http://localhost:3000"),
     AUTH_SECRET: z.string().default("dev-only-secret"),
+    // Added to the project automatically when you create a Blob store; pull it locally
+    // with `vercel env pull`. The @vercel/blob SDK reads it from process.env on its own.
+    BLOB_READ_WRITE_TOKEN: z.string(),
   })
   .parse(process.env);
+
+/**
+ * `OuterStorage` is three methods on purpose, so a backend needs no adapter package.
+ * Vercel Blob's pathname-addressed API maps onto it directly — Outer's storage keys
+ * become blob pathnames verbatim, so `addRandomSuffix` stays off.
+ *
+ * `access: "private"` keeps the blob URLs unguessable and unreadable without the token:
+ * bytes reach the browser only through Outer's own `GET /files/:id`, which applies the
+ * `.files()` permissions. A public store would leave the blob URL readable by anyone.
+ */
+const vercelBlob: OuterStorage = {
+  async get(key) {
+    const blob = await get(key, { access: "private" });
+    if (!blob?.stream) return null;
+    return new Uint8Array(await new Response(blob.stream).arrayBuffer());
+  },
+  async set(key, bytes) {
+    // put() takes a Blob/Buffer/stream, not a bare Uint8Array; Buffer.from views the
+    // same memory rather than copying it
+    await put(key, Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength), {
+      access: "private",
+      addRandomSuffix: false,
+      allowOverwrite: true,
+    });
+  },
+  delete: (key) => del(key),
+};
 
 const v1_0_0 = schema("1.0.0")
   // Better Auth core tables + admin plugin fields (role, banned, impersonatedBy, ...)
@@ -20,6 +51,9 @@ const v1_0_0 = schema("1.0.0")
     title: t.text(),
     ...timestamps(t),
   }))
+  // Adds the `file` metadata table plus a `post_file` pivot. Neon holds only the
+  // metadata and ownership; the bytes go to Vercel Blob (see `storage` below).
+  .files({ attachTo: ["post"] })
   .build();
 
 const outer = new Outer({
@@ -29,6 +63,8 @@ const outer = new Outer({
     dialect: new NeonDialect({ neon: neon(env.DATABASE_URL) }),
     kind: "postgres", // Neon is real Postgres
   },
+  // Serverless functions have no persistent disk, so uploaded bytes go to Vercel Blob
+  storage: vercelBlob,
 })
   .schema(v1_0_0)
   .auth({
@@ -37,6 +73,9 @@ const outer = new Outer({
   })
   .openapi()
   .admin()
+  // Adds file.upload / list / get / delete / attach / detach plus GET /files/:id.
+  // Files default to private: only the uploader can read or delete them.
+  .files({ maxBytes: 10 * 1024 * 1024 })
   .resource("post")
   .procedure("post.count", (base) =>
     base.output(z.object({ count: z.number() })).handler(async ({ context }) => {

@@ -38,11 +38,11 @@ const me = await client.user.me();
   mdx: {
     lang: "typescript",
     code: `.auth({ secret: process.env.AUTH_SECRET! })
-.middleware(async ({ context, next }) => {
-  const session = await context.auth.api
-    .getSession({ headers: context.headers });
-  return next({ context: { user: session?.user } });
-})`,
+// the session is resolved once per request — no middleware
+.procedure("user.me", (base) =>
+  base.handler(({ context }) => context.user),
+  { permission: "authenticated" },
+)`,
   },
   build: {
     lang: "shell",
@@ -51,6 +51,17 @@ const me = await client.user.me();
 # templates/cloudflare   -> wrangler deploy
 # templates/vercel-neon  -> vercel deploy --prod
 # any other host         -> node dist/server.js`,
+  },
+  files: {
+    lang: "typescript",
+    code: `// server — one call mounts the whole upload surface
+.files({ maxBytes: 10 * 1024 * 1024 })
+
+// client — no FormData, no upload endpoint to write
+const { url } = await client.file.upload({
+  file,
+  attach: { table: "post", entityId: post.id },
+});`,
   },
   realtime: {
     lang: "typescript",

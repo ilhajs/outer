@@ -1,5 +1,4 @@
 import { v1_0_0 } from "$lib/schemas/v1-0-0";
-import { v1_1_0 } from "$lib/schemas/v1-1-0";
 import { fromUnstorage, Outer, type InferRouter } from "@outerjs/server";
 import { pglite } from "@outerjs/server/pglite";
 import { admin, emailOTP } from "better-auth/plugins";
@@ -31,7 +30,6 @@ const outer = new Outer({
   storage: fromUnstorage(useStorage("fs")),
 })
   .schema(v1_0_0)
-  .schema(v1_1_0)
   .auth({
     secret: env.authSecret,
     plugins: [

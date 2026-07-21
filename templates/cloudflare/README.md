@@ -7,15 +7,18 @@ Outer's default database, [PGlite](https://pglite.dev), needs a persistent local
 - **`src/worker.ts`** — everything Workers-side, in one file:
   - `OuterDO`, a `DurableObject` subclass. `new Outer({ db: { dialect: new DurableObjectSqliteDialect(ctx.storage.sql), kind: "sqlite" } })` is built inside its constructor (it needs `ctx.storage.sql`, which only exists once the DO instance exists), then `ctx.blockConcurrencyWhile` runs migrations once before the DO serves its first request.
   - The default-exported `fetch` handler, which routes every request to one `OuterDO` instance (`idFromName("singleton")`) so there's a single consistent database, the DO equivalent of PGlite's one local data file. Swap that for per-tenant `idFromName(orgId)` routing if you want isolated databases per customer instead.
-- **`src/schema.ts`** — the Outer schema (one `post` table).
-- **`wrangler.jsonc`** — declares the `OUTER_DO` binding and, critically, `"new_sqlite_classes"` (not `"new_classes"`) in `migrations` — that's what gives the DO SQLite storage (`ctx.storage.sql`) instead of the older KV-backed DO storage.
+- **`src/schema.ts`** — the Outer schema (one `post` table, plus the `file` tables from `.files()`).
+- **`wrangler.jsonc`** — declares the `OUTER_DO` and `OUTER_FILES` bindings and, critically, `"new_sqlite_classes"` (not `"new_classes"`) in `migrations` — that's what gives the DO SQLite storage (`ctx.storage.sql`) instead of the older KV-backed DO storage.
 
 ## Getting started
 
 ```bash
 npm install
+npx wrangler r2 bucket create outer-files   # backs `.files()` uploads; once per account
 npm run dev      # wrangler dev — local Workers runtime, DO SQLite included
 ```
+
+`wrangler dev` simulates R2 locally, so the bucket only has to exist before you deploy.
 
 Open [http://localhost:8787/openapi.json](http://localhost:8787/openapi.json) to confirm it's up.
 
@@ -32,6 +35,18 @@ npm run deploy    # wrangler deploy — requires `wrangler login` first
 | `npm run types`  | Regenerate `worker-configuration.d.ts` from bindings     |
 
 Run `npm run types` after changing `wrangler.jsonc`'s bindings — `worker-configuration.d.ts` (the `Env` type) is generated, not hand-maintained.
+
+## File uploads
+
+`schema().files({ attachTo: ["post"] })` adds the `file` metadata table and a `post_file` pivot to the DO's SQLite; `.files()` on the chain adds `file.upload` / `list` / `get` / `delete` / `attach` / `detach` plus `GET /files/:id`. Only metadata goes in the Durable Object — the bytes go to R2.
+
+`OuterStorage` is three methods (`get` / `set` / `delete`), so the R2 binding needs no adapter package — `fromR2` in `src/worker.ts` is the whole integration:
+
+```ts
+storage: fromR2(env.OUTER_FILES);
+```
+
+Uploads travel the normal typed client (`client.file.upload({ file })`); oRPC switches the request to `multipart/form-data` on its own. Files are **private by default** — only the uploader can read or delete them, and the download route returns `404` to everyone else. Pass `permissions: { get: "public" }` to `.files()` for world-readable assets.
 
 ## Known rough edges
 

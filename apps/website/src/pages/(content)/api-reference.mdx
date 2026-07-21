@@ -1,7 +1,7 @@
 ---
 title: API Reference
 description: Every option you can pass to new Outer(...), its builder methods, and the schema() builder.
-order: 7
+order: 8
 tags: [api, reference, outer, schema, resource, auth, admin]
 ---
 
@@ -29,6 +29,7 @@ const outer = new Outer({
 | `baseUrl` | `string`                                                    | no       | Public origin of the server. Used as Better Auth's default `baseURL` and as the `servers[].url` (`<baseUrl>/rest`) in the OpenAPI spec.                                                                                                                                      |
 | `db`      | `{ dialect: Dialect; kind: "postgres" \| "sqlite" \| ... }` | **yes**  | A Kysely `Dialect` plus the dialect family it belongs to. `kind` drives DDL generation, Better Auth's schema, and DB error mapping, so it must match the dialect. Use `pglite()` for the zero-infra default; construct the `Dialect` yourself for network Postgres, D1, etc. |
 | `cors`    | `CorsConfig`                                                | no       | Cross-origin browser callers allowed to reach `/rpc/**`, `/api/auth/**`, and the admin API. Also merged into Better Auth's `trustedOrigins` when `.auth()` is used. Without it, no `Access-Control-Allow-Origin` header is set.                                              |
+| `storage` | `OuterStorage`                                              | no       | Object store for file bytes. Surfaced as `context.storage` and used by [`.files()`](#filesconfig), which throws without it. See [File Uploads](/guide/files#storage-adapters).                                                                                               |
 
 ### `CorsConfig`
 
@@ -47,7 +48,7 @@ Embedded, zero-infra Postgres from `@outerjs/server/pglite`. Returns a `{ dialec
 
 ## Builder methods
 
-Documented order: `.schema()` → `.middleware()` → `.procedure()` → `.build()`. `.auth()`, `.openapi()`, `.admin()`, `.route()`, and `.resource()` can appear anywhere before `.build()` (`.resource()` needs a prior `.schema()` that defines the table).
+Documented order: `.schema()` → `.middleware()` → `.procedure()` → `.build()`. `.auth()`, `.openapi()`, `.admin()`, `.files()`, `.route()`, and `.resource()` can appear anywhere before `.build()` (`.resource()` needs a prior `.schema()` that defines the table).
 
 ### `.schema(schemaResult)`
 
@@ -55,7 +56,7 @@ Registers a schema version built with [`schema()`](#schema-builder). Every `.sch
 
 ### `.auth(config)`
 
-Enables Better Auth and mounts `ALL /api/auth/**`. Narrows `context.auth` to non-null.
+Enables Better Auth and mounts `ALL /api/auth/**`. Narrows `context.auth` to non-null, and resolves the session **once per request** into `context.user` / `context.session` — no `getSession` middleware needed, and no extra query no matter how many procedures or permission checks read it.
 
 `AuthConfig` is Better Auth's full `BetterAuthOptions` minus `database` (Outer wires the database itself from your `db` dialect), with these Outer-specific notes:
 
@@ -70,13 +71,22 @@ Enables Better Auth and mounts `ALL /api/auth/**`. Narrows `context.auth` to non
 
 Adds an oRPC middleware to the base context. Whatever the middleware returns via `next({ context })` is merged into `context` for all subsequently defined procedures (and their types).
 
-### `.procedure(name, cb)`
+### `.procedure(name, cb, options?)`
 
 Registers an RPC procedure. Dot notation nests namespaces: `"user.me"` is served at `POST /rpc/user/me`. The callback receives the oRPC base builder — chain `.input()`, `.output()`, `.handler()` on it. Names must be unique; the `_admin` namespace is reserved.
 
+`options` guards the procedure without writing the check by hand:
+
+| Prop         | Type                                                          | Default     | Description                                                                                       |
+| ------------ | ------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------- |
+| `permission` | `"public" \| "authenticated" \| "admin" \| (args) => boolean` | `"public"`  | `"authenticated"` returns `401` when signed out; `"admin"` and function permissions return `403`. |
+| `roles`      | `string[]`                                                    | `["admin"]` | Roles accepted by `"admin"`.                                                                      |
+
+There's no `"owner"` — that needs a row, which a bare procedure doesn't have; use `.resource()` or check inside the handler. Any non-public permission is registered at `.build()`, so forgetting `.auth()` throws at startup instead of failing per request.
+
 ### `.route(method, path, handler)`
 
-Mounts a raw H3 route (webhooks, custom REST endpoints) alongside RPC routes. `handler(event, context)` receives the H3 event and the same `context` (with `db`, `auth`, ...) as procedures. Registered before `/rpc/**`, so it wins on overlapping paths.
+Mounts a raw H3 route (webhooks, custom REST endpoints) alongside RPC routes. `handler(event, context)` receives the H3 event and the same `context` as procedures (`headers`, `db`, `auth`, `user`, `session`, `storage`) — including the already-resolved session, so raw routes authorize exactly like procedures. Registered before `/rpc/**`, so it wins on overlapping paths.
 
 ### `.resource(name, options?)`
 
@@ -108,6 +118,31 @@ Mounts `GET /openapi.json` and a plain-JSON REST surface under `/rest/**` matchi
 | Prop      | Type      | Default | Description                                                                 |
 | --------- | --------- | ------- | --------------------------------------------------------------------------- |
 | `enabled` | `boolean` | `true`  | Pass `import.meta.env.DEV` or similar to gate the spec to dev/staging only. |
+
+### `.files(config?)`
+
+Mounts the upload surface — `file.upload` / `list` / `get` / `delete` / `attach` / `detach` plus `GET /files/:id` — over the tables [`schema().files()`](#filesoptions) registers. Requires an `OuterStorage` on the constructor (or in `config`). Full guide: [File Uploads](/guide/files).
+
+| Prop          | Type                            | Default                                             | Description                                                                                                    |
+| ------------- | ------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `storage`     | `OuterStorage`                  | the constructor's `storage`                         | Overrides the instance-wide store for files only.                                                              |
+| `maxBytes`    | `number`                        | `10 * 1024 * 1024`                                  | Larger uploads are rejected with `413`. Bytes are buffered in memory, so this is a real ceiling.               |
+| `accept`      | `string[]`                      | all types                                           | Allowed MIME types; wildcards like `"image/*"` are accepted.                                                   |
+| `permissions` | `{ upload, list, get, delete }` | upload/list `"authenticated"`, get/delete `"owner"` | Same vocabulary as `.resource()`. `"owner"` makes the download route answer `404` — not `403` — to non-owners. |
+| `path`        | `string` containing `:id`       | `"/files/:id"`                                      | Path of the download route.                                                                                    |
+| `roles`       | `string[]`                      | `["admin"]`                                         | Roles that bypass ownership.                                                                                   |
+
+### `OuterStorage`
+
+Three methods, so core depends on no storage vendor. `fromUnstorage(storage)`, `fromS3(client, commands, bucket)`, and `memoryStorage()` ship with the package; anything else is an object literal.
+
+```ts
+type OuterStorage = {
+  get(key: string): Promise<Uint8Array | null>;
+  set(key: string, bytes: Uint8Array): Promise<void>;
+  delete(key: string): Promise<void>;
+};
+```
 
 ### `.admin(config?)`
 
@@ -160,6 +195,17 @@ Starts a schema version. `version` is a free-form string (e.g. `"1.0.0"`) shown 
 
 Registers the Better Auth core tables (`user`, `session`, `account`, `verification`) with the admin plugin's fields (`user.role/banned/banReason/banExpires`, `session.impersonatedBy`) plus their relations. Extend an auth table by re-declaring extra columns via `.table("user", ...)` after this call — columns merge, yours win on name collisions. Never remove or rename the core auth columns.
 
+### `.files(options?)`
+
+Registers a `file` metadata table for blobs held in an object store — the counterpart to `.auth()` for uploads. Columns: `id` (PK), `key` (unique — the storage key the bytes live under, so a blob can never be double-registered), `name`, `type` (MIME), `size`, `userId` (nullable, references `user`), plus `timestamps(t)`. Exported as `FileTables`.
+
+| Prop       | Type       | Default | Description                                                                                                                                                                                        |
+| ---------- | ---------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `owner`    | `boolean`  | `true`  | Adds `file.userId` plus the `user hasMany file` / `file belongsTo user` relations — so it requires `.auth()`. Pass `false` for files with no per-user owner; the column and relations are omitted. |
+| `attachTo` | `string[]` | `[]`    | Tables files can attach to. Each name `x` gets a pivot `x_file` (`fileId`, `entityId`, nullable `role`, integer `position`) and a `manyToMany` relation both ways. Unknown names are a type error. |
+
+Outer deliberately stops at the schema here: it does not read, write, or serve the bytes. That's [`.files()`](#filesconfig) on the builder chain.
+
 ### `.table(name, define)`
 
 Defines (or extends — re-declaring merges, later wins) a table. `define` receives the column builder `t`:
@@ -206,10 +252,22 @@ Freezes and returns the `SchemaResult` to pass into `.schema()`.
 
 ## Type helpers
 
-| Export                 | Description                                                                                                                           |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `InferRouter<T>`       | Extracts the oRPC router type from an `Outer` or `BuiltOuter` instance — the input to oRPC client creation.                           |
-| `OuterAdminRouter`     | `{ _admin: AdminRouter }` — the router shape for a type-safe admin-only client: `createClient<OuterAdminRouter>({ baseUrl })`.        |
-| `InferDB<T>`           | Maps a schema's tables to Kysely row types.                                                                                           |
-| `AuthTables`           | The table shape `.auth()` registers on the schema builder.                                                                            |
-| `OuterRpcContext<TDB>` | The base procedure context: `{ headers, db, auth? }`. `context.db` is Kysely plus `query` (Sola) and `transact(fn)` for transactions. |
+| Export                 | Description                                                                                                                                                    |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `InferRouter<T>`       | Extracts the oRPC router type from an `Outer` or `BuiltOuter` instance — the input to oRPC client creation.                                                    |
+| `OuterAdminRouter`     | `{ _admin: AdminRouter }` — the router shape for a type-safe admin-only client: `createClient<OuterAdminRouter>({ baseUrl })`.                                 |
+| `InferDB<T>`           | Maps a schema's tables to Kysely row types.                                                                                                                    |
+| `AuthTables`           | The table shape `.auth()` registers on the schema builder.                                                                                                     |
+| `FileTables`           | The table shape `schema().files()` registers — the `file` table plus any `attachTo` pivots.                                                                    |
+| `OuterStorage`         | The three-method object store contract (`get` / `set` / `delete`) accepted by `new Outer({ storage })`.                                                        |
+| `OuterRpcContext<TDB>` | The base procedure context: `{ headers, db, auth?, user, session, storage? }`. `context.db` is Kysely plus `query` (Sola) and `transact(fn)` for transactions. |
+
+### `context.user` / `context.session`
+
+After `.auth()`, both are resolved once per request and shared with every procedure, raw route, and permission check — the types narrow from optional to `SessionUser | null` / `UserSession | null`, so no `?.` dance:
+
+```ts
+.procedure("user.me", (base) => base.handler(({ context }) => context.user))
+```
+
+Both are `null` for anonymous callers, and always `null` when `.auth()` was never called.

@@ -17,6 +17,9 @@ export default defineConfig({
     experimental: {
       tasks: true,
     },
+    // Backs `.files()` uploads, reached via `useStorage("fs")` in src/server.ts.
+    // For object storage in production, swap this driver for `s3` and keep the local
+    // filesystem in dev by moving this mount to `devStorage` — it merges on top.
     storage: {
       fs: {
         driver: "fs-lite",

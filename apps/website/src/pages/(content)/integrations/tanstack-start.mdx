@@ -174,3 +174,5 @@ Route loaders call `listPosts()` and get the in-process path during SSR and an R
 
 - **Self-hosted (VPS, Coolify, Docker)** — the `pglite()` default just works: it writes to local disk, so any long-lived Node/Bun process with a persistent filesystem is a zero-infra deploy. Mount the data directory (`.outer/pglite` by default) as a volume if you containerize.
 - **Serverless/edge targets** — no persistent disk, so swap `pglite()` for a serverless-friendly Kysely dialect: [Neon](https://neon.tech) Postgres (see `templates/vercel-neon`) or a Cloudflare Durable Object (see `templates/cloudflare`). Run migrations from a deploy-time script instead of at cold start.
+
+The same split applies to [file uploads](/guide/files) — local disk via unstorage when self-hosted, an object store (R2, Vercel Blob, any S3-compatible bucket) when not. Pass either as `new Outer({ storage })`.
