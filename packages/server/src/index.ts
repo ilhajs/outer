@@ -329,7 +329,15 @@ export type OpenApiConfig = {
 };
 
 export type CorsConfig = {
-  /** Allowed origins. Also merged into Better Auth's `trustedOrigins` when `.auth()` is used. */
+  /**
+   * Allowed origins. Also merged into Better Auth's `trustedOrigins` when
+   * `.auth()` is used.
+   *
+   * `["*"]` allows every origin — intended for public, unauthenticated APIs.
+   * Combining it with `credentials: true` lets any site make authenticated
+   * requests using a visitor's cookies, so list origins explicitly instead
+   * whenever the API is behind a session.
+   */
   origins: string[];
   credentials?: boolean;
 };
@@ -885,7 +893,10 @@ export class Outer<
         // never serve an ACAO-bearing response to a different origin.
         event.res.headers.set("Vary", "Origin");
         const origin = event.req.headers.get("origin");
-        if (origin && cors.origins.includes(origin)) {
+        // `"*"` matches every origin. The request origin is still echoed back
+        // rather than sent literally, since browsers reject a wildcard
+        // `Access-Control-Allow-Origin` whenever credentials are involved.
+        if (origin && (cors.origins.includes("*") || cors.origins.includes(origin))) {
           event.res.headers.set("Access-Control-Allow-Origin", origin);
           if (cors.credentials) event.res.headers.set("Access-Control-Allow-Credentials", "true");
           event.res.headers.set(

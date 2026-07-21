@@ -266,6 +266,8 @@ new Outer({
 
 Without `cors`, no `Access-Control-Allow-Origin` header is set — same-origin requests (and non-browser clients) are unaffected, but cross-origin browser requests will be blocked by the browser.
 
+`origins: ["*"]` allows every origin, for public APIs meant to be called from anywhere. The request's origin is echoed back rather than sent as a literal `*`, since browsers reject a wildcard `Access-Control-Allow-Origin` on credentialed requests. Combining `["*"]` with `credentials: true` lets any site make authenticated requests using a visitor's cookies — list origins explicitly for anything behind a session.
+
 With `cors`, every response carries `Vary: Origin` (so shared caches never serve an origin-specific response to a different origin), allowed origins get `Access-Control-Max-Age: 600` on preflights, and only real preflights (OPTIONS with `Access-Control-Request-Method`) are short-circuited with `204` — custom `.route("OPTIONS", ...)` handlers still receive plain OPTIONS requests.
 
 ---

@@ -318,6 +318,30 @@ describe("cors", () => {
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
   });
 
+  test('echoes any origin when the allow-list is ["*"]', async () => {
+    const app = new Outer({
+      name: "Test",
+      baseUrl: "http://localhost",
+      db: await postDb(),
+      cors: { origins: ["*"], credentials: true },
+    })
+      .schema(s)
+      .procedure("ping", (base) => base.handler(async () => "pong"))
+      .build();
+
+    const res = await app.handle(
+      new Request("http://localhost/rpc/ping", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://anything.test" },
+        body: JSON.stringify({ json: {} }),
+      }),
+    );
+    // Echoed, never a literal "*" — browsers reject that with credentials.
+    expect(res.headers.get("access-control-allow-origin")).toBe("https://anything.test");
+    expect(res.headers.get("access-control-allow-credentials")).toBe("true");
+    expect(res.headers.get("vary")).toBe("Origin");
+  });
+
   test("keeps CORS headers on error responses", async () => {
     const app = new Outer({
       name: "Test",

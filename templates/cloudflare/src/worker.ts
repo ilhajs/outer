@@ -46,6 +46,7 @@ export class OuterDO extends DurableObject<Env> {
         dialect: new DurableObjectSqliteDialect(ctx.storage.sql as any),
         kind: "sqlite",
       },
+      cors: { origins: ["*"], credentials: true },
       // Uploaded bytes go to R2, not the DO — see the OUTER_FILES binding in wrangler.jsonc
       storage: fromR2(env.OUTER_FILES),
     })
