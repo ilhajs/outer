@@ -39,12 +39,7 @@ export type { FilesConfig, FilesRouter, FilePermission, FileRecord } from "./fil
 /** Throw from a handler to return a specific HTTP status instead of a 500. */
 export { ORPCError };
 export type { ApiKeyTable, AuthOptions, AuthTables, FileTables, FilesOptions } from "./schema";
-/**
- * Marks a procedure for MCP exposure — `mcp.tool()`, `mcp.resource()`,
- * `mcp.prompt()`. Re-exported from `orpc-mcp` so `.mcp()` users need only one
- * import. Requires `orpc-mcp` to be installed.
- */
-export { mcp } from "orpc-mcp";
+export { mcp };
 export { parseSet, toSet } from "./schema";
 export type { ResourceOptions, DialectKind };
 export type {
@@ -365,13 +360,50 @@ async function loadOpenApiModules() {
 }
 
 /**
+ * Marks a procedure for MCP exposure — `mcp.tool()`, `mcp.resource()`,
+ * `mcp.prompt()`. Mirrors `orpc-mcp`'s `mcp` helper (a pure `~mcp` meta-plugin
+ * factory) so importing `@outerjs/server` never pulls in the optional peer —
+ * bundlers targeting Cloudflare Workers would fail to resolve it otherwise.
+ */
+const mcp: typeof import("orpc-mcp").mcp = {
+  tool: (meta = {}) => createMcpMetaPlugin({ ...meta, type: "tool" }),
+  resource: (meta) => createMcpMetaPlugin({ ...meta, type: "resource" }),
+  prompt: (meta = {}) => createMcpMetaPlugin({ ...meta, type: "prompt" }),
+};
+
+function createMcpMetaPlugin(incoming: any): any {
+  return {
+    name: "~mcp",
+    init(meta: any) {
+      const existing = meta["~mcp"];
+      const annotations =
+        existing?.annotations && incoming.annotations
+          ? { ...existing.annotations, ...incoming.annotations }
+          : "annotations" in incoming
+            ? incoming.annotations
+            : existing?.annotations;
+      return {
+        ...meta,
+        "~mcp": {
+          ...existing,
+          ...incoming,
+          ...(annotations !== undefined ? { annotations } : {}),
+        },
+      };
+    },
+  };
+}
+
+/**
  * `orpc-mcp` and `@orpc/zod` are optional peer dependencies — only needed when
  * `.mcp()` is enabled, so they're loaded lazily on the first request.
  */
 async function loadMcpModules() {
   try {
     const [mcpFetch, orpcZod] = await Promise.all([
-      import("orpc-mcp/fetch" as string),
+      // Indirection keeps bundlers (esbuild/wrangler) from statically resolving
+      // this optional peer when `.mcp()` is unused.
+      import(/* @vite-ignore */ `${"orpc-mcp"}/fetch`),
       import("@orpc/zod"),
     ]);
     return {
