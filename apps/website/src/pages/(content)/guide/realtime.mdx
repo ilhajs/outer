@@ -9,6 +9,8 @@ tags: [realtime, sse, event-iterator, eventpublisher]
 
 Outer supports realtime streaming via oRPC's built-in event iterator (SSE) support. No additional infrastructure is needed — the existing `/rpc/**` handler streams async generators automatically.
 
+Two ways to stream, depending on where the truth lives. **[Live queries](/guide/procedures#live-queries)** (`context.db.query.post.live()`) follow the _database_ — you subscribe to a query and every change reaches subscribers, whatever caused it. **`EventPublisher`**, below, follows your _application_ — you publish explicitly, which is what you want for events that aren't a row change (a job finishing, a notification, a presence ping).
+
 ## Basic event stream
 
 ```ts

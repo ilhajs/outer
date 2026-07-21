@@ -33,6 +33,7 @@ Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`
 | `baseUrl`    | `string`                 | —             | Default `baseURL` passed to Better Auth when `.auth()` is called (override per-call via `.auth({ baseURL })`) |
 | `db.dialect` | `Dialect`                | —             | Required. A Kysely `Dialect` — see below                                                                      |
 | `db.kind`    | `"postgres" \| "sqlite"` | —             | Required. Drives DDL generation, Better Auth's schema, and DB error mapping — must match `db.dialect`         |
+| `db.live`    | `LiveProvider`           | —             | Change feed backing [live queries](#live-queries). `pglite()` supplies one; without it `live*()` throws       |
 | `cors`       | `CorsConfig`             | —             | Cross-origin browser callers allowed to reach `/rpc/**`, `/api/auth/**`, and the admin API — see CORS below   |
 | `storage`    | `OuterStorage`           | —             | Object store for file bytes — surfaced as `context.storage` and used by `.files()`                            |
 
@@ -49,10 +50,22 @@ This is the path to reach for first; it's what makes Outer deployable to a VPS/C
 
 `@electric-sql/pglite` and `@electric-sql/pglite-pgvector` are **optional peer dependencies**: apps that use `pglite()` must install them themselves (`bun add @electric-sql/pglite @electric-sql/pglite-pgvector`), and apps on other dialects (Durable Objects, Neon, network Postgres) never download the WASM at all.
 
-Two extensions are loaded by default:
+Two extensions are loaded into the PGlite instance by default, so lower-level Postgres features are available without constructing your own client:
 
-- **live** (`@electric-sql/pglite/live`) — reactive queries, available on the underlying PGlite client.
-- **vector** (`@electric-sql/pglite-pgvector`) — pgvector. `CREATE EXTENSION IF NOT EXISTS vector` is issued at construction, ahead of any other query, so `vector` columns and operators are usable from migrations onward.
+- **vector** (`@electric-sql/pglite-pgvector`) — pgvector. `CREATE EXTENSION IF NOT EXISTS vector` is issued at construction, queued ahead of any dialect query, so `vector` columns and the distance operators (`<->`, `<=>`, `<#>`) are usable from the first migration onward. Reachable through ordinary SQL — declare the column with `sql` in a migration or `context.db` query; the schema builder has no `t.vector()` column type yet.
+
+  ```ts
+  await context.db
+    .selectFrom("doc")
+    .select("id")
+    .orderBy(sql`embedding <-> ${sql.lit("[1,2,3]")}`)
+    .limit(5)
+    .execute();
+  ```
+
+- **live** (`@electric-sql/pglite/live`) — reactive queries. Surfaced as [`context.db.query.<table>.live()`](#live-queries); no need to touch the extension directly.
+
+`pglite()` returns `{ dialect, kind, live, client }`. `live` is the `LiveProvider` Sola uses; `client` is the PGlite instance itself, for anything neither the query builder nor Sola covers (Kysely's `PGliteDialect` keeps its own reference private, so this is the only handle).
 
 ### Custom dialects
 
@@ -218,14 +231,15 @@ Auto-generates six CRUD procedures for a schema table. `name` must match a table
 // Registers: post.list, post.get, post.create, post.createMany, post.update, post.delete
 ```
 
-| Procedure           | Input                                            | Output        | Description                    |
-| ------------------- | ------------------------------------------------ | ------------- | ------------------------------ |
-| `{name}.list`       | `{ where?, orderBy?, take?, skip?, include? }`   | `Row[]`       | Filtered/ordered `SELECT`      |
-| `{name}.get`        | `{ <pk>: ..., include? }`                        | `Row \| null` | Fetch by primary key           |
-| `{name}.create`     | Row minus serial PK, defaults, and `ownerColumn` | `Row`         | `INSERT ... RETURNING *`       |
-| `{name}.createMany` | `{ data: createInput[] }` (1–1000 rows)          | `Row[]`       | Batch `INSERT ... RETURNING *` |
-| `{name}.update`     | `{ where: { <pk> }, data: partialUpdateInput }`  | `Row`         | `UPDATE ... RETURNING *`       |
-| `{name}.delete`     | `{ <pk>: ... }`                                  | `Row`         | `DELETE ... RETURNING *`       |
+| Procedure           | Input                                            | Output            | Description                                      |
+| ------------------- | ------------------------------------------------ | ----------------- | ------------------------------------------------ |
+| `{name}.list`       | `{ where?, orderBy?, take?, skip?, include? }`   | `Row[]`           | Filtered/ordered `SELECT`                        |
+| `{name}.get`        | `{ <pk>: ..., include? }`                        | `Row \| null`     | Fetch by primary key                             |
+| `{name}.create`     | Row minus serial PK, defaults, and `ownerColumn` | `Row`             | `INSERT ... RETURNING *`                         |
+| `{name}.createMany` | `{ data: createInput[] }` (1–1000 rows)          | `Row[]`           | Batch `INSERT ... RETURNING *`                   |
+| `{name}.update`     | `{ where: { <pk> }, data: partialUpdateInput }`  | `Row`             | `UPDATE ... RETURNING *`                         |
+| `{name}.delete`     | `{ <pk>: ... }`                                  | `Row`             | `DELETE ... RETURNING *`                         |
+| `{name}.live`       | `{ where?, orderBy?, take? }`                    | stream of `Row[]` | `list` as a live query — only when `live` is set |
 
 Input types are derived from column definitions at build time. `serial` primary key columns, columns with `.default()`, and `ownerColumn` are omitted from create input. Update `data` accepts any non–serial-PK column (including columns with `.default()`, such as boolean flags); `ownerColumn` is still omitted from update input.
 
@@ -237,6 +251,32 @@ Input types are derived from column definitions at build time. `serial` primary 
 - `include` — see below.
 
 `list` defaults to returning 50 rows and caps `take` at 100, and caps `skip` at 10000 so deep offsets can't force full table scans — pass `listLimit: { default, max, maxSkip }` in `options` to change these. This prevents an unbounded `SELECT *` on large tables; use `.procedure()` with `context.db.query[table].paginate(...)` directly if you need cursor pagination with metadata.
+
+### `live` — `list` as a stream
+
+Opt in with `live: true` (or `live: { ... }`) to register `{name}.live`: the same query as `list`, re-emitted on every change that affects the result set. Built on [Sola's live queries](#live-queries), so it needs a dialect with a `LiveProvider` (`pglite()` has one).
+
+```ts
+.resource("post", {
+  permissions: { list: "owner" },
+  ownerColumn: "userId",
+  live: true,
+})
+```
+
+It is **gated by the `list` permission**, owner scoping included — there is no separate `live` permission to forget. Owner scoping lands in the SQL `where`, so a subscriber is only ever sent their own rows.
+
+| Option         | Type              | Default | Description                                                                                           |
+| -------------- | ----------------- | ------- | ----------------------------------------------------------------------------------------------------- |
+| `revalidateMs` | `number \| false` | `30000` | How often to re-check the caller's permission while the stream is open. `false` disables re-checking. |
+| `max`          | `number`          | `100`   | Max concurrent subscriptions for this resource; beyond it, subscribers get `TOO_MANY_REQUESTS`.       |
+
+Two behaviours worth knowing before exposing this publicly:
+
+- **A subscription can outlive the session that opened it.** The permission check at subscribe time is not enough — an SSE connection stays open for hours, so a user who signs out, is banned, or loses a role would keep receiving rows. Hence `revalidateMs`: the check re-runs on that interval and the stream ends with `401`/`403` when it fails. The timer races the wait for the next change, so an **idle** subscription is cut just as promptly as a busy one — a revoked session doesn't get to sit on an open connection until the table next changes. Each re-check costs one session lookup, and it's skipped entirely when `list` is `"public"`.
+- **Owner scoping filters rows, not wakeups.** A write by _any_ user to the table re-runs every subscriber's query. Nothing leaks — the `where` is applied in SQL, so other users' rows never appear — but a busy table wakes every subscription. `max` exists because each one holds a database view open, and PGlite is a single embedded instance.
+
+`include` is not available on `live` (relations are separate queries, which one subscription can't watch), and neither is `skip`.
 
 `list` and `get` accept `include: { relatedTable: true }` for relations declared on the table via `.relation()` in the schema **and** opted in via `includable: ["relatedTable"]` in the resource options — `hasMany`/`manyToMany` relations come back as arrays, `hasOne`/`belongsTo` as an object or `null`. Relations are not includable by default because included rows are returned as-is, without being checked against the related resource's own permission rules — only opt in relations whose rows are safe to expose alongside this one. Unknown or non-includable relation names are rejected with a `400`; naming a nonexistent relation in `includable` throws at `.resource()` time. When nothing is includable, `include` is not part of the input schema.
 
@@ -712,6 +752,48 @@ Result shape:
 ```
 
 Cursors are opaque base64-encoded strings derived from `orderBy` column values. Multi-column `orderBy` uses correct row-comparison keyset semantics — always include a unique column (e.g. `id`) as the final `orderBy` entry to guarantee stable pages.
+
+### Live queries
+
+`live()` is `findMany()` as a stream: it emits the full result set immediately, then re-emits whenever a change affects it. Same arguments, same query — the SQL is built by the same code path, so a live stream and a one-shot read can't drift apart.
+
+```ts
+.procedure("post.live", (base) =>
+  base.handler(({ context, signal }) =>
+    context.db.query.post.live({ where: { done: false }, orderBy: [{ id: "desc" }], take: 20 }, { signal }),
+  ),
+)
+```
+
+Because it returns an `AsyncIterable`, a handler can return it directly and oRPC streams it over SSE — no `EventPublisher`, and no need for every mutation path to remember to publish. The database is the source of truth.
+
+| Method                        | Emits     |
+| ----------------------------- | --------- |
+| `live(args?, options?)`       | `T[]`     |
+| `liveCount(args?, options?)`  | `number`  |
+| `liveExists(args?, options?)` | `boolean` |
+
+`options.signal` ends the stream and releases the underlying subscription; pass a procedure's `signal` so a disconnecting client tears its query down. Breaking out of a `for await` loop releases it too.
+
+Emissions **coalesce**: a live query's payload is a snapshot, not an event log, so ticks arriving while the consumer is busy collapse into the newest one. Memory stays bounded no matter how fast writes land.
+
+**Requires a `LiveProvider`.** `pglite()` ships one. On dialects without one, `live*()` throws `NOT_IMPLEMENTED` rather than silently degrading to a one-shot read. To supply your own — Postgres `LISTEN`/`NOTIFY`, or polling — pass it alongside the dialect:
+
+```ts
+new Outer({ db: { dialect, kind: "postgres", live: myProvider } });
+
+type LiveProvider = {
+  subscribe(args: {
+    sql: string;
+    parameters: readonly unknown[];
+    signal?: AbortSignal;
+  }): AsyncIterable<Record<string, unknown>[]>;
+};
+```
+
+**`include` is not supported.** Relations load as separate queries, which a single subscription can't watch; passing `include` throws with that explanation. Subscribe to the related table separately.
+
+Each subscription costs database resources (PGlite maintains a view and triggers per live query), and PGlite is one embedded instance — so subscription count scales with connected clients. Prefer one broad subscription fanned out in your app over one per client, and cap what you expose publicly.
 
 ### `where` operators
 

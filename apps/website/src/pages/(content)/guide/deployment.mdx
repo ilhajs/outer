@@ -24,6 +24,27 @@ new Outer({ db: pglite() }); // or pglite({ dataDir: "..." }), defaults to <cwd>
 
 Because PGlite writes to local disk, the host needs a persistent, writable filesystem across requests. This works on a VPS, Coolify, or any long-lived Node process — it does not work on serverless/edge platforms unless you swap in a different dialect.
 
+### Bundled PGlite extensions
+
+`pglite()` loads two extensions into the instance it builds, so you get the lower-level Postgres features without assembling a client yourself.
+
+**`vector` (pgvector)** is ready to use immediately: `CREATE EXTENSION IF NOT EXISTS vector` is queued at construction, ahead of any dialect query, so `vector` columns and the distance operators (`<->`, `<=>`, `<#>`) work from the first migration onward. There's no `t.vector()` column type on the schema builder yet — declare it with raw SQL and query it through `context.db`:
+
+```ts
+await sql`CREATE TABLE doc (id serial primary key, embedding vector(3))`.execute(context.db);
+
+const nearest = await context.db
+  .selectFrom("doc")
+  .select("id")
+  .orderBy(sql`embedding <-> ${sql.lit("[1,2,3]")}`)
+  .limit(5)
+  .execute();
+```
+
+**`live` (reactive queries)** powers [live queries in Sola](/guide/procedures#live-queries) — `context.db.query.post.live()`. You don't touch the extension directly; `pglite()` wires it up as a `LiveProvider`.
+
+`pglite()` returns `{ dialect, kind, live, client }`. `live` is what Sola uses; `client` is the PGlite instance itself, for anything neither the query builder nor Sola covers — Kysely's `PGliteDialect` keeps its own reference private, so this is the only handle to it.
+
 ## Custom dialects for serverless/edge
 
 For platforms without a persistent filesystem (Vercel Functions, Cloudflare Workers), or to point at an existing database, pass any [Kysely `Dialect`](https://kysely.dev/docs/dialects) directly:

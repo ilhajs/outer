@@ -1,6 +1,7 @@
 import { ORPCError } from "@orpc/client";
 import { Kysely, sql } from "kysely";
 
+import { LiveProvider } from "./live";
 import { RelationDef, TablesDef } from "./schema";
 
 // ── Where ──────────────────────────────────────────────────────────────────
@@ -110,6 +111,15 @@ export type PaginationResult<T> = {
 
 type UniqueWhere<T> = { [K in keyof T]?: T[K] };
 
+/** Options accepted by every `live*` method. */
+export type LiveOptions = {
+  /**
+   * Ends the stream and releases the underlying subscription. Pass a
+   * procedure's `signal` so a disconnecting client tears the query down.
+   */
+  signal?: AbortSignal | undefined;
+};
+
 export type SolaModel<T> = {
   findMany(args?: FindArgs<T>): Promise<T[]>;
   findFirst(args?: FindArgs<T>): Promise<T | null>;
@@ -117,6 +127,28 @@ export type SolaModel<T> = {
   count(args?: { where?: WhereClause<T> }): Promise<number>;
   exists(args?: { where?: WhereClause<T> }): Promise<boolean>;
   paginate(args: PaginateArgs<T>): Promise<PaginationResult<T>>;
+  /**
+   * Same query as `findMany`, as a stream: the full result set now, then again
+   * on every change that affects it. Requires a dialect with a `LiveProvider`
+   * (`pglite()` ships one).
+   *
+   * `include` is not supported — relations are loaded as separate queries, so
+   * one subscription cannot cover them.
+   */
+  live(
+    args?: Omit<FindArgs<T>, "include">,
+    options?: LiveOptions,
+  ): AsyncGenerator<T[], void, undefined>;
+  /** `count` as a stream — emits the new total on every change. */
+  liveCount(
+    args?: { where?: WhereClause<T> },
+    options?: LiveOptions,
+  ): AsyncGenerator<number, void, undefined>;
+  /** `exists` as a stream — emits on every change that flips the answer. */
+  liveExists(
+    args?: { where?: WhereClause<T> },
+    options?: LiveOptions,
+  ): AsyncGenerator<boolean, void, undefined>;
 };
 
 export type Sola<TDB> = { [K in keyof TDB]: SolaModel<TDB[K]> };
@@ -447,13 +479,16 @@ function createModel<T>({
   tableName,
   tableRelations,
   tables,
+  live,
 }: {
   db: Kysely<any>;
   tableName: string;
   tableRelations: RelationDef[];
   tables: TablesDef;
+  live: LiveProvider | undefined;
 }): SolaModel<T> {
-  async function run(args: FindArgs<T> | undefined, limitOverride?: number): Promise<T[]> {
+  /** Builds the `findMany` query. Shared with `live()`, so a live stream and a one-shot read can never drift apart. */
+  function buildSelect(args: FindArgs<T> | undefined, limitOverride?: number): any {
     let qb: any = db.selectFrom(tableName);
 
     if (args?.where) qb = applyWhere({ qb, where: args.where as Record<string, any> });
@@ -474,8 +509,41 @@ function createModel<T>({
           .filter(([, v]) => v)
           .map(([k]) => k)
       : [];
-    qb = cols.length > 0 ? qb.select(cols) : qb.selectAll();
+    return cols.length > 0 ? qb.select(cols) : qb.selectAll();
+  }
 
+  /** Builds the `count` query — also shared, for the same reason. */
+  function buildCount(where: WhereClause<T> | undefined): any {
+    let qb: any = db.selectFrom(tableName).select((eb: any) => eb.fn.countAll().as("n"));
+    if (where) qb = applyWhere({ qb, where: where as Record<string, any> });
+    return qb;
+  }
+
+  /**
+   * Subscribes to a built query, mapping each result set with `map`.
+   * Fails loudly when the dialect has no provider — a live query that silently
+   * degrades to a one-shot read is worse than one that refuses to start.
+   */
+  function subscribe<R>(
+    qb: any,
+    map: (rows: Record<string, unknown>[]) => R,
+    options?: LiveOptions,
+  ): AsyncGenerator<R, void, undefined> {
+    if (!live) {
+      throw new ORPCError("NOT_IMPLEMENTED", {
+        message: `${tableName}.live(): the configured dialect has no live-query provider. Use pglite(), or pass \`live\` alongside \`dialect\` in \`new Outer({ db })\`.`,
+      });
+    }
+    const { sql, parameters } = qb.compile();
+    const stream = live.subscribe({ sql, parameters, signal: options?.signal });
+    // A real generator, not a bare iterable — see `liveIterable`.
+    return (async function* () {
+      for await (const rows of stream) yield map(rows);
+    })();
+  }
+
+  async function run(args: FindArgs<T> | undefined, limitOverride?: number): Promise<T[]> {
+    const qb = buildSelect(args, limitOverride);
     const rows: any[] = await qb.execute();
     if (!args?.include || rows.length === 0) return rows as T[];
 
@@ -525,11 +593,21 @@ function createModel<T>({
       return row != null;
     },
     count: async (args) => {
-      let qb: any = db.selectFrom(tableName).select((eb: any) => eb.fn.countAll().as("n"));
-      if (args?.where) qb = applyWhere({ qb, where: args.where as Record<string, any> });
-      const row = await qb.executeTakeFirstOrThrow();
+      const row = await buildCount(args?.where).executeTakeFirstOrThrow();
       return Number(row.n);
     },
+    live: (args, options) => {
+      if (args && "include" in args && (args as FindArgs<T>).include) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: `${tableName}.live(): \`include\` is not supported — relations are loaded as separate queries, which a single subscription cannot watch. Subscribe to the related table separately.`,
+        });
+      }
+      return subscribe(buildSelect(args), (rows) => rows as T[], options);
+    },
+    liveCount: (args, options) =>
+      subscribe(buildCount(args?.where), (rows) => Number((rows[0] as any)?.n ?? 0), options),
+    liveExists: (args, options) =>
+      subscribe(buildCount(args?.where), (rows) => Number((rows[0] as any)?.n ?? 0) > 0, options),
     paginate: async (args: PaginateArgs<T>): Promise<PaginationResult<T>> => {
       const { take, skip, after, before, orderBy, where, ...rest } = args;
 
@@ -608,10 +686,13 @@ export function createSola<TDB>({
   db,
   tables,
   relations,
+  live,
 }: {
   db: Kysely<any>;
   tables: TablesDef;
   relations: RelationDef[];
+  /** Omitted for dialects without one — `live*()` then throws rather than degrading. */
+  live?: LiveProvider | undefined;
 }): Sola<TDB> {
   const sola: any = {};
   for (const tableName of Object.keys(tables)) {
@@ -620,6 +701,7 @@ export function createSola<TDB>({
       tableName,
       tableRelations: relations.filter((r) => r.fromTable === tableName),
       tables,
+      live,
     });
   }
   return sola as Sola<TDB>;

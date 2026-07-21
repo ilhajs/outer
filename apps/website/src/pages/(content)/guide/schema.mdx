@@ -153,6 +153,27 @@ Input types are derived from column definitions at build time. `serial` primary 
 
 `list` defaults to 50 rows and rejects a `take` above 100 (`400 BAD_REQUEST`) — pass `listLimit: { default, max }` in `options` to change either bound. This keeps an unqualified `.resource()` call from becoming an unbounded `SELECT *` on a large table; reach for `context.db.query[table].paginate(...)` directly in a custom `.procedure()` when you need cursor pagination with metadata.
 
+### Live resources
+
+Pass `live: true` to also register `{name}.live` — the same query as `list`, streamed, re-emitting on every change that affects the result set:
+
+```ts
+.resource("post", {
+  permissions: { list: "owner" },
+  ownerColumn: "userId",
+  live: true,
+})
+```
+
+It reuses the **`list`** permission, owner scoping included — there's no separate `live` permission to forget to set, and the owner filter is applied in SQL, so a subscriber is only ever sent their own rows. Needs a dialect with a `LiveProvider`; `pglite()` has one. See [live queries](/guide/procedures#live-queries) for the underlying Sola API.
+
+Two things to weigh before exposing it publicly:
+
+- **A subscription outlives the check that opened it.** An SSE connection can stay open for hours, so a user who signs out, is banned, or loses a role would keep receiving rows. `revalidateMs` (default `30000`) re-runs the permission check on that interval and ends the stream with `401`/`403` when it fails. The timer races the wait for the next change, so an idle subscription is cut just as promptly as a busy one — a revoked session can't sit on an open connection until the table happens to change. It's skipped entirely when `list` is `"public"`, where there's nothing to check.
+- **Owner scoping filters rows, not wakeups.** A write by any user re-runs every subscriber's query. Nothing leaks, but a busy table wakes every subscription — which is why `max` (default `100`) caps concurrent subscribers per resource.
+
+`include` and `skip` aren't available on `live`.
+
 `list` and `get` accept `include: { relatedTable: true }` for any relation declared on the table via `.relation()` — `hasMany`/`manyToMany` relations come back as arrays, `hasOne`/`belongsTo` as an object or `null`. Unknown relation names are rejected with a `400`. When the table has no relations, `include` is not part of the input schema.
 
 `create`/`update` map common Postgres constraint violations to clean errors instead of a raw 500: unique/foreign-key violations → `409 CONFLICT`, not-null/check violations → `400 BAD_REQUEST`. `update`/`delete` on a row that doesn't exist → `404 NOT_FOUND`. `update` with an empty `data` object → `400 BAD_REQUEST`. Unrecognized DB errors still surface as a generic `500` with no internal details leaked.

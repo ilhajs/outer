@@ -148,6 +148,42 @@ Result shape:
 
 Cursors are opaque base64-encoded strings derived from `orderBy` column values. Multi-column `orderBy` uses correct row-comparison keyset semantics — always include a unique column (e.g. `id`) as the final `orderBy` entry to guarantee stable pages. A malformed or tampered `after`/`before` cursor is rejected with `400 BAD_REQUEST` rather than throwing an unhandled error.
 
+### Live queries
+
+`live()` is `findMany()` as a stream: the full result set immediately, then again on every change that affects it. Identical arguments, and the SQL comes from the same code path — a live stream and a one-shot read can't drift apart.
+
+Because it returns an `AsyncIterable`, a handler returns it directly and oRPC streams it over SSE:
+
+```ts
+.procedure("post.live", (base) =>
+  base.handler(({ context, signal }) =>
+    context.db.query.post.live(
+      { where: { done: false }, orderBy: [{ id: "desc" }], take: 20 },
+      { signal },
+    ),
+  ),
+)
+```
+
+That's the whole subscription. No `EventPublisher`, and no mutation path that has to remember to publish — the database is the source of truth, so a row changed by a migration, an admin action, or `psql` reaches subscribers just the same.
+
+| Method                        | Emits     |
+| ----------------------------- | --------- |
+| `live(args?, options?)`       | `T[]`     |
+| `liveCount(args?, options?)`  | `number`  |
+| `liveExists(args?, options?)` | `boolean` |
+
+Pass a procedure's `signal` as `options.signal` so a disconnecting client releases its subscription; breaking out of a `for await` loop releases it too.
+
+Emissions **coalesce** — the payload is a snapshot, not an event log, so ticks that arrive while the consumer is busy collapse into the newest one. A slow client can't build a backlog.
+
+Two limits worth knowing before you lean on it:
+
+- **Needs a `LiveProvider`.** `pglite()` ships one; other dialects throw `NOT_IMPLEMENTED` rather than quietly degrading to a one-shot read. Supply your own (Postgres `LISTEN`/`NOTIFY`, or polling) by passing `live` alongside `dialect` in `new Outer({ db })`.
+- **No `include`.** Relations load as separate queries, which one subscription can't watch — passing `include` throws. Subscribe to the related table separately.
+
+Each subscription costs real database resources, and PGlite is a single embedded instance, so subscription count scales with connected clients. Prefer one broad subscription fanned out in your app over one per client.
+
 ### `where` operators
 
 | Operator                    | Types        | SQL                                          |

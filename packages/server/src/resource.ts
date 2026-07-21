@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/client";
-import { Builder, AnyProcedure, Context, Procedure, Schema } from "@orpc/server";
+import { Builder, AnyProcedure, Context, eventIterator, Procedure, Schema } from "@orpc/server";
 import { NoResultError } from "kysely";
 import { z } from "zod/v4";
 
@@ -53,6 +53,36 @@ export type ResourceOptions = {
    * Defaults to `[]` (no relations includable).
    */
   includable?: string[];
+  /**
+   * Registers a `<resource>.live` procedure — `list` as a stream, re-emitting
+   * on every change that affects the result set. Off by default: each open
+   * subscription costs database resources, so it's opt-in rather than
+   * something a plain `.resource()` call starts paying for.
+   *
+   * Gated by the **`list`** permission, including its owner scoping — there is
+   * no separate `live` permission to forget to set. Requires a dialect with a
+   * `LiveProvider` (`pglite()` has one).
+   */
+  live?: boolean | ResourceLiveOptions;
+};
+
+export type ResourceLiveOptions = {
+  /**
+   * How often to re-check the caller's permission while a stream is open, in ms
+   * (default `30000`). A subscription can outlive the session that opened it,
+   * so the check that ran at subscribe time is not enough: without this, a user
+   * who signs out, is banned, or loses a role keeps receiving rows until they
+   * disconnect. Each re-check is one session lookup. `false` disables it —
+   * only sensible when `list` is `"public"`, where nothing is checked anyway.
+   */
+  revalidateMs?: number | false;
+  /**
+   * Max concurrent subscriptions for this resource (default `100`). Further
+   * subscribers get `TOO_MANY_REQUESTS`. PGlite is a single embedded instance
+   * and every live query holds a view and triggers open, so an uncapped public
+   * stream is a denial-of-service surface.
+   */
+  max?: number;
 };
 
 // ── Type-level input/output derivation ─────────────────────────────────────
@@ -221,6 +251,11 @@ export type ResourceProcedures<
     ResourceRow<Cols>
   >;
   delete: TypedProcedure<ResourceWhereKey<Cols>, ResourceRow<Cols>>;
+  /** Only registered when `options.live` is set. */
+  live: TypedProcedure<
+    Omit<ResourceListInput<Cols>, "include"> | undefined,
+    AsyncGenerator<ResourceRow<Cols>[], void, undefined>
+  >;
 };
 
 /** Actions (of a given resource) whose permission requires a signed-in session — used by `Outer.build()` to fail fast if `.auth()` was never called. */
@@ -722,5 +757,147 @@ export function buildResourceProcedures(
       }
     });
 
-  return { list, get, create, createMany, update, delete: del };
+  /**
+   * `list` as a stream. Deliberately shares `list`'s permission — including its
+   * owner scoping, which lands in the SQL `where`, so a subscriber can only
+   * ever be sent their own rows.
+   */
+  const liveConfig: ResourceLiveOptions | undefined = !options.live
+    ? undefined
+    : options.live === true
+      ? {}
+      : options.live;
+  const liveProc =
+    liveConfig === undefined
+      ? undefined
+      : (() => {
+          const revalidateMs = liveConfig.revalidateMs ?? 30_000;
+          const maxSubscriptions = liveConfig.max ?? 100;
+          // Only non-public permissions can go stale mid-stream.
+          const revalidates =
+            revalidateMs !== false && !!permissions.list && permissions.list !== "public";
+          let active = 0;
+
+          /** Runs the permission check and returns the (possibly owner-scoped) where. Throws if the caller may not read. */
+          const authorize = async (context: any, where: unknown) => {
+            if (permissions.list === "owner") {
+              const user = await getSession(context);
+              return { AND: [...(where ? [where] : []), { [ownerColumn!]: user.id }] };
+            }
+            await enforce(permissions.list, context);
+            return where;
+          };
+
+          return base
+            .input(
+              z
+                .object({
+                  where: filterSchema.optional(),
+                  orderBy: orderBySchema.optional(),
+                  take: z.number().int().positive().max(maxLimit).optional(),
+                })
+                .optional(),
+            )
+            .output(eventIterator(z.array(rowSchema)))
+            .handler(async function* ({ context, input, signal }: any) {
+              // Checked before the subscription is created, so a flood can't
+              // open views faster than it's rejected.
+              if (active >= maxSubscriptions) {
+                throw new ORPCError("TOO_MANY_REQUESTS", {
+                  message: `${tableName}.live: too many concurrent subscriptions (max ${maxSubscriptions}). Raise it with \`.resource("${tableName}", { live: { max } })\`.`,
+                });
+              }
+              const where = await authorize(context, input?.where);
+
+              active++;
+              // Teardown is driven by this controller rather than by
+              // `iterator.return()` alone: when the stream ends while a
+              // `next()` is still pending (an idle subscription whose
+              // revalidation just failed), `return()` would queue behind that
+              // never-settling promise and deadlock. Aborting settles it first.
+              const controller = new AbortController();
+              const propagateAbort = () => controller.abort();
+              if (signal?.aborted) controller.abort();
+              else signal?.addEventListener("abort", propagateAbort, { once: true });
+
+              const stream = context.db.query[tableName].live(
+                {
+                  ...(where ? { where } : {}),
+                  ...(input?.orderBy && { orderBy: input.orderBy }),
+                  take: input?.take ?? defaultLimit,
+                },
+                { signal: controller.signal },
+              );
+              const iterator = stream[Symbol.asyncIterator]();
+              try {
+                let checkedAt = Date.now();
+                // The iterator is driven by hand rather than with `for await` so
+                // the wait for the next change can race a revalidation timer:
+                // an idle stream must still notice a revoked session, not only
+                // one that happens to be receiving rows.
+                let pending: Promise<IteratorResult<Record<string, unknown>[]>> | undefined;
+
+                while (true) {
+                  // Held across timer wins — calling next() again while the
+                  // previous call is unsettled would re-enter the generator.
+                  const next = (pending ??= iterator.next());
+
+                  let timer: ReturnType<typeof setTimeout> | undefined;
+                  const due = revalidates
+                    ? Math.max(0, revalidateMs - (Date.now() - checkedAt))
+                    : undefined;
+                  const race: Promise<IteratorResult<Record<string, unknown>[]> | "revalidate">[] =
+                    [next];
+                  if (due !== undefined) {
+                    race.push(
+                      new Promise<"revalidate">((resolve) => {
+                        timer = setTimeout(() => resolve("revalidate"), due);
+                      }),
+                    );
+                  }
+
+                  let settled: IteratorResult<Record<string, unknown>[]> | "revalidate";
+                  try {
+                    settled = await Promise.race(race);
+                  } finally {
+                    if (timer) clearTimeout(timer);
+                  }
+
+                  if (settled === "revalidate") {
+                    // Throws (401/403) if the session died or the role was
+                    // revoked, which ends the stream for that subscriber.
+                    await authorize(context, input?.where);
+                    checkedAt = Date.now();
+                    continue;
+                  }
+
+                  pending = undefined;
+                  if (settled.done) break;
+
+                  if (revalidates && Date.now() - checkedAt >= revalidateMs) {
+                    await authorize(context, input?.where);
+                    checkedAt = Date.now();
+                  }
+                  yield settled.value;
+                }
+              } finally {
+                // Driving by hand means teardown is ours to do — `for await`
+                // would have called this on break/throw.
+                signal?.removeEventListener("abort", propagateAbort);
+                controller.abort();
+                await iterator.return?.();
+                active--;
+              }
+            });
+        })();
+
+  return {
+    list,
+    get,
+    create,
+    createMany,
+    update,
+    delete: del,
+    ...(liveProc && { live: liveProc }),
+  } as any;
 }

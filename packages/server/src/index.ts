@@ -17,6 +17,7 @@ import { Dialect, Kysely } from "kysely";
 
 import { AdminConfig, AdminRouter, buildAdminProcedures } from "./admin";
 import { buildFileProcedures, buildFileRoute, FilesConfig, FilesRouter } from "./files";
+import { LiveProvider } from "./live";
 import { createMigrator, DialectKind } from "./migrator";
 import {
   actionsRequiringAuth,
@@ -32,6 +33,8 @@ import { fromUnstorage, fromS3, memoryStorage, OuterStorage } from "./storage";
 export { schema, timestamps };
 export { fromUnstorage, fromS3, memoryStorage };
 export type { OuterStorage } from "./storage";
+export type { LiveProvider } from "./live";
+export { liveIterable } from "./live";
 export type { FilesConfig, FilesRouter, FilePermission, FileRecord } from "./files";
 /** Throw from a handler to return a specific HTTP status instead of a 500. */
 export { ORPCError };
@@ -176,7 +179,7 @@ export type OuterParams = {
    * `new Outer({ db: pglite() })`. For anything else (network Postgres,
    * Cloudflare D1/Durable Objects, etc.) construct the `Dialect` yourself.
    */
-  db: { dialect: Dialect; kind: DialectKind };
+  db: { dialect: Dialect; kind: DialectKind; live?: LiveProvider };
   /**
    * Cross-origin browser callers allowed to reach `/rpc/**`, `/api/auth/**`,
    * and the admin API. Lives on the constructor (not a chain method) so it's
@@ -203,6 +206,8 @@ type OuterRoute<TContext> = {
 type OuterResources = {
   dialect: Dialect;
   dialectKind: DialectKind;
+  /** Backs `context.db.query.<table>.live()`; absent for dialects that can't stream changes. */
+  live: LiveProvider | undefined;
   db: Kysely<any>;
   baseUrl: string | undefined;
   auth: OuterAuth | undefined;
@@ -312,11 +317,12 @@ export class Outer<
       this.schemas = _schemas ?? [];
     } else {
       const { db: dbConfig, baseUrl, cors, storage } = params as OuterParams;
-      const { dialect, kind: dialectKind } = dbConfig;
+      const { dialect, kind: dialectKind, live } = dbConfig;
       const db = new Kysely<any>({ dialect });
       this.resources = {
         dialect,
         dialectKind,
+        live,
         db,
         baseUrl,
         auth: undefined,
@@ -616,6 +622,7 @@ export class Outer<
     const solaConfig = {
       tables: latestSchema?.tables ?? {},
       relations: latestSchema?.relations ?? [],
+      live: this.resources.live,
     };
     const wrapDb = (k: Kysely<any>): OuterDB<TDB> =>
       Object.assign(k as Kysely<TDB>, {
