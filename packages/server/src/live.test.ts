@@ -350,6 +350,27 @@ describe("resource live queries", () => {
     void app;
   });
 
+  // Regression guard: `getSession` reuses the user resolved when the request
+  // arrived, which is right for one-shot calls but must never apply to a
+  // long-lived stream — otherwise a revoked session keeps receiving rows.
+  test("revalidation re-reads the session rather than the one cached at subscribe time", async () => {
+    const app = await makeApp("memory://res-fresh", {
+      live: { revalidateMs: 10 },
+      permissions: { list: "authenticated" },
+    });
+    const user = await signUp(app, "erin@test.com");
+
+    const stream: any = await (app.client(user.headers) as any).post.live();
+    const iter = stream[Symbol.asyncIterator]();
+    await iter.next(); // context.user is now populated for this subscription
+
+    await app.db.deleteFrom("session").execute();
+    await new Promise((r) => setTimeout(r, 30));
+    await app.db.insertInto("post").values({ title: "must-not-arrive" }).execute();
+
+    await expect(iter.next()).rejects.toThrow(/signed in/i);
+  });
+
   test("ends an idle stream when the session dies — no new rows needed", async () => {
     const app = await makeApp("memory://res-idle", {
       live: { revalidateMs: 50 },

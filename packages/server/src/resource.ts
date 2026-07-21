@@ -509,7 +509,14 @@ function buildSchemas({
 
 // ── Permission enforcement ─────────────────────────────────────────────────
 
-export async function getSession(context: any) {
+/**
+ * The signed-in user, or a 401.
+ *
+ * Pass `{ fresh: true }` when the answer must reflect the database *now*
+ * rather than when the request arrived — long-lived streams revalidate this
+ * way, so a revoked session actually ends the subscription.
+ */
+export async function getSession(context: any, opts?: { fresh?: boolean }) {
   if (!context.auth) {
     throw new Error(
       "This resource permission requires auth — call `.auth()` on the Outer instance before `.build()`",
@@ -518,7 +525,7 @@ export async function getSession(context: any) {
   // `.auth()` already resolved the session for this request. Presence of the
   // key (not truthiness) marks it as resolved — `null` means signed out, which
   // must not trigger a second lookup.
-  if ("user" in context) {
+  if (!opts?.fresh && "user" in context) {
     if (!context.user) throw new ORPCError("UNAUTHORIZED", { message: "You must be signed in" });
     return context.user as { id: string; role?: string; [key: string]: unknown };
   }
@@ -558,6 +565,7 @@ async function enforce(
   context: any,
   row?: Record<string, unknown>,
   ownerColumn?: string,
+  opts?: { fresh?: boolean },
 ): Promise<{ id: string; [key: string]: unknown } | null> {
   if (!permission || permission === "public") return null;
 
@@ -567,7 +575,7 @@ async function enforce(
     return null;
   }
 
-  const user = await getSession(context);
+  const user = await getSession(context, opts);
 
   if (permission === "admin" && !hasRole(user, ["admin"])) {
     throw new ORPCError("FORBIDDEN", { message: "Admin access required" });
@@ -862,13 +870,20 @@ export function buildResourceProcedures(
             revalidateMs !== false && !!permissions.list && permissions.list !== "public";
           let active = 0;
 
-          /** Runs the permission check and returns the (possibly owner-scoped) where. Throws if the caller may not read. */
-          const authorize = async (context: any, where: unknown) => {
+          /**
+           * Runs the permission check and returns the (possibly owner-scoped) where.
+           * Throws if the caller may not read.
+           *
+           * `fresh` forces a database lookup instead of reusing the session the
+           * request resolved at subscribe time — revalidation exists precisely
+           * to notice a session that has since been revoked.
+           */
+          const authorize = async (context: any, where: unknown, opts?: { fresh?: boolean }) => {
             if (permissions.list === "owner") {
-              const user = await getSession(context);
+              const user = await getSession(context, opts);
               return { AND: [...(where ? [where] : []), { [ownerColumn!]: user.id }] };
             }
-            await enforce(permissions.list, context);
+            await enforce(permissions.list, context, undefined, undefined, opts);
             return where;
           };
 
@@ -950,7 +965,7 @@ export function buildResourceProcedures(
                   if (settled === "revalidate") {
                     // Throws (401/403) if the session died or the role was
                     // revoked, which ends the stream for that subscriber.
-                    await authorize(context, input?.where);
+                    await authorize(context, input?.where, { fresh: true });
                     checkedAt = Date.now();
                     continue;
                   }
@@ -959,7 +974,7 @@ export function buildResourceProcedures(
                   if (settled.done) break;
 
                   if (revalidates && Date.now() - checkedAt >= revalidateMs) {
-                    await authorize(context, input?.where);
+                    await authorize(context, input?.where, { fresh: true });
                     checkedAt = Date.now();
                   }
                   yield settled.value;
