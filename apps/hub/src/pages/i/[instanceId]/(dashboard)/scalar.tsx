@@ -39,7 +39,7 @@ export default ilha
   // min-h-0 lets the scroll container shrink inside the flex column instead of
   // growing the page — Scalar's own root is tall and would otherwise overflow.
   .render(({ input }) => (
-    <div class="min-h-0 flex-1 overflow-auto">
+    <div class="max-h-screen min-h-0 flex-1 overflow-auto">
       {when(
         input.meta?.openapi ?? false,
         () => (
