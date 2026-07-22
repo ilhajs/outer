@@ -513,7 +513,8 @@ Route params are available as `event.context.params`.
 Registers a complete upload surface — six `file.*` procedures plus a download route — from the `file` tables `schema().files()` defines. Requires an `OuterStorage`.
 
 ```ts
-import { Outer, fromUnstorage } from "@outerjs/server";
+import { Outer } from "@outerjs/server";
+import { fromUnstorage } from "@outerjs/server/storage";
 
 new Outer({ db: pglite(), storage: fromUnstorage(useStorage("fs")) })
   .schema(v1_1) // schema(...).auth().files({ attachTo: ["post"] })
@@ -593,7 +594,8 @@ Four adapters ship with the package:
 - `memorySecrets(values?)` — a fixed map, for tests.
 
 ```ts
-import { Outer, fromSchema } from "@outerjs/server";
+import { Outer } from "@outerjs/server";
+import { fromSchema } from "@outerjs/server/secrets";
 import { z } from "zod";
 
 const Env = z.object({

@@ -44,7 +44,8 @@ The server listens on `http://localhost:3000`. Call `POST /rpc/user/me` to check
 Every Outer app is one chain. Read it top to bottom: a schema version, auth, then the procedures your clients call.
 
 ```ts
-import { Outer, schema } from "@outerjs/server";
+import { Outer } from "@outerjs/server";
+import { schema } from "@outerjs/server/schema";
 import { pglite } from "@outerjs/server/pglite";
 
 const v1_0 = schema("1.0.0")

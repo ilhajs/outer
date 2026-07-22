@@ -22,7 +22,8 @@ Create the Outer instance in a shared module. Next.js re-evaluates modules on HM
 
 ```ts
 // src/lib/outer.ts
-import { Outer, schema } from "@outerjs/server";
+import { Outer } from "@outerjs/server";
+import { schema } from "@outerjs/server/schema";
 import { pglite } from "@outerjs/server/pglite";
 
 const v1_0 = schema("1.0.0")

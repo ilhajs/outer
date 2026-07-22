@@ -14,7 +14,7 @@ The `schema()` builder describes your tables and the links between them. It is a
 Describe tables with `.table()` and links between them with `.relation()`:
 
 ```ts
-import { schema } from "@outerjs/server";
+import { schema } from "@outerjs/server/schema";
 
 const v1_0 = schema("1.0.0")
   .table("user", (t) => ({
@@ -149,7 +149,7 @@ role: t.text().enum(["user", "admin", "support"], { multiple: true });
 // "admin,support" ✓   "admin,root" ✗ unknown   "admin,admin" ✗ duplicate
 ```
 
-Each part is validated independently. The TS type stays `string`, because enumerating every legal combination would be combinatorial. Read a set with `parseSet(value)` and build one with `toSet([...])`, both exported from `@outerjs/server`.
+Each part is validated independently. The TS type stays `string`, because enumerating every legal combination would be combinatorial. Read a set with `parseSet(value)` and build one with `toSet([...])`, both exported from `@outerjs/server/schema`.
 
 ## Relations
 

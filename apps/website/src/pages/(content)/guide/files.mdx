@@ -21,7 +21,9 @@ You need two things in place:
 ## Set up uploads
 
 ```ts
-import { fromUnstorage, Outer, schema } from "@outerjs/server";
+import { Outer } from "@outerjs/server";
+import { schema } from "@outerjs/server/schema";
+import { fromUnstorage } from "@outerjs/server/storage";
 import { pglite } from "@outerjs/server/pglite";
 import { createStorage } from "unstorage";
 import fsLite from "unstorage/drivers/fs-lite";
