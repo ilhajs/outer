@@ -29,6 +29,9 @@ const outer = new Outer({
   // The `fs` mount from vite.config.ts. Swap that driver for `s3` in production
   // and nothing here changes.
   storage: fromUnstorage(useStorage("fs")),
+  // Nitro's unstorage instance, surfaced as `context.kv`. On Cloudflare/Vercel
+  // point the default mount at their KV driver and nothing here changes.
+  kv: useStorage(),
 })
   .schema(v1_0_0)
   .auth({
@@ -48,9 +51,10 @@ const outer = new Outer({
   // Adds file.upload / list / get / delete / attach / detach plus GET /files/:id.
   // Files default to private: only the uploader can read or delete them.
   .files({ maxBytes: 10 * 1024 * 1024 })
-  // `context.user` and `context.session` are already resolved by `.auth()` —
-  // this middleware only adds the extras this app wants.
-  .middleware(async ({ next }) => next({ context: { kv: useStorage(), runTask } }))
+  // `context.user` and `context.session` are already resolved by `.auth()`, and
+  // `context.kv` comes from `new Outer({ kv })` — this middleware only adds the
+  // extras this app wants.
+  .middleware(async ({ next }) => next({ context: { runTask } }))
   .resource("todo", {
     permissions: {
       list: "owner",
@@ -65,8 +69,12 @@ const outer = new Outer({
     "foo",
     (base) =>
       base.handler(async ({ context }) => {
-        await context.kv.setItem("foo", "bar");
-        return { foo: await context.kv.getItem("foo"), signedInAs: context.user?.email ?? null };
+        // context.kv comes from `new Outer({ kv })`, so it's optional — guard for it
+        await context.kv?.setItem("foo", "bar");
+        return {
+          foo: await context.kv?.getItem("foo"),
+          signedInAs: context.user?.email ?? null,
+        };
       }),
     { permission: "authenticated" },
   )

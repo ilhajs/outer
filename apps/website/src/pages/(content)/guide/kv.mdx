@@ -1,0 +1,117 @@
+---
+title: Key/value store
+description: Reach a key/value store the same way in every runtime with context.kv — pass any unstorage instance, including Cloudflare KV and Vercel KV, and read it with getItem/setItem plus TTL.
+order: 13
+tags: [kv, key-value, cache, unstorage, cloudflare, vercel, ttl, redis]
+---
+
+# Key/value store
+
+`context.kv` is a key/value store for the data that doesn't belong in your schema: cache entries, rate-limit counters, ephemeral tokens, feature flags, idempotency keys. You pass any [unstorage](https://unstorage.unjs.io) instance as `new Outer({ kv })`, and every handler reads it the same way — a VPS backed by memory or Redis, Cloudflare Workers backed by KV, or Vercel backed by Vercel KV. The backend difference lives in the driver, not your procedures.
+
+It's for values you want fast and optionally expiring. For anything you query, relate, or need transactions on, use [`context.db`](/guide/database) instead — the KV store has no queries, joins, or transactions.
+
+## Pass a store on the constructor
+
+Point `kv` at an unstorage instance. In new code, wire it once at construction rather than injecting a store through middleware:
+
+```ts
+import { Outer } from "@outerjs/server";
+import { pglite } from "@outerjs/server/pglite";
+import { createStorage } from "unstorage";
+
+const outer = new Outer({ db: pglite(), kv: createStorage() })
+  .schema(v1_0)
+  .procedure("cache.get", (base) =>
+    base.handler(async ({ context }) => {
+      const hit = await context.kv.getItem<{ value: string }>("greeting");
+      if (hit) return hit;
+
+      const fresh = { value: "hello" };
+      await context.kv.setItem("greeting", fresh, { ttl: 60 }); // expires in 60s
+      return fresh;
+    }),
+  )
+  .build();
+```
+
+`createStorage()` with no driver is an in-memory `Map` — good for local development and tests. Swap the driver for your platform's store and nothing in your handlers changes.
+
+## The store
+
+`context.kv` is typed as `OuterKV`, the slice of unstorage's `Storage` most apps use:
+
+```ts
+type OuterKV = {
+  hasItem(key: string): Promise<boolean>;
+  getItem<T = unknown>(key: string): Promise<T | null>;
+  getItemRaw(key: string): Promise<unknown>;
+  setItem(key: string, value: unknown, opts?: { ttl?: number }): Promise<void>;
+  setItemRaw(key: string, value: unknown, opts?: { ttl?: number }): Promise<void>;
+  removeItem(key: string): Promise<void>;
+  getKeys(base?: string): Promise<string[]>;
+  clear(base?: string): Promise<void>;
+};
+```
+
+`getItem` / `setItem` serialize JSON; use the `Raw` variants for binary values. `ttl` is in **seconds** and is honored by the drivers that support expiry (Cloudflare KV, Vercel KV, Redis) — the in-memory driver ignores it. `getKeys(base)` and `clear(base)` scope to a key prefix.
+
+`context.kv` is `undefined` when you don't pass `kv`. Guard for it, or make it required in your own context type.
+
+## Cloudflare KV
+
+Bind a KV namespace in `wrangler.toml`, then wrap the binding with unstorage's Cloudflare KV driver:
+
+```ts
+import { Outer } from "@outerjs/server";
+import { createStorage } from "unstorage";
+import cloudflareKVBinding from "unstorage/drivers/cloudflare-kv-binding";
+
+export default {
+  fetch(req: Request, env: Env) {
+    const outer = new Outer({
+      db: { dialect: myDialect, kind: "sqlite" },
+      kv: createStorage({ driver: cloudflareKVBinding({ binding: env.MY_KV }) }),
+    })
+      .schema(v1_0)
+      .build();
+
+    return outer.handle(req);
+  },
+};
+```
+
+Construct the store inside `fetch` (or your Durable Object constructor), where the `env` binding is available. Cloudflare KV honors `ttl` down to a 60-second minimum.
+
+## Vercel KV
+
+Set the `KV_REST_API_URL` and `KV_REST_API_TOKEN` environment variables from your Vercel KV store, then use the Vercel KV driver:
+
+```ts
+import { Outer } from "@outerjs/server";
+import { createStorage } from "unstorage";
+import vercelKVDriver from "unstorage/drivers/vercel-kv";
+
+const outer = new Outer({
+  db: { dialect: myDialect, kind: "postgres" },
+  kv: createStorage({ driver: vercelKVDriver() }),
+})
+  .schema(v1_0)
+  .build();
+```
+
+Vercel KV is Redis-backed, so `ttl` works with no minimum.
+
+## Nitro and other hosts
+
+When Outer runs inside a host that already exposes unstorage — Nitro's `useStorage()` — pass it straight through. The driver is chosen in the host's config, so moving to Cloudflare KV or Redis in production needs no change here:
+
+```ts
+import { useStorage } from "nitro/storage";
+
+new Outer({ db: pglite(), kv: useStorage() });
+```
+
+## Redis, filesystem, and more
+
+Any [unstorage driver](https://unstorage.unjs.io/drivers) works — `redis`, `fs`, `upstash`, `netlify-blobs`, and others. Pick the one that matches your deployment and pass it to `createStorage({ driver })`; `context.kv` stays the same in every procedure.

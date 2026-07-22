@@ -17,6 +17,7 @@ import { Dialect, Kysely, sql } from "kysely";
 
 import { AdminConfig, AdminRouter, buildAdminProcedures } from "./admin";
 import { buildFileProcedures, buildFileRoute, FilesConfig, FilesRouter } from "./files";
+import type { OuterKV } from "./kv";
 import { LiveProvider } from "./live";
 import { createMigrator, DialectKind } from "./migrator";
 import {
@@ -33,6 +34,7 @@ import type { OuterStorage } from "./storage";
 
 // The schema, secrets, and storage surfaces live in their own subpath entries:
 // `@outerjs/server/schema`, `/secrets`, `/storage`.
+export type { OuterKV } from "./kv";
 export type { LiveProvider } from "./live";
 export { liveIterable } from "./live";
 export type { FilesConfig, FilesRouter, FilePermission, FileRecord } from "./files";
@@ -78,6 +80,8 @@ export type OuterRpcContext<TDB = any> = {
   storage?: OuterStorage;
   /** The secret accessor passed as `new Outer({ secrets })`, if any. */
   secrets?: OuterSecrets;
+  /** The key/value store passed as `new Outer({ kv })`, if any. */
+  kv?: OuterKV;
 };
 
 /** Context additions `.auth()` guarantees: `auth` is present and `user`/`session` are always resolved (possibly to `null`). */
@@ -265,6 +269,14 @@ export type OuterParams = {
    */
   secrets?: OuterSecrets<any>;
   /**
+   * Key/value store, surfaced as `context.kv`. Pass any
+   * [unstorage](https://unstorage.unjs.io) instance — Nitro's `useStorage()`,
+   * a bare `createStorage({ driver })`, or a Cloudflare KV / Vercel KV driver —
+   * so the same `context.kv.getItem(...)` resolves against whatever backend the
+   * host provides, with TTL via `setItem(key, value, { ttl })`.
+   */
+  kv?: OuterKV;
+  /**
    * Called for unexpected failures — anything that isn't a deliberate
    * `ORPCError` response. Route it to your logger or Sentry; without it,
    * Outer writes to `console.error`. Pass `() => {}` to silence it.
@@ -316,6 +328,7 @@ type OuterResources = {
   files: FilesConfig | undefined;
   storage: OuterStorage | undefined;
   secrets: OuterSecrets<any> | undefined;
+  kv: OuterKV | undefined;
 };
 
 export type McpConfig = {
@@ -504,6 +517,7 @@ export class Outer<
         cors,
         storage,
         secrets,
+        kv,
         onError: onErrorHook,
         health,
         rateLimit,
@@ -526,6 +540,7 @@ export class Outer<
         files: undefined,
         storage,
         secrets,
+        kv,
         onError: onErrorHook,
         health,
         rateLimit,
@@ -860,6 +875,7 @@ export class Outer<
 
     const storage = this.resources.storage;
     const secrets = this.resources.secrets;
+    const kv = this.resources.kv;
 
     /**
      * Per-request context. When `.auth()` is enabled the session is resolved
@@ -873,6 +889,7 @@ export class Outer<
         db: typedDb,
         ...(storage && { storage }),
         ...(secrets && { secrets }),
+        ...(kv && { kv }),
       } as OuterRpcContext<TDB>;
       if (!auth) return { ...base, user: null, session: null };
       const resolved = await auth.api.getSession({ headers: event.req.headers }).catch(() => null);
