@@ -1,4 +1,5 @@
-import { parseSet, toSet, type AdminMeta } from "@outerjs/server";
+import { type AdminMeta } from "@outerjs/server";
+import { parseSet, toSet } from "@outerjs/server/schema";
 import { Button, Checkbox, ClipboardText, Icon, Input, Select, Switch, Textarea } from "areia";
 import { format } from "date-fns";
 import ilha from "ilha";

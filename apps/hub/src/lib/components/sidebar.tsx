@@ -3,7 +3,7 @@ import { useRoute } from "@ilha/router";
 import type { AdminMeta } from "@outerjs/server";
 import { Button, Icon, LinkButton } from "areia";
 import ilha from "ilha";
-import { ArrowRightLeft, BookOpen, MoreVertical } from "lucide";
+import { ArrowRightLeft, BookOpen, FolderOpen, Home, MoreVertical } from "lucide";
 import { each, when } from "quando";
 
 const { params, path } = useRoute();
@@ -24,8 +24,16 @@ export const Sidebar = ilha
           </LinkButton>
           <Button variant="ghost" shape="square" icon={<Icon icon={MoreVertical} />} />
         </div>
+        <LinkButton
+          href={`/i/${input.instance?.id}`}
+          variant={path() === `/i/${input.instance?.id}` ? "outline" : undefined}
+          icon={<Icon icon={Home} />}
+          class="w-full"
+        >
+          Dashboard
+        </LinkButton>
         <div class="flex flex-col">
-          <div class="text-sm">Tables</div>
+          <div class="text-sm font-semibold text-areia-surface-muted-foreground mb-1">Tables</div>
           {each(input.meta?.tables ?? []).as((table) => {
             const isActive = params().tableName === table.name;
             return (
@@ -39,16 +47,29 @@ export const Sidebar = ilha
             );
           })}
         </div>
-        {when(input.meta?.openapi ?? false, () => (
-          <LinkButton
-            variant={path().endsWith("/scalar") ? "outline" : undefined}
-            href={`/i/${input.instance?.id}/scalar`}
-            class="w-full"
-            icon={<Icon icon={BookOpen} />}
-          >
-            API Reference
-          </LinkButton>
-        ))}
+        <div class="flex flex-col">
+          <div class="text-sm font-semibold text-areia-surface-muted-foreground mb-1">System</div>
+          {when(input.meta?.tables.some((table) => table.name === "file") ?? false, () => (
+            <LinkButton
+              variant={path().endsWith("/files") ? "outline" : undefined}
+              href={`/i/${input.instance?.id}/files`}
+              class="w-full"
+              icon={<Icon icon={FolderOpen} />}
+            >
+              Files
+            </LinkButton>
+          ))}
+          {when(input.meta?.openapi ?? false, () => (
+            <LinkButton
+              variant={path().endsWith("/scalar") ? "outline" : undefined}
+              href={`/i/${input.instance?.id}/scalar`}
+              class="w-full"
+              icon={<Icon icon={BookOpen} />}
+            >
+              API Reference
+            </LinkButton>
+          ))}
+        </div>
       </div>
       <LinkButton href="/i" variant="outline" class="w-full" icon={<Icon icon={ArrowRightLeft} />}>
         {input.instance?.name}

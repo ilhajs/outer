@@ -33,7 +33,7 @@ export default ilha
     if (!input.url || !input.meta?.openapi) return;
     const mount = document.querySelector<HTMLElement>("[data-scalar-mount]");
     if (!mount) return;
-    const app = createApiReference(mount, { url: input.url });
+    const app = createApiReference(mount, { url: input.url, hideDarkModeToggle: true });
     return () => app.destroy();
   })
   // min-h-0 lets the scroll container shrink inside the flex column instead of

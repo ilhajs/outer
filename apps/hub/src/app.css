@@ -1,6 +1,11 @@
 @import "tailwindcss";
 @plugin "areia";
 
+* {
+  --font-sans: "Geist Variable", sans-serif;
+  --font-mono: "Geist Mono Variable", monospace;
+}
+
 [data-ilha-slot] {
   @apply contents;
 }
