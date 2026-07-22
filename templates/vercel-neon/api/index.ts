@@ -4,6 +4,8 @@ import { schema, timestamps } from "@outerjs/server/schema";
 import { type OuterStorage } from "@outerjs/server/storage";
 import { del, get, put } from "@vercel/blob";
 import { NeonDialect } from "kysely-neon";
+import { createStorage } from "unstorage";
+import vercelRuntimeCacheDriver from "unstorage/drivers/vercel-runtime-cache";
 import { z } from "zod";
 
 // TODO: Set DATABASE_URL and AUTH_SECRET in your Vercel project env — the AUTH_SECRET fallback is for local development only
@@ -67,6 +69,10 @@ const outer = new Outer({
   },
   // Serverless functions have no persistent disk, so uploaded bytes go to Vercel Blob
   storage: vercelBlob,
+  // `context.kv`, backed by Vercel's Runtime Cache — built into the runtime, no store to
+  // provision. It's a cache (entries can be evicted, and it can't list keys), so use it for
+  // rate-limit counters, feature flags, and idempotency keys, not anything you can't recompute.
+  kv: createStorage({ driver: vercelRuntimeCacheDriver({ ttl: 60 }) }),
 })
   .schema(v1_0_0)
   .auth({
@@ -83,11 +89,16 @@ const outer = new Outer({
   .resource("post", { readonly: ["createdAt", "updatedAt"] })
   .procedure("post.count", (base) =>
     base.output(z.object({ count: z.number() })).handler(async ({ context }) => {
+      // Serve a cached count when the Runtime Cache still has it — a typical `context.kv` use.
+      const cached = await context.kv?.getItem<number>("post:count");
+      if (typeof cached === "number") return { count: cached };
       const rows = await context.db
         .selectFrom("post")
         .select(context.db.fn.countAll().as("count"))
         .execute();
-      return { count: Number(rows[0]?.count ?? 0) };
+      const count = Number(rows[0]?.count ?? 0);
+      await context.kv?.setItem("post:count", count, { ttl: 60 });
+      return { count };
     }),
   )
   .build();

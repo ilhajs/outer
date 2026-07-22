@@ -60,6 +60,16 @@ Uploads are buffered in the function's memory, so `maxBytes` (10 MB here) is a r
 
 Set `DATABASE_URL` in your Vercel project's environment variables too (`BLOB_READ_WRITE_TOKEN` is added for you when the Blob store is created) — `.env` is only read locally by `vercel dev`/`npm run migrate`, and `buildCommand` needs `DATABASE_URL` available at build time (Vercel exposes project env vars to both build and runtime by default, so this should just work once it's set).
 
+## Key/value store
+
+`new Outer({ kv })` surfaces a store as `context.kv`, backed here by Vercel's [Runtime Cache](https://vercel.com/docs/functions/runtime-cache) through unstorage's `vercel-runtime-cache` driver. It's built into the Vercel runtime — no store to provision, no env vars, no local emulation to run:
+
+```ts
+kv: createStorage({ driver: vercelRuntimeCacheDriver({ ttl: 60 }) });
+```
+
+Runtime Cache **replaces Vercel KV**, which Vercel is sunsetting. It's a _cache_, not durable storage: entries honor `ttl` (in seconds) but may be evicted early, and the API can't list keys — `getKeys` returns `[]`, so `getKeys`/`clear` won't enumerate. The `post.count` procedure shows the intended shape — read `context.kv` first, recompute and re-cache on a miss — so use it for counters, feature flags, and idempotency keys, not for anything you can't recompute.
+
 ## Scripts
 
 | Command           | Description                                                                                                                                  |

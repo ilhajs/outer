@@ -43,20 +43,20 @@ The `schema`, `secrets`, and `storage` members are only available from their sub
 
 ## `new Outer(params)`
 
-| Param        | Type                     | Default         | Description                                                                                                                 |
-| ------------ | ------------------------ | --------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `name`       | `string`                 | `"Outer API"`   | API title in OpenAPI spec                                                                                                   |
-| `baseUrl`    | `string`                 | —               | Default `baseURL` passed to Better Auth when `.auth()` is called (override per-call via `.auth({ baseURL })`)               |
-| `db.dialect` | `Dialect`                | —               | Required. A Kysely `Dialect` — see below                                                                                    |
-| `db.kind`    | `"postgres" \| "sqlite"` | —               | Required. Drives DDL generation, Better Auth's schema, and DB error mapping — must match `db.dialect`                       |
-| `db.live`    | `LiveProvider`           | —               | Change feed backing [live queries](#live-queries). `pglite()` supplies one; without it `live*()` throws                     |
-| `cors`       | `CorsConfig`             | —               | Cross-origin browser callers allowed to reach `/rpc/**`, `/api/auth/**`, and the admin API — see CORS below                 |
-| `storage`    | `OuterStorage`           | —               | Object store for file bytes — surfaced as `context.storage` and used by `.files()`                                          |
-| `secrets`    | `OuterSecrets`           | —               | Runtime-agnostic secret accessor — surfaced as `context.secrets`. See [`OuterSecrets`](#outersecrets)                       |
-| `kv`         | `OuterKV`                | —               | Key/value store — surfaced as `context.kv`. Any unstorage instance (Cloudflare KV, Vercel KV, …). See [`OuterKV`](#outerkv) |
-| `onError`    | `(error, info) => void`  | `console.error` | Called for unexpected failures (never for deliberate `ORPCError` responses) — route to your logger or Sentry                |
-| `health`     | `boolean \| { path }`    | `true`          | Mounts `GET /health` with a `select 1` probe. `false` omits it; a `.route()` on the same path wins                          |
-| `rateLimit`  | `RateLimitConfig`        | —               | Per-caller limit on `/rpc/**` and `/rest/**`. Off by default; `/api/auth/**` is excluded                                    |
+| Param        | Type                     | Default         | Description                                                                                                                            |
+| ------------ | ------------------------ | --------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`       | `string`                 | `"Outer API"`   | API title in OpenAPI spec                                                                                                              |
+| `baseUrl`    | `string`                 | —               | Default `baseURL` passed to Better Auth when `.auth()` is called (override per-call via `.auth({ baseURL })`)                          |
+| `db.dialect` | `Dialect`                | —               | Required. A Kysely `Dialect` — see below                                                                                               |
+| `db.kind`    | `"postgres" \| "sqlite"` | —               | Required. Drives DDL generation, Better Auth's schema, and DB error mapping — must match `db.dialect`                                  |
+| `db.live`    | `LiveProvider`           | —               | Change feed backing [live queries](#live-queries). `pglite()` supplies one; without it `live*()` throws                                |
+| `cors`       | `CorsConfig`             | —               | Cross-origin browser callers allowed to reach `/rpc/**`, `/api/auth/**`, and the admin API — see CORS below                            |
+| `storage`    | `OuterStorage`           | —               | Object store for file bytes — surfaced as `context.storage` and used by `.files()`                                                     |
+| `secrets`    | `OuterSecrets`           | —               | Runtime-agnostic secret accessor — surfaced as `context.secrets`. See [`OuterSecrets`](#outersecrets)                                  |
+| `kv`         | `OuterKV`                | —               | Key/value store — surfaced as `context.kv`. Any unstorage instance (Cloudflare KV, Vercel Runtime Cache, …). See [`OuterKV`](#outerkv) |
+| `onError`    | `(error, info) => void`  | `console.error` | Called for unexpected failures (never for deliberate `ORPCError` responses) — route to your logger or Sentry                           |
+| `health`     | `boolean \| { path }`    | `true`          | Mounts `GET /health` with a `select 1` probe. `false` omits it; a `.route()` on the same path wins                                     |
+| `rateLimit`  | `RateLimitConfig`        | —               | Per-caller limit on `/rpc/**` and `/rest/**`. Off by default; `/api/auth/**` is excluded                                               |
 
 ### `onError`
 
@@ -649,7 +649,7 @@ type OuterKV = {
 };
 ```
 
-Pass any unstorage instance as `new Outer({ kv })`: `createStorage()` (in-memory), `createStorage({ driver: cloudflareKVBinding({ binding: env.MY_KV }) })`, `createStorage({ driver: vercelKVDriver() })`, or Nitro's `useStorage()`. `ttl` is in seconds, honored by drivers that support expiry (Cloudflare KV, Vercel KV, Redis) and ignored by the in-memory driver. `context.kv` is `undefined` when `kv` isn't passed.
+Pass any unstorage instance as `new Outer({ kv })`: `createStorage()` (in-memory), `createStorage({ driver: cloudflareKVBinding({ binding: env.MY_KV }) })`, `createStorage({ driver: vercelRuntimeCacheDriver() })`, or Nitro's `useStorage()`. `ttl` is in seconds, honored by drivers that support expiry (Cloudflare KV, Vercel Runtime Cache, Redis) and ignored by the in-memory driver. `context.kv` is `undefined` when `kv` isn't passed.
 
 Unlike `OuterStorage` (a narrow byte contract `.files()` calls internally), KV has no internal consumer forcing a narrow shape, so it keeps unstorage's full API rather than being wrapped down to `get`/`set`/`delete`. Full guide: [Key/value store](/guide/kv).
 

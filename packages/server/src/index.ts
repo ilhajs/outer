@@ -276,7 +276,7 @@ export type OuterParams = {
   /**
    * Key/value store, surfaced as `context.kv`. Pass any
    * [unstorage](https://unstorage.unjs.io) instance — Nitro's `useStorage()`,
-   * a bare `createStorage({ driver })`, or a Cloudflare KV / Vercel KV driver —
+   * a bare `createStorage({ driver })`, or a Cloudflare KV / Vercel Runtime Cache driver —
    * so the same `context.kv.getItem(...)` resolves against whatever backend the
    * host provides, with TTL via `setItem(key, value, { ttl })`.
    */

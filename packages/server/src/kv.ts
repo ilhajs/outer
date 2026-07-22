@@ -3,7 +3,7 @@
  * against [unstorage](https://unstorage.unjs.io)'s `Storage` — the slice apps
  * actually use — so core never imports unstorage and any unstorage instance
  * (Nitro's `useStorage()`, a bare `createStorage(...)`, a Cloudflare KV or
- * Vercel KV driver) assigns to it without an adapter.
+ * Vercel Runtime Cache driver) assigns to it without an adapter.
  *
  * Unlike `OuterStorage` (a narrow byte store `.files()` calls internally), KV
  * has no internal consumer forcing a narrow contract, so it keeps unstorage's

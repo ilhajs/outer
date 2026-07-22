@@ -1,13 +1,13 @@
 ---
 title: Key/value store
-description: Reach a key/value store the same way in every runtime with context.kv — pass any unstorage instance, including Cloudflare KV and Vercel KV, and read it with getItem/setItem plus TTL.
+description: Reach a key/value store the same way in every runtime with context.kv — pass any unstorage instance, including Cloudflare KV and Vercel Runtime Cache, and read it with getItem/setItem plus TTL.
 order: 13
 tags: [kv, key-value, cache, unstorage, cloudflare, vercel, ttl, redis]
 ---
 
 # Key/value store
 
-`context.kv` is a key/value store for the data that doesn't belong in your schema: cache entries, rate-limit counters, ephemeral tokens, feature flags, idempotency keys. You pass any [unstorage](https://unstorage.unjs.io) instance as `new Outer({ kv })`, and every handler reads it the same way — a VPS backed by memory or Redis, Cloudflare Workers backed by KV, or Vercel backed by Vercel KV. The backend difference lives in the driver, not your procedures.
+`context.kv` is a key/value store for the data that doesn't belong in your schema: cache entries, rate-limit counters, ephemeral tokens, feature flags, idempotency keys. You pass any [unstorage](https://unstorage.unjs.io) instance as `new Outer({ kv })`, and every handler reads it the same way — a VPS backed by memory or Redis, Cloudflare Workers backed by KV, or Vercel backed by its Runtime Cache. The backend difference lives in the driver, not your procedures.
 
 It's for values you want fast and optionally expiring. For anything you query, relate, or need transactions on, use [`context.db`](/guide/database) instead — the KV store has no queries, joins, or transactions.
 
@@ -54,7 +54,7 @@ type OuterKV = {
 };
 ```
 
-`getItem` / `setItem` serialize JSON; use the `Raw` variants for binary values. `ttl` is in **seconds** and is honored by the drivers that support expiry (Cloudflare KV, Vercel KV, Redis) — the in-memory driver ignores it. `getKeys(base)` and `clear(base)` scope to a key prefix.
+`getItem` / `setItem` serialize JSON; use the `Raw` variants for binary values. `ttl` is in **seconds** and is honored by the drivers that support expiry (Cloudflare KV, Vercel Runtime Cache, Redis) — the in-memory driver ignores it. `getKeys(base)` and `clear(base)` scope to a key prefix.
 
 `context.kv` is `undefined` when you don't pass `kv`. Guard for it, or make it required in your own context type.
 
@@ -83,24 +83,24 @@ export default {
 
 Construct the store inside `fetch` (or your Durable Object constructor), where the `env` binding is available. Cloudflare KV honors `ttl` down to a 60-second minimum.
 
-## Vercel KV
+## Vercel Runtime Cache
 
-Set the `KV_REST_API_URL` and `KV_REST_API_TOKEN` environment variables from your Vercel KV store, then use the Vercel KV driver:
+Vercel's Runtime Cache is available in the Vercel runtime with no store to provision and no environment variables to set — pass the driver and go. (It replaces Vercel KV, which Vercel is sunsetting.)
 
 ```ts
 import { Outer } from "@outerjs/server";
 import { createStorage } from "unstorage";
-import vercelKVDriver from "unstorage/drivers/vercel-kv";
+import vercelRuntimeCacheDriver from "unstorage/drivers/vercel-runtime-cache";
 
 const outer = new Outer({
   db: { dialect: myDialect, kind: "postgres" },
-  kv: createStorage({ driver: vercelKVDriver() }),
+  kv: createStorage({ driver: vercelRuntimeCacheDriver({ ttl: 60 }) }),
 })
   .schema(v1_0)
   .build();
 ```
 
-Vercel KV is Redis-backed, so `ttl` works with no minimum.
+It's a **cache**, not durable storage: entries honor `ttl` (in seconds) but may be evicted early, and the API can't list keys — `getKeys` returns `[]`, so `getKeys`/`clear` won't enumerate. Use it for the cache-shaped data above (rate-limit counters, feature flags, idempotency keys), not for anything you can't recompute.
 
 ## Nitro and other hosts
 

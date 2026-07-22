@@ -61,6 +61,7 @@ const outer = new Outer({
   db: pglite(), // embedded Postgres + pgvector; swap for any Kysely Dialect
   cors: { origins: ["https://app.example.com"], credentials: true },
   storage: fromUnstorage(createStorage({ driver: fsLite({ base: ".outer/files" }) })),
+  kv: createStorage(), // context.kv — any unstorage driver (Redis, Cloudflare KV, Vercel Runtime Cache, …)
   secrets, // surfaced as context.secrets
   rateLimit: { max: 100, windowMs: 60_000 }, // per-caller on /rpc + /rest
 })
