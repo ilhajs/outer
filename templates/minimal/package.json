@@ -20,6 +20,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@tsconfig/strictest": "^2.0.8",
     "tsdown": "^0.22.3",
     "typescript": "^6.0.3"
   }
