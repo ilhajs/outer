@@ -1,16 +1,24 @@
+<div align="center">
+
 # Outer
 
-**Own your backend.** Outer is an open-source alternative to Supabase, PocketBase, and Firebase where you own 100% of the solution and the data — no hosted control plane, no per-project pricing, nothing leaving your box. One TypeScript builder chain gives you a real Postgres database, auth, typed RPC, auto-generated CRUD with row-level permissions, file uploads, migrations, realtime, and OpenAPI — compiled into a single fetch-compatible handler you can deploy to a $5 VPS, Coolify, Cloudflare Workers, or Vercel.
+### The open-source backend for the agentic internet.
 
-Built on proven pieces — [Kysely](https://kysely.dev), [oRPC](https://orpc.unnoq.com), [Better Auth](https://better-auth.com), and [PGlite](https://pglite.dev) — instead of reinventing them.
+**Define a procedure once — serve it as typed RPC, REST, an OpenAPI spec, and an MCP tool your agents can call.** Real Postgres with pgvector, running on the same box as your app. No hosted control plane, no per-project pricing, nothing leaving your machine.
 
-## Quick start
+`Self-hosted` · `MIT licensed` · `Alpha`
+
+</div>
+
+Outer is an open-source alternative to Supabase, PocketBase, and Firebase where **you own 100% of the solution and the data**. One TypeScript builder chain gives you a Postgres database, auth, typed RPC, auto-generated CRUD with row-level permissions, file uploads, migrations, realtime, OpenAPI, and an MCP server — compiled into a single fetch-compatible handler you can drop on a $5 VPS, Coolify, Cloudflare Workers, or Vercel.
+
+It's built on pieces you already trust — [Kysely](https://kysely.dev), [oRPC](https://orpc.unnoq.com), [Better Auth](https://better-auth.com), and [PGlite](https://pglite.dev) — instead of reinventing them. `.outer/pglite` is a folder you own; there is no dashboard between you and your data.
 
 ```bash
 npx giget@latest gh:ilhajs/outer/templates/minimal my-outer-app
 ```
 
-Or from scratch — this is a complete backend:
+## A complete backend, from one file
 
 ```ts
 import { fromUnstorage, Outer, schema } from "@outerjs/server";
@@ -20,7 +28,7 @@ import { createStorage } from "unstorage";
 import fsLite from "unstorage/drivers/fs-lite";
 
 const v1_0 = schema("1.0.0")
-  .auth() // Better Auth tables (user, session, account, verification) + admin plugin fields
+  .auth() // Better Auth tables (user, session, account, verification) + admin fields
   .table("post", (t) => ({
     id: t.serial().primaryKey(),
     title: t.text(),
@@ -37,76 +45,102 @@ const outer = new Outer({
   storage: fromUnstorage(createStorage({ driver: fsLite({ base: ".outer/files" }) })),
 })
   .schema(v1_0)
-  .auth({ secret: process.env.AUTH_SECRET! })
-  .openapi()
-  .admin()
-  .files() // file.upload / list / get / delete / attach / detach + GET /files/:id
+  .auth({ secret: process.env.AUTH_SECRET! }) // sign-up, sessions, social — at /api/auth/**
+  .openapi() // GET /openapi.json + a plain-JSON REST surface at /rest/**
+  .admin() // schema introspection + table CRUD at /rpc/_admin/**, admin-gated
+  .mcp() // the same router, as MCP tools an agent can call, at /mcp
+  .files() // upload / download / attach + GET /files/:id, private to the uploader
   .resource("post", {
+    // six typed CRUD endpoints with row-level permissions
     permissions: { create: "authenticated", update: "owner", delete: "owner" },
     ownerColumn: "userId",
   })
-  .procedure("hello", (base) => base.handler(() => "world"))
+  .procedure("hello", (base) => base.handler(() => "world")) // your own typed RPC
   .build();
 
 await outer.migrator.migrateToLatest();
-serve({ fetch: (req) => outer.handle(req) });
+serve({ fetch: (req) => outer.handle(req) }); // outer.handle is a plain Fetch handler
 ```
 
-With zero extra setup, that's:
+That's auth, six CRUD endpoints for `post` with ownership enforced, file uploads, an admin API, an OpenAPI spec, an MCP endpoint, a custom procedure, and versioned migrations — backed by embedded Postgres that writes to local disk, with **zero infrastructure to run**.
 
-- A local **Postgres database** ([PGlite](https://pglite.dev) — real embedded Postgres, not SQLite pretending), schema-driven **migrations**, and a typed `context.db` (Kysely + a Prisma-style read API)
-- **Auth** — sign-up, sign-in, sessions, social providers — via Better Auth at `/api/auth/**`, with the auth tables registered in one call (`schema().auth()`)
-- Auto-generated **CRUD procedures** per table via `.resource()`, with per-action permissions: `public` / `authenticated` / `admin` / `owner` / your own function
-- **Type-safe RPC** at `/rpc/**`, plus opt-in **OpenAPI** (`/openapi.json`) with a spec-accurate plain-JSON surface at `/rest/**`
-- **File uploads** via `.files()` — a typed `file.upload` and a `GET /files/:id` download route, private to the uploader by default, with the bytes in unstorage, S3/R2, or Vercel Blob and only the metadata in Postgres
-- An **admin API** via `.admin()` — schema introspection, migration status, and table CRUD under `/rpc/_admin/**`, guarded by the admin role, ready for a dashboard to consume
-- **Realtime streaming** (SSE) via oRPC event iterators — no extra infrastructure
+## Why developers pick Outer
 
-Serving a browser frontend from another origin? Pass `cors` to the constructor: `new Outer({ cors: { origins: [...] } })` — it covers `/rpc/**`, `/api/auth/**`, and the admin API, and feeds Better Auth's `trustedOrigins`.
+|                 | A hosted BaaS                                                               | Outer                                                                                                       |
+| :-------------- | :-------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------- |
+| **Your data**   | Lives in someone else's database, behind their dashboard and their billing. | Lives in your Postgres, on your infra. `.outer/pglite` is a folder you own.                                 |
+| **Your auth**   | A black box you configure through a settings UI.                            | [Better Auth](https://better-auth.com) — real code you read, extend, and call directly from `context.auth`. |
+| **Your client** | Generated after the fact, and quietly drifts from your schema.              | Inferred straight from your server. If it compiles, it matches.                                             |
+| **Scaling**     | Means picking a new pricing plan past the free tier.                        | Means giving the box you already pay for more CPU and RAM.                                                  |
 
-And because `outer.handle(request)` is a plain Fetch handler, it mounts unchanged into Bun, Node, srvx, Nitro, Hono, H3, or Next.js API Routes.
+## One router, four surfaces
 
-## End-to-end types
+Define a procedure once. Outer serves it four ways, with no second definition to keep in sync:
 
-Pair it with `@outerjs/sdk` on the client for a fully typed RPC + auth client in one call — every `.procedure()`'s input and output flows to your frontend:
+- **Typed RPC** at `/rpc/**` — the wire protocol `@outerjs/sdk` speaks, end to end.
+- **REST + OpenAPI** — a spec-accurate plain-JSON surface at `/rest/**`, plus `GET /openapi.json`.
+- **MCP tools** at `/mcp` — `.mcp()` hands agents your _shipped business logic_, not raw database access, inheriting the exact permissions your app already enforces. (`post.search` becomes the `post_search` tool.)
+
+Add `.admin()` for a self-describing admin API — schema introspection, migration status, and table CRUD — ready for a dashboard to drive.
+
+## What one chain gives you
+
+With zero extra setup:
+
+- **Real Postgres, embedded** — [PGlite](https://pglite.dev) is actual Postgres in your process (not SQLite pretending), with **pgvector bundled in** for vector search on a $4 box. Prefer Neon, Durable Objects, or network Postgres? Pass any Kysely `Dialect` and the whole chain is unchanged.
+- **A typed `context.db`** — Kysely for writes, a Prisma-style read API (`findMany`, `where` operators, `include`, cursor `paginate`) via `context.db.query`, and `context.db.transact()` for transactions that span both.
+- **Auto-generated CRUD** per table via `.resource()`, with per-action permissions — `public` / `authenticated` / `admin` / `owner` / your own function — plus field-level write control (`writable` / `readonly`) so a client can never spoof a server-managed column.
+- **File uploads** via `.files()` — typed `file.upload` and a `GET /files/:id` route, private to the uploader by default (a 404, never a 403), bytes in unstorage / S3·R2 / Vercel Blob and only metadata in Postgres. Downloads are hardened against stored XSS out of the box.
+- **Realtime, no broker** — an async generator in a `.procedure()` streams over SSE with resumable delivery, and `context.db.query.<table>.live()` turns any read into a reactive stream on PGlite.
+- **Schema-driven migrations** — versioned, diffed, and applied from your `schema()`.
+
+## Schema to SSR, no HTTP hop
+
+`outer.client()` calls your procedures in-process during server rendering — same types, no serialization, no localhost round-trip:
+
+```ts
+// In a Server Component / server function, in the same process as Outer:
+const api = outer.client(() => headers()); // sees the caller's session, runs permission checks
+const posts = await api.post.list();
+```
+
+On the client, `@outerjs/sdk` gives you a fully typed RPC + auth client in one call — every `.procedure()`'s input and output flows to your frontend, with **no codegen step and no SDK to regenerate**:
 
 ```ts
 import { createClient } from "@outerjs/sdk";
 import type { InferRouter } from "@outerjs/server";
 import type { outer } from "./server";
 
-type Router = InferRouter<typeof outer>;
-
-export const client = createClient<Router>({
+export const client = createClient<InferRouter<typeof outer>>({
   baseUrl: "http://localhost:3000",
 })
   .auth()
   .build();
 
-await client.hello(); // "world" — typed
+await client.hello(); // "world" — typed. Rename it on the server and this turns red.
 ```
+
+Because `outer.handle(request)` is a plain `(Request) => Promise<Response>`, it mounts unchanged into Bun, Node, srvx, Nitro, Hono, H3, or Next.js API Routes.
 
 ## Deploy anywhere
 
-The `pglite()` default writes to local disk, which makes persistent hosts (VPS, Coolify, any long-lived process) a zero-infra deploy. On serverless/edge, swap in any Kysely dialect — the templates show both paths:
+The `pglite()` default writes to local disk, so any persistent host (VPS, Coolify, a long-lived process) is a zero-infra deploy. On serverless/edge, swap in a Kysely dialect — the templates show both paths, and heavy or platform-specific pieces are optional peers, so a Workers deploy never downloads PGlite's WASM.
 
-| Template      | Stack                                                                                           | Command                                                         |
+| Template      | Stack                                                                                           | Scaffold                                                        |
 | ------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
 | `minimal`     | Bare Outer server behind [srvx](https://srvx.h3.dev)                                            | `npx giget@latest gh:ilhajs/outer/templates/minimal my-app`     |
 | `ilha`        | Full-stack: Outer in a [Nitro](https://nitro.build) entry + [Ilha](https://ilha.build) frontend | `npx giget@latest gh:ilhajs/outer/templates/ilha my-app`        |
 | `cloudflare`  | Cloudflare Workers — Durable Object SQLite for data, R2 for uploads                             | `npx giget@latest gh:ilhajs/outer/templates/cloudflare my-app`  |
 | `vercel-neon` | Vercel functions — [Neon](https://neon.tech) Postgres for data, Vercel Blob for uploads         | `npx giget@latest gh:ilhajs/outer/templates/vercel-neon my-app` |
 
-Heavy or platform-specific dependencies are optional peers, so a Workers deploy never downloads PGlite's WASM and a server that skips `.openapi()` never installs the OpenAPI toolchain.
-
 ## Documentation
 
-- [SPEC.md](./SPEC.md) — the full API reference: builder chain, schema and migrations, resource permissions, the Sola query API, realtime, type extraction
-- Guides on the website: getting started and deployment (`apps/website`)
+- [SPEC.md](./SPEC.md) — the full API reference: builder chain, schema and migrations, resource permissions, the Sola query API, realtime, MCP, type extraction.
+- Guides and API reference on the website (`apps/website`).
 
 ## Repo layout
 
-This is a Bun workspace monorepo:
+A Bun workspace monorepo:
 
 | Path              | Description                                            |
 | ----------------- | ------------------------------------------------------ |
@@ -127,4 +161,4 @@ bun run fmt     # oxfmt
 
 ## License
 
-MIT
+MIT — no telemetry, nothing phoning home. The whole thing runs on hardware you already pay for.
