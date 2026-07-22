@@ -2,7 +2,8 @@ import { test, describe, beforeAll, expect } from "bun:test";
 
 import { z } from "zod/v4";
 
-import { Outer, schema } from "./index";
+import { Outer } from "./index";
+import { schema } from "./schema";
 import { fastPasswordHashing, testDb } from "./test-utils";
 
 const s = schema("1.0.0")

@@ -5,8 +5,9 @@ import { ORPCError } from "@orpc/client";
 import { admin as betterAuthAdmin } from "better-auth/plugins";
 import { PGliteDialect } from "kysely";
 
-import { Outer, schema } from "./index";
+import { Outer } from "./index";
 import { pglite } from "./pglite";
+import { schema } from "./schema";
 import { testAuth, testDb } from "./test-utils";
 
 const s = schema("1.0.0")

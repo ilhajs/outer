@@ -35,6 +35,18 @@
     "./pglite": {
       "types": "./dist/pglite.d.mts",
       "import": "./dist/pglite.mjs"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.mts",
+      "import": "./dist/schema.mjs"
+    },
+    "./secrets": {
+      "types": "./dist/secrets.d.mts",
+      "import": "./dist/secrets.mjs"
+    },
+    "./storage": {
+      "types": "./dist/storage.d.mts",
+      "import": "./dist/storage.mjs"
     }
   },
   "publishConfig": {

@@ -1,7 +1,13 @@
 import { defineConfig } from "tsdown";
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/pglite.ts"],
+  entry: {
+    index: "src/index.ts",
+    pglite: "src/pglite.ts",
+    schema: "src/entry/schema.ts",
+    secrets: "src/entry/secrets.ts",
+    storage: "src/entry/storage.ts",
+  },
   platform: "node",
   dts: true,
   // Don't ship minified library code — avoids double-minification edge cases

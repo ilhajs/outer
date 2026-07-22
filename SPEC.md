@@ -25,6 +25,22 @@ Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`
 
 ---
 
+## Package entry points
+
+The core builder and its context types come from the package root. The schema DSL, secret accessors, and storage adapters are also published as subpath entries, so you can import just the surface you use:
+
+| Import                    | Members                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------- |
+| `@outerjs/server`         | `Outer`, `ORPCError`, `mcp`, `liveIterable`, `memoryRateLimitStore`, and all context types  |
+| `@outerjs/server/pglite`  | `pglite`                                                                                    |
+| `@outerjs/server/schema`  | `schema`, `timestamps`, `parseSet`, `toSet`, `InferDB`, `SchemaResult`, and the table types |
+| `@outerjs/server/secrets` | `fromEnv`, `fromRecord`, `fromSchema`, `memorySecrets`, `OuterSecrets`, `StandardSchemaV1`  |
+| `@outerjs/server/storage` | `fromUnstorage`, `fromS3`, `memoryStorage`, `OuterStorage`                                  |
+
+The `schema`, `secrets`, and `storage` members are only available from their subpaths — the root exports the builder and context types.
+
+---
+
 ## `new Outer(params)`
 
 | Param        | Type                     | Default         | Description                                                                                                   |

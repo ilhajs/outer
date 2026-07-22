@@ -3,7 +3,8 @@ import { test, describe, beforeAll, expect } from "bun:test";
 import { apiKey } from "@better-auth/api-key";
 import { z } from "zod/v4";
 
-import { Outer, mcp, schema } from "./index";
+import { Outer, mcp } from "./index";
+import { schema } from "./schema";
 import { fastPasswordHashing, testDb } from "./test-utils";
 
 const s = schema("1.0.0")

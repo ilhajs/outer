@@ -11,6 +11,20 @@ Complete reference for `@outerjs/server`: the `Outer` constructor, every builder
 
 For task-oriented explanations, start with the guides — [Schema](/guide/schema), [Permissions](/guide/permissions), and [Procedures](/guide/procedures).
 
+## Package entry points
+
+Import the core builder from the root and the rest from subpath entries:
+
+| Import                    | Members                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------- |
+| `@outerjs/server`         | `Outer`, `ORPCError`, `mcp`, `liveIterable`, `memoryRateLimitStore`, and all context types  |
+| `@outerjs/server/pglite`  | `pglite`                                                                                    |
+| `@outerjs/server/schema`  | `schema`, `timestamps`, `parseSet`, `toSet`, `InferDB`, `SchemaResult`, and the table types |
+| `@outerjs/server/secrets` | `fromEnv`, `fromRecord`, `fromSchema`, `memorySecrets`, `OuterSecrets`, `StandardSchemaV1`  |
+| `@outerjs/server/storage` | `fromUnstorage`, `fromS3`, `memoryStorage`, `OuterStorage`                                  |
+
+The `schema`, `secrets`, and `storage` members are only importable from their subpaths — the root exports the builder and context types.
+
 ## `new Outer(params)`
 
 ```ts

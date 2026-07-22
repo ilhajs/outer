@@ -1,7 +1,8 @@
 import { serve } from "srvx";
 
-import { Outer, schema } from "../src/index";
+import { Outer } from "../src/index";
 import { pglite } from "../src/pglite";
+import { schema } from "../src/schema";
 
 const v1_0 = schema("1.0.0")
   .table("user", (t) => ({

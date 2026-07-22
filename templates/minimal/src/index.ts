@@ -1,7 +1,9 @@
 import { existsSync } from "node:fs";
 
-import { fromSchema, fromUnstorage, Outer, type InferRouter } from "@outerjs/server";
+import { Outer, type InferRouter } from "@outerjs/server";
 import { pglite } from "@outerjs/server/pglite";
+import { fromSchema } from "@outerjs/server/secrets";
+import { fromUnstorage } from "@outerjs/server/storage";
 import { emailOTP } from "better-auth/plugins";
 import { serve } from "srvx";
 import { createStorage } from "unstorage";

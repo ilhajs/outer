@@ -1,6 +1,7 @@
 import { v1_0_0 } from "$lib/schemas/v1-0-0";
-import { fromUnstorage, Outer, type InferRouter } from "@outerjs/server";
+import { Outer, type InferRouter } from "@outerjs/server";
 import { pglite } from "@outerjs/server/pglite";
+import { fromUnstorage } from "@outerjs/server/storage";
 import { admin, emailOTP } from "better-auth/plugins";
 import { useRuntimeConfig } from "nitro/runtime-config";
 import { useStorage } from "nitro/storage";

@@ -2,8 +2,9 @@ import { test, describe, expect, beforeAll } from "bun:test";
 
 import { z } from "zod/v4";
 
-import { Outer, schema, timestamps } from "./index";
+import { Outer } from "./index";
 import { pglite } from "./pglite";
+import { schema, timestamps } from "./schema";
 import { fastPasswordHashing, testDb } from "./test-utils";
 
 // Better Auth core tables (via schema().auth()) plus an app table

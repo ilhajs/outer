@@ -1,5 +1,7 @@
 import { neon } from "@neondatabase/serverless";
-import { Outer, schema, type InferRouter, type OuterStorage, timestamps } from "@outerjs/server";
+import { Outer, type InferRouter } from "@outerjs/server";
+import { schema, timestamps } from "@outerjs/server/schema";
+import { type OuterStorage } from "@outerjs/server/storage";
 import { del, get, put } from "@vercel/blob";
 import { NeonDialect } from "kysely-neon";
 import { z } from "zod";

@@ -2,7 +2,8 @@ import { test, describe, expect } from "bun:test";
 
 import { ORPCError } from "@orpc/client";
 
-import { Outer, memoryRateLimitStore, schema } from "./index";
+import { Outer, memoryRateLimitStore } from "./index";
+import { schema } from "./schema";
 import { testDb } from "./test-utils";
 
 const s = schema("1.0.0")

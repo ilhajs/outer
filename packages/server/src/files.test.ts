@@ -1,7 +1,9 @@
 import { test, describe, expect, beforeAll } from "bun:test";
 
-import { Outer, schema, memoryStorage, type OuterStorage } from "./index";
+import { Outer } from "./index";
 import { pglite } from "./pglite";
+import { schema } from "./schema";
+import { memoryStorage, type OuterStorage } from "./storage";
 import { testAuth, testDb } from "./test-utils";
 
 const v1 = schema("1.0.0")

@@ -1,4 +1,6 @@
-import { Outer, fromRecord, type InferRouter, type OuterStorage } from "@outerjs/server";
+import { Outer, type InferRouter } from "@outerjs/server";
+import { fromRecord } from "@outerjs/server/secrets";
+import { type OuterStorage } from "@outerjs/server/storage";
 import { emailOTP } from "better-auth/plugins";
 import { DurableObject } from "cloudflare:workers";
 import { DurableObjectSqliteDialect } from "kysely-durable-objects";

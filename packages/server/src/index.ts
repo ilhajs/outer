@@ -26,24 +26,19 @@ import {
   ResourceOptions,
   ResourceProcedures,
 } from "./resource";
-import { schema, timestamps, SchemaResult, InferDB, TablesDef, ColumnDef } from "./schema";
-import { fromEnv, fromRecord, fromSchema, memorySecrets, OuterSecrets } from "./secrets";
+import type { SchemaResult, InferDB, TablesDef, ColumnDef } from "./schema";
+import type { OuterSecrets } from "./secrets";
 import { createSola, Sola } from "./sola";
-import { fromUnstorage, fromS3, memoryStorage, OuterStorage } from "./storage";
+import type { OuterStorage } from "./storage";
 
-export { schema, timestamps };
-export { fromUnstorage, fromS3, memoryStorage };
-export { fromEnv, fromRecord, fromSchema, memorySecrets };
-export type { OuterStorage } from "./storage";
-export type { OuterSecrets, StandardSchemaV1 } from "./secrets";
+// The schema, secrets, and storage surfaces live in their own subpath entries:
+// `@outerjs/server/schema`, `/secrets`, `/storage`.
 export type { LiveProvider } from "./live";
 export { liveIterable } from "./live";
 export type { FilesConfig, FilesRouter, FilePermission, FileRecord } from "./files";
 /** Throw from a handler to return a specific HTTP status instead of a 500. */
 export { ORPCError };
-export type { ApiKeyTable, AuthOptions, AuthTables, FileTables, FilesOptions } from "./schema";
 export { mcp };
-export { parseSet, toSet } from "./schema";
 export type { ResourceOptions, DialectKind };
 export type {
   AdminConfig,
