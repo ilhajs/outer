@@ -591,7 +591,7 @@
 
     "@types/ms": ["@types/ms@2.1.0", "", {}, "sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA=="],
 
-    "@types/node": ["@types/node@26.1.1", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-nxAkRSVkN1Y0JC1W8ky/fTfkGsMmcrRsbx+3XoZE+rMOX71kLYTV7fLXpqud1GpbpP5TuffXFqfX7fH2GgZREw=="],
+    "@types/node": ["@types/node@24.13.3", "", { "dependencies": { "undici-types": "~7.18.0" } }, "sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q=="],
 
     "@types/unist": ["@types/unist@3.0.3", "", {}, "sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q=="],
 
@@ -1271,7 +1271,7 @@
 
     "unconfig-core": ["unconfig-core@7.5.0", "", { "dependencies": { "@quansync/fs": "^1.0.0", "quansync": "^1.0.0" } }, "sha512-Su3FauozOGP44ZmKdHy2oE6LPjk51M/TRRjHv2HNCWiDvfvCoxC2lno6jevMA91MYAdCdwP05QnWdWpSbncX/w=="],
 
-    "undici-types": ["undici-types@8.3.0", "", {}, "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ=="],
+    "undici-types": ["undici-types@7.18.2", "", {}, "sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w=="],
 
     "unhead": ["unhead@3.2.2", "", { "dependencies": { "hookable": "^6.1.1", "unplugin": "^3.3.0" }, "peerDependencies": { "vite": ">=6.4.2" }, "optionalPeers": ["vite"] }, "sha512-1sp6E2pzYneEdLlhzboRSZJlJgqugvzfNP5hNYntx9YZmSRNT6KewddzMWUPfmo3qUgWlKxuKvI2mrjcnQ9SjA=="],
 
@@ -1349,11 +1349,9 @@
 
     "@orpc/openapi/rou3": ["rou3@0.9.1", "", {}, "sha512-z/sSmzvtwMDDnxsPVhfWMuG6F6mbmhFDXoVqLmMfbpDD9qfV3GDmSQpf0+W296/ZDIpW2wcMmBfpVFzcnOi/nA=="],
 
-    "@outerjs/hub/@outerjs/sdk": ["@outerjs/sdk@https://pkg.pr.new/ilhajs/outer/@outerjs/sdk@main", { "dependencies": { "@orpc/client": "2.0.0-beta.18", "@orpc/server": "2.0.0-beta.18", "better-auth": "1.6.24" } }, "sha512-Jh0JOJUeKMLKYY/8L0w0VEL5jazep/V2WbACHonbeIdgdYkVtDtG1AwabyZZpQAILgQgOfVfIr+KtUUpG+noTQ=="],
+    "@outerjs/hub/@outerjs/sdk": ["@outerjs/sdk@https://pkg.pr.new/ilhajs/outer/@outerjs/sdk@main", { "dependencies": { "@orpc/client": "2.0.0-beta.18", "@orpc/server": "2.0.0-beta.18", "better-auth": "1.6.24" } }, "sha512-x0lEj25g3pjwp5NzrUjN7wdQfOWZhl3xZpSOZ7KJlnW3h/6o96QScYITaJe61B86bVc5izzLrS4ozoXMOKf5Xg=="],
 
-    "@outerjs/hub/@outerjs/server": ["@outerjs/server@https://pkg.pr.new/ilhajs/outer/@outerjs/server@main", { "dependencies": { "@orpc/client": "2.0.0-beta.18", "@orpc/server": "2.0.0-beta.18", "better-auth": "1.6.24", "kysely": "0.29.2", "zod": "4.4.3" }, "peerDependencies": { "@better-auth/api-key": "^1.6.23", "@electric-sql/pglite": "0.5.4", "@electric-sql/pglite-pgvector": "0.0.5", "@orpc/openapi": "2.0.0-beta.18", "@orpc/zod": "2.0.0-beta.18", "h3": "^2.0.1-rc.22", "orpc-mcp": "^0.1.1" }, "optionalPeers": ["@better-auth/api-key", "@electric-sql/pglite", "@electric-sql/pglite-pgvector", "@orpc/openapi", "@orpc/zod", "orpc-mcp"] }, "sha512-qolqcLnCfvzvGMIVSIfEnxALqNmFiJ1T1XqN4P/S5hlBrZ8pO86AnbpmKFBSiiCc0RFgtx4dlJllSOdbWpMacg=="],
-
-    "@scalar/icons/@types/node": ["@types/node@24.13.3", "", { "dependencies": { "undici-types": "~7.18.0" } }, "sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q=="],
+    "@outerjs/hub/@outerjs/server": ["@outerjs/server@https://pkg.pr.new/ilhajs/outer/@outerjs/server@main", { "dependencies": { "@orpc/client": "2.0.0-beta.18", "@orpc/server": "2.0.0-beta.18", "better-auth": "1.6.24", "kysely": "0.29.2", "zod": "4.4.3" }, "peerDependencies": { "@better-auth/api-key": "^1.6.23", "@electric-sql/pglite": "0.5.4", "@electric-sql/pglite-pgvector": "0.0.5", "@orpc/openapi": "2.0.0-beta.18", "@orpc/zod": "2.0.0-beta.18", "h3": "^2.0.1-rc.22", "orpc-mcp": "^0.1.1" }, "optionalPeers": ["@better-auth/api-key", "@electric-sql/pglite", "@electric-sql/pglite-pgvector", "@orpc/openapi", "@orpc/zod", "orpc-mcp"] }, "sha512-130J2CxQebiZRdZPb6Qki5hR2LdrC4GpIlkLPj6V0m+WghmX56VaTELVB5+pa0c2rijhjdyooAjamyVcWYr+Vw=="],
 
     "@scalar/use-hooks/tailwind-merge": ["tailwind-merge@3.5.0", "", {}, "sha512-I8K9wewnVDkL1NTGoqWmVEIlUcB9gFriAEkXkfCjX5ib8ezGxtR3xD7iZIxrfArjEsH7F1CHD4RFUtxefdqV/A=="],
 
@@ -1398,8 +1396,6 @@
     "radix-vue/@vueuse/shared": ["@vueuse/shared@10.11.1", "", { "dependencies": { "vue-demi": ">=0.14.8" } }, "sha512-LHpC8711VFZlDaYUXEBbFBCQ7GS3dVU9mjOhhMhXP6txTV4EhYQg/KGnQuvt/sPAtoUKq7VVUnL6mVtFoL42sA=="],
 
     "vite/rolldown": ["rolldown@1.1.5", "", { "dependencies": { "@oxc-project/types": "=0.139.0", "@rolldown/pluginutils": "^1.0.0" }, "optionalDependencies": { "@rolldown/binding-android-arm64": "1.1.5", "@rolldown/binding-darwin-arm64": "1.1.5", "@rolldown/binding-darwin-x64": "1.1.5", "@rolldown/binding-freebsd-x64": "1.1.5", "@rolldown/binding-linux-arm-gnueabihf": "1.1.5", "@rolldown/binding-linux-arm64-gnu": "1.1.5", "@rolldown/binding-linux-arm64-musl": "1.1.5", "@rolldown/binding-linux-ppc64-gnu": "1.1.5", "@rolldown/binding-linux-s390x-gnu": "1.1.5", "@rolldown/binding-linux-x64-gnu": "1.1.5", "@rolldown/binding-linux-x64-musl": "1.1.5", "@rolldown/binding-openharmony-arm64": "1.1.5", "@rolldown/binding-wasm32-wasi": "1.1.5", "@rolldown/binding-win32-arm64-msvc": "1.1.5", "@rolldown/binding-win32-x64-msvc": "1.1.5" }, "bin": { "rolldown": "./bin/cli.mjs" } }, "sha512-t9z29cJjXf/vxQ8dyhCSpt6H6aSwHTk8cT5I3iy6SMXuFpk5mB6PL6XfC8PCwrPTx93udwKUm9HRteAlTGBLiA=="],
-
-    "@scalar/icons/@types/node/undici-types": ["undici-types@7.18.2", "", {}, "sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w=="],
 
     "@tailwindcss/node/lightningcss/lightningcss-android-arm64": ["lightningcss-android-arm64@1.32.0", "", { "os": "android", "cpu": "arm64" }, "sha512-YK7/ClTt4kAK0vo6w3X+Pnm0D2cf2vPHbhOXdoNti1Ga0al1P4TBZhwjATvjNwLEBCnKvjJc2jQgHXH0NEwlAg=="],
 

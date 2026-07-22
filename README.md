@@ -21,12 +21,26 @@ npx giget@latest gh:ilhajs/outer/templates/minimal my-outer-app
 ## A complete backend, from one file
 
 ```ts
-import { fromUnstorage, Outer, schema } from "@outerjs/server";
+import { Outer } from "@outerjs/server";
 import { pglite } from "@outerjs/server/pglite";
+import { schema } from "@outerjs/server/schema";
+import { fromSchema } from "@outerjs/server/secrets";
+import { fromUnstorage } from "@outerjs/server/storage";
 import { serve } from "srvx";
 import { createStorage } from "unstorage";
 import fsLite from "unstorage/drivers/fs-lite";
+import { z } from "zod";
 
+// Validate env once; read typed values via `context.secrets` anywhere — no more `process.env.X!`
+const secrets = fromSchema(
+  z.object({
+    AUTH_SECRET: z.string(),
+    BASE_URL: z.string().default("http://localhost:3000"),
+  }),
+  process.env,
+);
+
+// Versioned schema — drives migrations, query types, and endpoint validation
 const v1_0 = schema("1.0.0")
   .auth() // Better Auth tables (user, session, account, verification) + admin fields
   .table("post", (t) => ({
@@ -40,29 +54,38 @@ const v1_0 = schema("1.0.0")
 
 const outer = new Outer({
   name: "My API",
-  baseUrl: "http://localhost:3000",
-  db: pglite(),
+  baseUrl: secrets.get("BASE_URL"),
+  db: pglite(), // embedded Postgres + pgvector; swap for any Kysely Dialect
+  cors: { origins: ["https://app.example.com"], credentials: true },
   storage: fromUnstorage(createStorage({ driver: fsLite({ base: ".outer/files" }) })),
+  secrets, // surfaced as context.secrets
+  rateLimit: { max: 100, windowMs: 60_000 }, // per-caller on /rpc + /rest
 })
   .schema(v1_0)
-  .auth({ secret: process.env.AUTH_SECRET! }) // sign-up, sessions, social — at /api/auth/**
+  .auth({ secret: secrets.require("AUTH_SECRET") }) // sign-up, sessions, social — /api/auth/**
   .openapi() // GET /openapi.json + a plain-JSON REST surface at /rest/**
   .admin() // schema introspection + table CRUD at /rpc/_admin/**, admin-gated
-  .mcp() // the same router, as MCP tools an agent can call, at /mcp
   .files() // upload / download / attach + GET /files/:id, private to the uploader
   .resource("post", {
     // six typed CRUD endpoints with row-level permissions
-    permissions: { create: "authenticated", update: "owner", delete: "owner" },
-    ownerColumn: "userId",
+    permissions: { list: "public", create: "authenticated", update: "owner", delete: "owner" },
+    ownerColumn: "userId", // auto-filled on create, enforced on owner checks
   })
-  .procedure("hello", (base) => base.handler(() => "world")) // your own typed RPC
+  .procedure("post.search", (base) =>
+    // your own typed RPC — Zod-validated input, Prisma-style reads on context.db
+    base
+      .input(z.object({ q: z.string() }))
+      .handler(({ input, context }) =>
+        context.db.query.post.findMany({ where: { title: { contains: input.q } }, take: 20 }),
+      ),
+  )
   .build();
 
 await outer.migrator.migrateToLatest();
 serve({ fetch: (req) => outer.handle(req) }); // outer.handle is a plain Fetch handler
 ```
 
-That's auth, six CRUD endpoints for `post` with ownership enforced, file uploads, an admin API, an OpenAPI spec, an MCP endpoint, a custom procedure, and versioned migrations — backed by embedded Postgres that writes to local disk, with **zero infrastructure to run**.
+That's validated env secrets, auth, six CRUD endpoints for `post` with ownership enforced, file uploads, an admin API, an OpenAPI spec, per-caller rate limiting, a custom search procedure over the Prisma-style query API, and versioned migrations — backed by embedded Postgres that writes to local disk, with **zero infrastructure to run**.
 
 ## Why developers pick Outer
 
