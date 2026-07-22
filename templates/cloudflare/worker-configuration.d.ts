@@ -4,6 +4,8 @@ interface __BaseEnv_Env {
   OUTER_FILES: R2Bucket;
   // secret — set via `wrangler secret put AUTH_SECRET` (undefined in local dev without .dev.vars)
   AUTH_SECRET?: string;
+  // seeded admin account — set in wrangler.jsonc `vars` or .dev.vars; unset skips seeding
+  ADMIN_EMAIL?: string;
 }
 declare namespace Cloudflare {
   interface GlobalProps {

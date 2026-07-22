@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 
-import { fromUnstorage, Outer, type InferRouter } from "@outerjs/server";
+import { fromSchema, fromUnstorage, Outer, type InferRouter } from "@outerjs/server";
 import { pglite } from "@outerjs/server/pglite";
 import { emailOTP } from "better-auth/plugins";
 import { serve } from "srvx";
@@ -14,8 +14,12 @@ import { v1_0_0 } from "./schema";
 // Node doesn't read .env on its own (Bun/Deno do); optional chaining skips runtimes that auto-load or lack loadEnvFile
 if (existsSync(".env")) process.loadEnvFile?.(".env");
 
-const env = z
-  .object({
+// One schema validates the env and stays the single source of truth: `fromSchema` parses
+// once, throws on bad config, and hands back a typed accessor. `secrets.get("KEY")` returns
+// the parsed value (defaults + transforms applied), typed per key; pass `secrets` to
+// `new Outer({ secrets })` too, so procedures read the same validated values via `context.secrets`.
+const secrets = fromSchema(
+  z.object({
     PORT: z.coerce.number().default(3000),
     BASE_URL: z.string().default("http://localhost:3000"),
     AUTH_SECRET: z.string().default("dev-only-secret"),
@@ -34,23 +38,26 @@ const env = z
           .map((o) => o.trim())
           .filter(Boolean),
       ),
-  })
-  .parse(process.env);
+  }),
+  process.env,
+);
 
 const outer = new Outer({
   name: "Outer",
   db: pglite(),
-  baseUrl: env.BASE_URL,
+  baseUrl: secrets.get("BASE_URL"),
   // credentials lets browsers send the session cookie cross-origin — pair with `credentials: "include"` on the client
-  cors: { origins: env.CORS_ORIGINS, credentials: true },
+  cors: { origins: secrets.get("CORS_ORIGINS"), credentials: true },
   // Where uploaded bytes live. `fs-lite` writes next to the PGlite data dir; swap the
   // driver for `s3` (or use `fromS3`) in production and nothing below changes.
   storage: fromUnstorage(createStorage({ driver: fsLite({ base: ".outer/files" }) })),
+  // Surfaced as `context.secrets` — read the same validated values in any procedure
+  secrets,
 })
   .schema(v1_0_0)
   .auth({
-    secret: env.AUTH_SECRET,
-    advanced: { cookiePrefix: env.COOKIE_PREFIX },
+    secret: secrets.get("AUTH_SECRET"),
+    advanced: { cookiePrefix: secrets.get("COOKIE_PREFIX") },
     emailAndPassword: { enabled: true },
     user: {
       // `input: false` blocks signups from setting their own role — only the seed (or an admin) can
@@ -97,13 +104,14 @@ if (error) {
 
 // Seed the single admin account: no password, so email OTP is its only sign-in path.
 // Idempotent — re-running promotes an existing user with this email instead of duplicating.
-if (!error && env.ADMIN_EMAIL) {
+const adminEmail = secrets.get("ADMIN_EMAIL");
+if (!error && adminEmail) {
   await outer.db
     .insertInto("user")
     .values({
       id: crypto.randomUUID(),
       name: "Admin",
-      email: env.ADMIN_EMAIL,
+      email: adminEmail,
       emailVerified: true,
       role: "admin",
       banned: false,
@@ -120,7 +128,7 @@ export type Router = InferRouter<typeof outer>;
 // swap for Bun.serve/Deno.serve/etc — outer.handle is a plain Fetch handler
 serve({
   fetch: (req) => outer.handle(req),
-  port: env.PORT,
+  port: secrets.get("PORT"),
 });
 
 // Release the database (and the embedded PGlite with it) on a deploy restart,

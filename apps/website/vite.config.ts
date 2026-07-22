@@ -9,7 +9,7 @@ export default defineConfig({
       repo: "https://github.com/ilhajs/outer",
       repoPath: "apps/website",
       shiki: {
-        themes: { light: "night-owl-light", dark: "houston" },
+        themes: { light: "min-light", dark: "houston" },
         langs: ["typescript", "tsx", "mdx", "shell", "yaml", "json"],
       },
       head: {

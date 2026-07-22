@@ -4,6 +4,9 @@
   "main": "src/worker.ts",
   "compatibility_date": "2026-04-06",
   "compatibility_flags": ["nodejs_compat"],
+  // Seeds a single admin account on the first request after deploy, signing in via
+  // email OTP only. Remove (or leave empty) to skip seeding.
+  "vars": { "ADMIN_EMAIL": "admin@example.com" },
   "durable_objects": {
     "bindings": [{ "name": "OUTER_DO", "class_name": "OuterDO" }],
   },

@@ -14,6 +14,7 @@ import { Badge, ClipboardText, Icon, LinkButton, LayerCard } from "areia";
 import ilha from "ilha";
 import { Icon as SocialIcon } from "imprensa/icons";
 import {
+  Bot,
   CircleCheck,
   CircleX,
   CloudUpload,
@@ -22,10 +23,48 @@ import {
   KeyRound,
   Lock,
   Radio,
+  Route,
   Server,
   ShieldCheck,
+  Sparkles,
   Upload,
+  Zap,
 } from "lucide";
+
+const cloudLogos: { src: string; alt: string; class?: string }[] = [
+  { src: "/logo/cloudflare-svgrepo-com.svg", alt: "Cloudflare" },
+  { src: "/logo/vercel-svgrepo-com.svg", alt: "Vercel", class: "scale-150" },
+  { src: "/logo/aws-svgrepo-com.svg", alt: "AWS" },
+  { src: "/logo/google-cloud-svgrepo-com.svg", alt: "Google Cloud" },
+  { src: "/logo/azure-svgrepo-com.svg", alt: "Azure" },
+];
+
+const differentiators: { icon: typeof Lock; title: string; description: string }[] = [
+  {
+    icon: Sparkles,
+    title: "pgvector, out of the box",
+    description:
+      "PGlite is real embedded Postgres with pgvector bundled in. Vector search on a $4 VPS — no managed tier, no add-on to switch on.",
+  },
+  {
+    icon: Route,
+    title: "One router. Four surfaces.",
+    description:
+      "Define a procedure once and it's served as typed RPC, REST, an OpenAPI spec, and an MCP tool. No second definition to keep in sync.",
+  },
+  {
+    icon: Bot,
+    title: "Your API, your agent's toolbox",
+    description:
+      "`.mcp()` hands agents your shipped business logic — not raw database access — inheriting the exact permissions your app already enforces.",
+  },
+  {
+    icon: Zap,
+    title: "Schema to SSR, no HTTP hop",
+    description:
+      "`outer.client()` calls procedures in-process during server rendering. Same types, no serialization, no localhost round-trip.",
+  },
+];
 
 const uploadTraits: { icon: typeof Lock; title: string; description: string }[] = [
   {
@@ -78,11 +117,12 @@ export default ilha
             <div class="flex min-w-0 flex-col items-start gap-5 text-left sm:gap-6">
               <Badge variant="outline">Self-hosted · MIT licensed · Alpha</Badge>
               <h1 class="text-[1.9rem] leading-[1.12] font-semibold tracking-tight text-balance sm:text-4xl sm:leading-[1.1] lg:text-[2.75rem] lg:leading-[1.08]">
-                Your backend. Your server. Nobody else's cloud.
+                The open-source backend for the agentic internet.
               </h1>
               <p class="text-areia-subtle max-w-xl text-[0.9375rem] leading-[1.65] text-balance sm:text-lg sm:leading-7">
-                A typed backend builder that runs anywhere you can run Node. No dashboard, no vendor
-                SDK, no bill that grows faster than your app.
+                Define a procedure once and serve it as typed RPC, REST, OpenAPI, and an MCP tool
+                your agents can call. Real Postgres with pgvector, running on the same box as your
+                app — no managed cloud to rent.
               </p>
               <div class="flex w-full max-w-md flex-row gap-2 px-0.5 sm:gap-3 sm:px-0">
                 <LinkButton
@@ -120,6 +160,46 @@ export default ilha
               Built entirely on tools you already trust
             </p>
             <HeroTechCards />
+            <p class="text-areia-subtle mt-10 text-center text-xs tracking-wide uppercase sm:mt-12">
+              Deploys to
+            </p>
+            <div class="mt-5 flex flex-wrap items-center justify-center gap-x-8 gap-y-5 sm:gap-x-12">
+              {cloudLogos.map((logo) => (
+                <img
+                  src={logo.src}
+                  alt={logo.alt}
+                  loading="lazy"
+                  class={`h-9 w-auto opacity-60 grayscale transition hover:opacity-100 hover:grayscale-0 sm:h-11 dark:invert ${logo.class ?? ""}`}
+                />
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ── Differentiators band ────────────────────────────────────────── */}
+        <section class="container mx-auto max-w-6xl px-5 pt-4 pb-16 sm:px-6 sm:pt-6 sm:pb-24 lg:px-8">
+          <div class="mb-8 max-w-2xl space-y-3 sm:mb-10 sm:space-y-4">
+            <Badge variant="outline">Never choose between zero-infra and full-power</Badge>
+            <h2 class="text-xl leading-snug font-semibold tracking-tight sm:text-3xl sm:leading-tight">
+              Full-power Postgres and an agent-ready API, with nothing to run but your app.
+            </h2>
+          </div>
+          <div class="grid gap-5 sm:grid-cols-2 sm:gap-6">
+            {differentiators.map((item) => (
+              <div class="border-areia-border bg-areia-background flex items-start gap-4 rounded-2xl border p-5 sm:p-6">
+                <span class="bg-areia-control flex size-9 shrink-0 items-center justify-center rounded-lg">
+                  <Icon icon={item.icon} class="size-5" />
+                </span>
+                <div class="min-w-0 space-y-1.5">
+                  <h3 class="text-base leading-snug font-semibold tracking-tight sm:text-lg">
+                    {item.title}
+                  </h3>
+                  <p class="text-areia-subtle text-[0.9375rem] leading-relaxed">
+                    {item.description}
+                  </p>
+                </div>
+              </div>
+            ))}
           </div>
         </section>
 
@@ -303,12 +383,12 @@ export default ilha
           <div class="border-areia-border bg-areia-background flex flex-col gap-6 rounded-2xl border p-5 sm:gap-8 sm:p-8 md:flex-row md:items-center md:justify-between lg:p-10">
             <div class="max-w-2xl space-y-2.5 text-left sm:space-y-4">
               <h2 class="text-xl leading-snug font-semibold tracking-tight sm:text-[1.75rem]">
-                Stop paying for infrastructure you already own.
+                Install it, write your schema, ship.
               </h2>
               <p class="text-areia-subtle text-[0.9375rem] leading-[1.65] sm:text-base sm:leading-7">
-                Install the package, write your schema, and ship. Outer is alpha software — the API
-                can still move — but it's MIT licensed, has no telemetry, and never phones home.
-                Your server, your rules.
+                Schema, auth, permissions, files, realtime, and a four-surface API are in the box
+                today. A dashboard and typed vector columns are next. MIT licensed, no telemetry,
+                nothing phoning home — the whole thing runs on hardware you already pay for.
               </p>
             </div>
             <div class="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row sm:gap-3">

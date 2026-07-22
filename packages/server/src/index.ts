@@ -27,12 +27,15 @@ import {
   ResourceProcedures,
 } from "./resource";
 import { schema, timestamps, SchemaResult, InferDB, TablesDef, ColumnDef } from "./schema";
+import { fromEnv, fromRecord, fromSchema, memorySecrets, OuterSecrets } from "./secrets";
 import { createSola, Sola } from "./sola";
 import { fromUnstorage, fromS3, memoryStorage, OuterStorage } from "./storage";
 
 export { schema, timestamps };
 export { fromUnstorage, fromS3, memoryStorage };
+export { fromEnv, fromRecord, fromSchema, memorySecrets };
 export type { OuterStorage } from "./storage";
+export type { OuterSecrets, StandardSchemaV1 } from "./secrets";
 export type { LiveProvider } from "./live";
 export { liveIterable } from "./live";
 export type { FilesConfig, FilesRouter, FilePermission, FileRecord } from "./files";
@@ -78,6 +81,8 @@ export type OuterRpcContext<TDB = any> = {
   session?: UserSession | null;
   /** The object store passed as `new Outer({ storage })`, if any. */
   storage?: OuterStorage;
+  /** The secret accessor passed as `new Outer({ secrets })`, if any. */
+  secrets?: OuterSecrets;
 };
 
 /** Context additions `.auth()` guarantees: `auth` is present and `user`/`session` are always resolved (possibly to `null`). */
@@ -256,6 +261,15 @@ export type OuterParams = {
    */
   storage?: OuterStorage;
   /**
+   * Runtime-agnostic secret accessor, surfaced as `context.secrets`. Wrap
+   * `process.env` with `fromEnv()`, the Cloudflare Workers `env` binding with
+   * `fromRecord(env)`, or pass any `OuterSecrets` implementation — so the same
+   * `context.secrets.require("STRIPE_KEY")` resolves identically everywhere.
+   * `fromSchema(zodSchema, env)` gives a fully-typed accessor; any parsed shape
+   * is accepted here.
+   */
+  secrets?: OuterSecrets<any>;
+  /**
    * Called for unexpected failures — anything that isn't a deliberate
    * `ORPCError` response. Route it to your logger or Sentry; without it,
    * Outer writes to `console.error`. Pass `() => {}` to silence it.
@@ -306,6 +320,7 @@ type OuterResources = {
   /** Set by `.files()` — the `file.*` procedures are built at `.build()` so they see the final schema. */
   files: FilesConfig | undefined;
   storage: OuterStorage | undefined;
+  secrets: OuterSecrets<any> | undefined;
 };
 
 export type McpConfig = {
@@ -493,6 +508,7 @@ export class Outer<
         baseUrl,
         cors,
         storage,
+        secrets,
         onError: onErrorHook,
         health,
         rateLimit,
@@ -514,6 +530,7 @@ export class Outer<
         admin: undefined,
         files: undefined,
         storage,
+        secrets,
         onError: onErrorHook,
         health,
         rateLimit,
@@ -847,6 +864,7 @@ export class Outer<
     const typedDb = wrapDb(db);
 
     const storage = this.resources.storage;
+    const secrets = this.resources.secrets;
 
     /**
      * Per-request context. When `.auth()` is enabled the session is resolved
@@ -859,6 +877,7 @@ export class Outer<
         headers: event.req.headers,
         db: typedDb,
         ...(storage && { storage }),
+        ...(secrets && { secrets }),
       } as OuterRpcContext<TDB>;
       if (!auth) return { ...base, user: null, session: null };
       const resolved = await auth.api.getSession({ headers: event.req.headers }).catch(() => null);

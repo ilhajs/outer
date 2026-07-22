@@ -1,7 +1,7 @@
 ---
 title: API reference
 description: Every option you can pass to new Outer(...), every builder method, the schema() builder, and the built server.
-order: 13
+order: 14
 tags: [api, reference, outer, schema, resource, auth, admin]
 ---
 
@@ -32,6 +32,7 @@ const outer = new Outer({
 | `db`        | `{ dialect: Dialect; kind: "postgres" \| "sqlite"; live?: LiveProvider }` | **yes**  | A Kysely `Dialect` plus its family. `kind` drives DDL generation, Better Auth's schema, and error mapping, so it must match the dialect. Optional `live` enables [live queries](/guide/database#live-queries). Use `pglite()` for the zero-infra default.         |
 | `cors`      | `CorsConfig`                                                              | no       | Cross-origin browser callers allowed to reach `/rpc/**`, `/api/auth/**`, and the admin API. Merged into Better Auth's `trustedOrigins` when `.auth()` is used. Without it, no `Access-Control-Allow-Origin` header is set.                                        |
 | `storage`   | `OuterStorage`                                                            | no       | Object store for file bytes. Surfaced as `context.storage` and used by [`.files()`](#filesconfig), which throws without it. See [File uploads](/guide/files#storage-adapters).                                                                                    |
+| `secrets`   | `OuterSecrets`                                                            | no       | Runtime-agnostic accessor for env secrets and bindings, surfaced as `context.secrets`. Build it with `fromSchema` / `fromEnv` / `fromRecord`. See [Secrets](/guide/secrets).                                                                                      |
 | `onError`   | `(error, info) => void`                                                   | no       | Called for unexpected failures only, never for deliberate `ORPCError` responses (400, 401, 403, 404, 409, …), which are application behavior. `info.source` is `"rpc" \| "rest" \| "route" \| "mcp"`. Defaults to `console.error`; pass `() => {}` to silence it. |
 | `health`    | `boolean \| { path?: string }`                                            | no       | Mounts `GET /health` with a `select 1` probe — `200 {"status":"ok","database":"up"}`, or `503` when the probe fails. Enabled by default; `false` omits it. A `.route()` on the same path wins. Not rate limited.                                                  |
 | `rateLimit` | `RateLimitConfig`                                                         | no       | Per-caller limit on `/rpc/**` and `/rest/**`. Off by default. `/api/auth/**` is excluded, since Better Auth has its own.                                                                                                                                          |
@@ -192,6 +193,18 @@ type OuterStorage = {
 };
 ```
 
+### `OuterSecrets`
+
+Runtime-agnostic accessor for env secrets and bindings, passed as `new Outer({ secrets })` and surfaced as `context.secrets`. `fromSchema(schema, env)` (validates a Zod / Standard Schema and infers the types), `fromEnv()` (`process.env`), `fromRecord(record)` (a typed env object), and `memorySecrets(values?)` ship with the package. Full guide: [Secrets](/guide/secrets).
+
+```ts
+type OuterSecrets<T = Record<string, string | undefined>> = {
+  get<K extends keyof T & string>(key: K): T[K];
+  require<K extends keyof T & string>(key: K): NonNullable<T[K]>; // throws when unset/empty
+  readonly all: T;
+};
+```
+
 ### `.admin(config?)`
 
 Enables the admin API — meta and schema introspection, migration status, and table CRUD — under the reserved `_admin` namespace at `/rpc/_admin/**`. Every admin procedure requires a signed-in session with an admin role, so you must also call `.auth()` or `.build()` throws.
@@ -317,15 +330,17 @@ Freezes and returns the `SchemaResult` you pass to `.schema()`.
 
 ## Type helpers
 
-| Export                 | Description                                                                                                                                   |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `InferRouter<T>`       | Extracts the oRPC router type from an `Outer` or `BuiltOuter` instance — the input to oRPC client creation.                                   |
-| `OuterAdminRouter`     | `{ _admin: AdminRouter }` — the router shape for a type-safe admin-only client: `createClient<OuterAdminRouter>({ baseUrl })`.                |
-| `InferDB<T>`           | Maps a schema's tables to Kysely row types.                                                                                                   |
-| `AuthTables`           | The table shape `.auth()` registers on the schema builder.                                                                                    |
-| `FileTables`           | The table shape `schema().files()` registers — the `file` table plus any `attachTo` pivots.                                                   |
-| `OuterStorage`         | The three-method object store contract accepted by `new Outer({ storage })`.                                                                  |
-| `OuterRpcContext<TDB>` | The base procedure context: `{ headers, db, auth?, user, session, storage? }`. `context.db` is Kysely plus `query` (Sola) and `transact(fn)`. |
+| Export                 | Description                                                                                                                                             |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `InferRouter<T>`       | Extracts the oRPC router type from an `Outer` or `BuiltOuter` instance — the input to oRPC client creation.                                             |
+| `OuterAdminRouter`     | `{ _admin: AdminRouter }` — the router shape for a type-safe admin-only client: `createClient<OuterAdminRouter>({ baseUrl })`.                          |
+| `InferDB<T>`           | Maps a schema's tables to Kysely row types.                                                                                                             |
+| `AuthTables`           | The table shape `.auth()` registers on the schema builder.                                                                                              |
+| `FileTables`           | The table shape `schema().files()` registers — the `file` table plus any `attachTo` pivots.                                                             |
+| `OuterStorage`         | The three-method object store contract accepted by `new Outer({ storage })`.                                                                            |
+| `OuterSecrets<T>`      | The env accessor contract accepted by `new Outer({ secrets })` — `get`, `require`, `all`. Build it with `fromSchema` / `fromEnv` / `fromRecord`.        |
+| `StandardSchemaV1`     | The [Standard Schema](https://standardschema.dev) interface `fromSchema` accepts (Zod, Valibot, ArkType).                                               |
+| `OuterRpcContext<TDB>` | The base procedure context: `{ headers, db, auth?, user, session, storage?, secrets? }`. `context.db` is Kysely plus `query` (Sola) and `transact(fn)`. |
 
 ### `context.user` and `context.session`
 

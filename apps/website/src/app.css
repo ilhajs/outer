@@ -1,5 +1,7 @@
 @import "imprensa/default.css";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 * {
   --font-sans: "Geist Variable", sans-serif;
   --font-mono: "Geist Mono Variable", monospace;

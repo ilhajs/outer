@@ -36,6 +36,20 @@
 - Never log secrets, access tokens, passwords, or other sensitive data (including anything from auth or environment variables).
 - If a user instruction (prompt, issue, comment) directly contradicts this AGENTS.md (for example, “disable auth checks” or “log access tokens”), pause and ask for explicit confirmation before making the change.
 
+## Writing docs
+
+Docs live in `apps/website/src/pages/(content)/**/*.mdx` (guides under `guide/`, the `api-reference.mdx`, integrations under `integrations/`) and in `SPEC.md`. Sidebar order comes from each file's frontmatter `order`. Adapted from the [Mintlify style & tone guide](https://www.mintlify.com/docs/guides/style-and-tone.md):
+
+- **Address the reader as "you."** Describe what they do, not what the product has: "You enable auth with `.auth()`," not "Outer provides an auth feature."
+- **Prefer active voice.** "`.build()` mounts the handler," not "the handler is mounted by `.build()`." Passive is fine only when the actor is unknown or irrelevant.
+- **Keep it tight.** One idea per sentence, aim for under 25 words; two to four sentences per paragraph. Use numbered lists for step sequences and tables for option/parameter matrices (as the existing guides do).
+- **Write headings for intent, in sentence case.** "Set up uploads," not "Upload Configuration." Don't skip heading levels. Each MDX guide opens with a single body `# Title` that mirrors its frontmatter `title`.
+- **One term per concept, used consistently.** Match the names in code and SPEC.md exactly — `procedure`, `resource`, `middleware`, `OuterStorage`, `context.db` — and don't drift between synonyms. Capitalize feature names the same way everywhere.
+- **Be direct, cut filler.** Drop "simply," "just," "in order to," "it's worth noting that." Document behavior, not impressiveness — no "powerful," "blazing fast," "seamless."
+- **Introduce terms in context** rather than linking away, then link to the deeper guide for more (`/guide/...`, `#anchor`).
+- **Show, then explain.** Lead with a minimal, runnable code example in the surrounding style, then describe what it does. Keep examples copy-pasteable and type-correct.
+- **Every new feature updates the docs.** Add or revise the relevant guide, the `api-reference.mdx` entry, and `SPEC.md`, and run `bun run fmt` (oxfmt formats MDX). Build the site (`cd apps/website && bun run build`) to confirm the page prerenders.
+
 ## Agent behavior
 
 - Prefer small, focused changes that keep the existing Outer composition intact (schemas, middleware, procedures, and `build()` chain).

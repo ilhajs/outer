@@ -36,6 +36,7 @@ Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`
 | `db.live`    | `LiveProvider`           | —               | Change feed backing [live queries](#live-queries). `pglite()` supplies one; without it `live*()` throws       |
 | `cors`       | `CorsConfig`             | —               | Cross-origin browser callers allowed to reach `/rpc/**`, `/api/auth/**`, and the admin API — see CORS below   |
 | `storage`    | `OuterStorage`           | —               | Object store for file bytes — surfaced as `context.storage` and used by `.files()`                            |
+| `secrets`    | `OuterSecrets`           | —               | Runtime-agnostic secret accessor — surfaced as `context.secrets`. See [`OuterSecrets`](#outersecrets)         |
 | `onError`    | `(error, info) => void`  | `console.error` | Called for unexpected failures (never for deliberate `ORPCError` responses) — route to your logger or Sentry  |
 | `health`     | `boolean \| { path }`    | `true`          | Mounts `GET /health` with a `select 1` probe. `false` omits it; a `.route()` on the same path wins            |
 | `rateLimit`  | `RateLimitConfig`        | —               | Per-caller limit on `/rpc/**` and `/rest/**`. Off by default; `/api/auth/**` is excluded                      |
@@ -551,6 +552,61 @@ Three adapters ship with the package:
 
 Uploads are buffered in memory, so `maxBytes` is a real ceiling. For large media, issue presigned URLs and upload directly to the bucket instead of through the Outer process.
 
+### `OuterSecrets`
+
+A tiny, **synchronous**, generic accessor for configuration secrets and bindings, surfaced as `context.secrets`. Core never reads `process.env` directly, so the same call resolves identically on a VPS, Cloudflare Workers, or Deno — the environment difference lives in the adapter:
+
+```ts
+type OuterSecrets<T = Record<string, string | undefined>> = {
+  get<K extends keyof T & string>(key: K): T[K];
+  require<K extends keyof T & string>(key: K): NonNullable<T[K]>; // throws "Missing required secret \"X\"." when unset/empty
+  readonly all: T; // the fully-parsed, typed object — the analog of `schema.parse(env)`
+};
+```
+
+`require` is the deterministic replacement for `process.env.X!`, which silently yields `undefined` at runtime on platforms without a `process` global rather than failing loudly.
+
+Reads are synchronous by design: secrets come from an already-materialized source, never a fetch. For an async backend (Vault, AWS Secrets Manager), load its values into a plain record at startup and pass that to `fromRecord`.
+
+Four adapters ship with the package:
+
+- `fromSchema(schema, input)` — validates `input` against a [Standard Schema](https://standardschema.dev) (Zod, Valibot, ArkType, …) and returns a **fully-typed** accessor. The integrated replacement for a standalone `schema.parse(env)`: defaults and transforms flow into `get`/`require`/`all`, `z.custom<T>()` bindings stay typed, invalid input throws an error listing every failing path, and an async schema (async refinements) throws — resolve those at startup and use `fromRecord`.
+- `fromEnv()` — reads `process.env` (Node/Bun). Safe to import where no `process` global exists — returns `undefined` for every key instead of throwing.
+- `fromRecord(record)` — reads a plain object: the Cloudflare Workers `env` binding, `Deno.env.toObject()`, or secrets you loaded at startup. Infers per-key types from the record.
+- `memorySecrets(values?)` — a fixed map, for tests.
+
+```ts
+import { Outer, fromSchema } from "@outerjs/server";
+import { z } from "zod";
+
+const Env = z.object({
+  AUTH_SECRET: z.string(),
+  CORS_ORIGINS: z.string().transform((s) => s.split(",")), // string -> string[]
+  OUTER_FILES: z.custom<R2Bucket>(),
+});
+
+// Cloudflare Workers — validate the env + bindings once, per request
+export default {
+  fetch(req: Request, env: unknown) {
+    const secrets = fromSchema(Env, env);
+    secrets.all.CORS_ORIGINS; // string[] — validated once, typed everywhere
+
+    const outer = new Outer({
+      db: d1(secrets.all.OUTER_FILES),
+      cors: { origins: secrets.all.CORS_ORIGINS },
+      secrets, // surfaced as context.secrets
+    })
+      .auth({ secret: secrets.require("AUTH_SECRET") })
+      .build();
+    return outer.handle(req);
+  },
+};
+```
+
+Then, in any handler: `context.secrets.require("STRIPE_KEY")`. (`context.secrets` is typed to the default string-bag shape; for the schema-inferred types, read the accessor you constructed — in a single-file worker it's in scope on the procedure closures.)
+
+> `context.secrets` is only for reading secrets Outer doesn't already own. It is **not** a store — Outer never writes, encrypts, rotates, or persists secrets. `.auth()`'s own `secret` is still passed explicitly; wiring it through `secrets` is up to your server file.
+
 ---
 
 ## `.build(): BuiltOuter`
@@ -642,6 +698,7 @@ type OuterRpcContext<TDB> = {
   user: SessionUser | null; // resolved once per request; null when signed out
   session: UserSession | null;
   storage?: OuterStorage; // the object store passed to new Outer({ storage })
+  secrets?: OuterSecrets; // the secret accessor passed to new Outer({ secrets })
 };
 ```
 
