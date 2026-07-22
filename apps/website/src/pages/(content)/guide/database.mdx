@@ -140,6 +140,10 @@ Cursors are opaque base64 strings derived from the `orderBy` column values. Mult
 | `OR`                        | —            | `OR(...)`                                    |
 | `NOT`                       | —            | `NOT(...)`                                   |
 
+### Passing untrusted input
+
+Values in a Sola query are always parameterized, so user-supplied values never lead to SQL injection. Column names in `where`, `orderBy`, and `select` are a different matter: `.resource()` and the admin API validate them against the schema, but a `.procedure()` that forwards a client-supplied `where` or `orderBy` straight into `context.db.query` lets a caller filter or sort by any column — including ones you never meant to expose (sorting on a secret column can leak its order). Validate the shape with Zod, or spread a fixed `where` over the caller's, before handing it to Sola.
+
 ### `include`
 
 `include` loads relations you declared with [`.relation()`](/guide/schema#relations). It runs one extra query per relation and merges the results in JS, Prisma-style.

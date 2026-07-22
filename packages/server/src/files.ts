@@ -370,6 +370,33 @@ export function buildFileProcedures(params: {
 }
 
 /**
+ * MIME types a browser renders as *active* content — an uploaded file served
+ * with one of these as its `content-type` executes script on the API's own
+ * origin. These are always sent as a download (`attachment`), never `inline`,
+ * regardless of the browser's own sniffing.
+ */
+const INLINE_UNSAFE_TYPES = new Set([
+  "text/html",
+  "application/xhtml+xml",
+  "image/svg+xml",
+  "application/xml",
+  "text/xml",
+  "application/xslt+xml",
+]);
+
+/**
+ * Whether the stored `content-type` is safe to render inline. Everything the
+ * browser treats as markup is forced to download instead — combined with the
+ * `nosniff` + sandbox CSP headers below, this closes the stored-XSS hole where
+ * an attacker uploads HTML/SVG and loads it from the file route.
+ */
+function inlineDisposition(type: string): "inline" | "attachment" {
+  return INLINE_UNSAFE_TYPES.has(type.split(";")[0]!.trim().toLowerCase())
+    ? "attachment"
+    : "inline";
+}
+
+/**
  * The `GET <path>` handler that serves the bytes. Downloads can't go through
  * `/rpc/**` — that speaks oRPC's wire protocol, which a browser `<img src>`
  * can't consume.
@@ -403,12 +430,19 @@ export function buildFileRoute(params: {
     const bytes = await storage.get(row.key);
     if (!bytes) return notFound();
 
+    const disposition = inlineDisposition(row.type);
     return new Response(new Blob([new Uint8Array(bytes)]), {
       headers: {
         "content-type": row.type,
         "content-length": String(row.size),
-        "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(row.name)}`,
+        "content-disposition": `${disposition}; filename*=UTF-8''${encodeURIComponent(row.name)}`,
         "cache-control": permission === "public" ? "public, max-age=3600" : "private, max-age=3600",
+        // The uploaded `content-type` is caller-controlled, so a browser must
+        // not be free to reinterpret the bytes as something executable.
+        "x-content-type-options": "nosniff",
+        // Defense in depth: even if a markup type slips through, `sandbox`
+        // strips script execution and same-origin privileges from the response.
+        "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
       },
     });
   };

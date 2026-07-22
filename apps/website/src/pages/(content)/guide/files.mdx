@@ -81,6 +81,14 @@ For avatars and other world-readable assets, opt in explicitly:
 .files({ permissions: { get: "public" } })   // the route switches to Cache-Control: public
 ```
 
+## The download route is hardened against stored XSS
+
+An uploaded file's `content-type` is caller-controlled, so the download route never lets a browser treat one as executable content on your API's origin. Every response sends `X-Content-Type-Options: nosniff` and a `Content-Security-Policy: default-src 'none'; sandbox`, and markup types (`text/html`, `image/svg+xml`, XML) are forced to download (`Content-Disposition: attachment`) instead of rendering inline. Set `accept` to an allowlist of the types you actually expect to narrow the surface further.
+
+## Attaching does not check the target row
+
+`file.attach` (and `attach` on `upload`) verifies the caller owns the **file**, but not that they may write to the target `entityId` — Outer has no ownership model for your own tables. If attachments are visible to others, guard the link yourself: wrap the attach in a `.procedure()` that checks the caller owns the target row, or keep attachable tables to ones where any authenticated user may attach.
+
 ## Options
 
 | Option        | Type                             | Default                                             |

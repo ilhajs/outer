@@ -377,6 +377,48 @@ describe("resource — eager config validation", () => {
   test("includable naming a nonexistent relation throws when .resource() is called", () => {
     expect(makeApp({ includable: ["comment"] })).rejects.toThrow(/includable/);
   });
+
+  test("writable and readonly together throw", () => {
+    expect(makeApp({ writable: ["title"], readonly: ["status"] })).rejects.toThrow(
+      /either `writable` or `readonly`/,
+    );
+  });
+
+  test("writable/readonly naming a nonexistent column throws", () => {
+    expect(makeApp({ readonly: ["nope"] })).rejects.toThrow(/not in the table/);
+  });
+});
+
+describe("resource — mass-assignment controls", () => {
+  test("readonly columns are stripped from create and update", async () => {
+    const app = await makeApp({ readonly: ["status"] });
+    await app.migrator.migrateToLatest();
+
+    // `status` is silently dropped from create — the DB default wins.
+    const { status, output } = await rpc(app, "create", { title: "A", status: "published" });
+    expect(status).toBe(200);
+    expect(output.status).toBe("draft");
+
+    // And from update — the attempt to flip it is a no-op, so update 400s for
+    // having no writable fields left.
+    const upd = await rpc(app, "update", {
+      where: { id: output.id },
+      data: { status: "published" },
+    });
+    expect(upd.status).toBe(400);
+  });
+
+  test("writable is an allowlist — everything else is server-controlled", async () => {
+    const app = await makeApp({ writable: ["title"] });
+    await app.migrator.migrateToLatest();
+    const { output } = await rpc(app, "create", {
+      title: "B",
+      status: "published",
+      userId: "hacker",
+    });
+    expect(output.status).toBe("draft");
+    expect(output.userId).toBeNull();
+  });
 });
 
 describe("resource — list skip cap", () => {

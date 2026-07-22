@@ -44,6 +44,21 @@ export type ResourceOptions = {
    * the current user's ID is automatically injected into the insert.
    */
   ownerColumn?: string;
+  /**
+   * Columns callers may set on `create`/`update`. When present, it's an
+   * allowlist — every other column is server-controlled and silently dropped
+   * from the input, closing mass-assignment (a caller can't flip a `role`,
+   * `featured`, or `credits` column you never meant to expose). The serial PK
+   * and `ownerColumn` are always excluded regardless. Mutually exclusive with
+   * `readonly`.
+   */
+  writable?: string[];
+  /**
+   * Columns callers may never set on `create`/`update` — a denylist, stripped
+   * from both input schemas. Use it to protect a handful of server-controlled
+   * columns while leaving the rest writable. Mutually exclusive with `writable`.
+   */
+  readonly?: string[];
   /** Max rows `list` can return per call, and the default when `take` isn't passed. Defaults to 100/50. `maxSkip` caps the `list` offset (default 10000) so deep offsets can't force full scans. */
   listLimit?: { default?: number; max?: number; maxSkip?: number };
   /**
@@ -463,9 +478,12 @@ function buildIncludeSchemas(
 function buildSchemas({
   cols,
   ownerColumn,
+  isWritable = () => true,
 }: {
   cols: Record<string, AnyColumn>;
   ownerColumn?: string;
+  /** Gate applied on top of the always-excluded serial PK / ownerColumn — backs `writable`/`readonly`. */
+  isWritable?: (name: string) => boolean;
 }) {
   const entries = Object.entries(cols);
 
@@ -490,6 +508,7 @@ function buildSchemas({
   for (const [name, col] of entries) {
     if (col._type === "serial" && col._primaryKey) continue;
     if (ownerColumn && name === ownerColumn) continue;
+    if (!isWritable(name)) continue;
     const field = colToZod(col, INPUT_TYPE_TO_ZOD);
     createShape[name] = col._default !== null ? field.optional() : field;
   }
@@ -500,6 +519,7 @@ function buildSchemas({
   for (const [name, col] of entries) {
     if (col._type === "serial" && col._primaryKey) continue;
     if (ownerColumn && name === ownerColumn) continue;
+    if (!isWritable(name)) continue;
     updateShape[name] = colToZod(col, INPUT_TYPE_TO_ZOD);
   }
   const updateSchema = z.object(updateShape).partial();
@@ -669,7 +689,7 @@ export function buildResourceProcedures(
   kind: DialectKind = "postgres",
   schemaInfo: { tables: TablesDef; relations: RelationDef[] } = { tables: {}, relations: [] },
 ): Record<string, AnyProcedure> {
-  const { permissions = {}, ownerColumn, listLimit, includable = [] } = options;
+  const { permissions = {}, ownerColumn, listLimit, includable = [], writable, readonly } = options;
   const usesOwnerPermission = Object.values(permissions).some((p) => p === "owner");
   if (usesOwnerPermission && !ownerColumn) {
     throw new Error(
@@ -677,9 +697,27 @@ export function buildResourceProcedures(
     );
   }
 
+  if (writable && readonly) {
+    throw new Error(
+      `resource("${tableName}"): set either \`writable\` or \`readonly\`, not both — they are two ways to express the same allowlist.`,
+    );
+  }
+  for (const name of [...(writable ?? []), ...(readonly ?? [])]) {
+    if (!(name in cols)) {
+      throw new Error(
+        `resource("${tableName}"): \`${writable ? "writable" : "readonly"}\` names column "${name}", which is not in the table.`,
+      );
+    }
+  }
+  const writableSet = writable ? new Set(writable) : undefined;
+  const readonlySet = readonly ? new Set(readonly) : undefined;
+  const isWritable = (name: string): boolean =>
+    writableSet ? writableSet.has(name) : readonlySet ? !readonlySet.has(name) : true;
+
   const { rowSchema, createSchema, updateSchema, whereSchema, pkName } = buildSchemas({
     cols,
     ...(ownerColumn !== undefined && { ownerColumn }),
+    isWritable,
   });
 
   for (const relName of includable) {

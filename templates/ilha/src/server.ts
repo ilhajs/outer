@@ -64,6 +64,10 @@ const outer = new Outer({
       delete: "owner",
     },
     ownerColumn: "userId",
+    // Timestamps are managed by the DB (and `updatedAt` is auto-touched on
+    // update), so keep them out of the create/update input rather than letting
+    // a client spoof them. `readonly` strips them; `writable` is the allowlist form.
+    readonly: ["createdAt", "updatedAt"],
   })
   .procedure(
     "foo",

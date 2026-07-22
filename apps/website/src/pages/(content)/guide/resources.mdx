@@ -38,6 +38,23 @@ Outer derives the input types from your column definitions at build time. Serial
 
 Every client inherits these types — `@outerjs/sdk` in the browser and `outer.client()` on the server alike.
 
+## Control which columns callers can write
+
+By default `create` and `update` accept every column except the serial primary key and the `ownerColumn`. On a table with a server-controlled column — a `role`, a `featured` flag, a `credits` balance — that lets a caller set it directly. Restrict the writable surface with one of two mutually exclusive options:
+
+```ts
+.resource("post", {
+  ownerColumn: "userId",
+  permissions: { update: "owner" },
+  writable: ["title", "body"], // only these are accepted; everything else is server-controlled
+})
+```
+
+- `writable` — an allowlist. Only the named columns are accepted on `create`/`update`; any other column is dropped from the input.
+- `readonly` — a denylist. The named columns are stripped from both input schemas, leaving the rest writable.
+
+Dropped columns are removed from the generated input schema, so a value a caller sends for one is silently ignored rather than written. Naming a column that isn't on the table, or setting both options at once, throws when `.resource()` is called.
+
 ## Query a list
 
 `list` accepts the same query surface as the Sola ORM, described in [Database](/guide/database#where-operators):

@@ -91,7 +91,9 @@ export class OuterDO extends DurableObject<Env> {
       // Adds file.upload / list / get / delete / attach / detach plus GET /files/:id.
       // Files default to private: only the uploader can read or delete them.
       .files({ maxBytes: 10 * 1024 * 1024 })
-      .resource("post")
+      // `readonly` keeps the DB-managed timestamps out of the create/update input,
+      // so a client can't spoof them (`updatedAt` is auto-touched on update anyway).
+      .resource("post", { readonly: ["createdAt", "updatedAt"] })
       .procedure("post.count", (base) =>
         base.output(z.object({ count: z.number() })).handler(async ({ context }) => {
           const rows = await context.db

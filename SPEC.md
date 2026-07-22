@@ -84,7 +84,7 @@ new Outer({ db, rateLimit: { max: 100, windowMs: 60_000 } });
 | `skip`     | —                        | `(event) => boolean` to bypass the limit                |
 | `store`    | `memoryRateLimitStore()` | Swap in Redis/Upstash to share counters across replicas |
 
-Over-limit requests get `429` with `Retry-After` and `RateLimit-*` headers. **The default store is in-process**, so each replica counts separately — behind a load balancer the effective limit is `max × replicas`. The default key falls back to `x-forwarded-for` / `x-real-ip`; if your proxy strips both, every caller shares one bucket, so pass `key` explicitly.
+Over-limit requests get `429` with `Retry-After` and `RateLimit-*` headers. **The default store is in-process**, so each replica counts separately — behind a load balancer the effective limit is `max × replicas`. The default key falls back to `x-forwarded-for` / `x-real-ip`; if your proxy strips both, every caller shares one bucket, so pass `key` explicitly. Those headers are also spoofable when traffic can reach the server directly — a caller sends a fresh value per request and evades the limit — so behind an untrusted network set `key` to a value you can trust (a verified IP, an API-key id).
 
 Implement `RateLimitStore` for a shared backend:
 
@@ -284,7 +284,7 @@ new Outer({
 
 Without `cors`, no `Access-Control-Allow-Origin` header is set — same-origin requests (and non-browser clients) are unaffected, but cross-origin browser requests will be blocked by the browser.
 
-`origins: ["*"]` allows every origin, for public APIs meant to be called from anywhere. The request's origin is echoed back rather than sent as a literal `*`, since browsers reject a wildcard `Access-Control-Allow-Origin` on credentialed requests. Combining `["*"]` with `credentials: true` lets any site make authenticated requests using a visitor's cookies — list origins explicitly for anything behind a session.
+`origins: ["*"]` allows every origin, for public APIs meant to be called from anywhere. The request's origin is echoed back rather than sent as a literal `*`, since browsers reject a wildcard `Access-Control-Allow-Origin` on credentialed requests. Because the echo would otherwise sidestep that browser safeguard, combining `["*"]` with `credentials: true` — which lets any site make authenticated requests using a visitor's cookies — throws at `.build()`; list origins explicitly for anything behind a session.
 
 With `cors`, every response carries `Vary: Origin` (so shared caches never serve an origin-specific response to a different origin), allowed origins get `Access-Control-Max-Age: 600` on preflights, and only real preflights (OPTIONS with `Access-Control-Request-Method`) are short-circuited with `204` — custom `.route("OPTIONS", ...)` handlers still receive plain OPTIONS requests.
 
@@ -387,6 +387,8 @@ Auto-generates six CRUD procedures for a schema table. `name` must match a table
 Input types are derived from column definitions at build time. `serial` primary key columns and `ownerColumn` are omitted from create input — the database and the session own those. Columns with `.default()` are **optional** on create: omit one and the DB default applies, pass one and it wins (so a defaulted enum like `status` is still settable at creation). Nullable columns are optional too. Update `data` accepts any non–serial-PK column; `ownerColumn` is omitted there as well.
 
 A supplied `ownerColumn` is stripped rather than rejected, so passing someone else's id cannot spoof ownership — the value from the session is used regardless.
+
+`create`/`update` accept every column except the serial PK and `ownerColumn` by default. Narrow that to prevent mass assignment with either `writable` (an allowlist — only the named columns are accepted, the rest are dropped from the input schema) or `readonly` (a denylist — the named columns are stripped, the rest stay writable). The two are mutually exclusive, and naming a column not on the table throws when `.resource()` is called.
 
 `list` accepts the same Prisma-style query surface as Sola, validated per column type:
 
@@ -548,7 +550,9 @@ Uploads travel the ordinary typed-SDK path: oRPC's codec detects the `File` fiel
 
 Ordering is deliberate: on upload the row commits **before** the bytes are written, and on delete the row is removed **before** the bytes. A failure leaves at worst a retryable orphaned blob, never a database row pointing at bytes that aren't there.
 
-`attach` / `attachedTo` use the pivot tables from `schema().files({ attachTo })`. Attaching to a table that wasn't listed there is a `400` naming the fix.
+**The download route is hardened against stored XSS.** A file's `content-type` is caller-controlled, so every response carries `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'; sandbox`, and markup types (`text/html`, `image/svg+xml`, XML) are served as `Content-Disposition: attachment` rather than rendered inline — so an uploaded file can't execute script on the API's origin. Narrow the surface further with `accept`.
+
+`attach` / `attachedTo` use the pivot tables from `schema().files({ attachTo })`. Attaching to a table that wasn't listed there is a `400` naming the fix. `attach` checks the caller owns the **file**, but not the target row — Outer has no ownership model for user tables — so guard attaches to shared entities in a `.procedure()` of your own.
 
 ### `OuterStorage`
 

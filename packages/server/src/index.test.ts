@@ -319,12 +319,12 @@ describe("cors", () => {
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
   });
 
-  test('echoes any origin when the allow-list is ["*"]', async () => {
+  test('echoes any origin when the allow-list is ["*"] (no credentials)', async () => {
     const app = new Outer({
       name: "Test",
       baseUrl: "http://localhost",
       db: await postDb(),
-      cors: { origins: ["*"], credentials: true },
+      cors: { origins: ["*"] },
     })
       .schema(s)
       .procedure("ping", (base) => base.handler(async () => "pong"))
@@ -337,10 +337,20 @@ describe("cors", () => {
         body: JSON.stringify({ json: {} }),
       }),
     );
-    // Echoed, never a literal "*" — browsers reject that with credentials.
+    // Echoed, never a literal "*", so it works even when a caller sends credentials.
     expect(res.headers.get("access-control-allow-origin")).toBe("https://anything.test");
-    expect(res.headers.get("access-control-allow-credentials")).toBe("true");
+    expect(res.headers.get("access-control-allow-credentials")).toBeNull();
     expect(res.headers.get("vary")).toBe("Origin");
+  });
+
+  test('rejects ["*"] combined with credentials at build', async () => {
+    const app = new Outer({
+      name: "Test",
+      baseUrl: "http://localhost",
+      db: await postDb(),
+      cors: { origins: ["*"], credentials: true },
+    }).schema(s);
+    expect(() => app.build()).toThrow(/cannot be combined with `credentials: true`/);
   });
 
   test("keeps CORS headers on error responses", async () => {

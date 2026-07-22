@@ -66,12 +66,14 @@ Over-limit requests get `429` with `Retry-After` and `RateLimit-*` headers.
 
 The default store is in-process, so each replica counts separately: behind a load balancer, the effective limit is `max × replicas`. If your proxy strips both forwarded-IP headers, every anonymous caller shares one bucket — pass `key` explicitly there.
 
+The header fallback is only trustworthy behind a proxy you control: `x-forwarded-for` / `x-real-ip` are plain request headers, so if traffic can reach the server directly a caller spoofs a fresh value per request and never hits the limit. In that setup, set `key` to something you can trust — a verified client IP or an API-key id.
+
 ### `CorsConfig`
 
-| Prop          | Type       | Default | Description                                                                                      |
-| ------------- | ---------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `origins`     | `string[]` | —       | Allowed origins, matched exactly against the request's `Origin` header.                          |
-| `credentials` | `boolean`  | `false` | Sets `Access-Control-Allow-Credentials: true`, needed for cookie-based auth from another origin. |
+| Prop          | Type       | Default | Description                                                                                                                                                                                                                                                     |
+| ------------- | ---------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `origins`     | `string[]` | —       | Allowed origins, matched exactly against the request's `Origin` header. `["*"]` echoes any origin — for public, unauthenticated APIs.                                                                                                                           |
+| `credentials` | `boolean`  | `false` | Sets `Access-Control-Allow-Credentials: true`, needed for cookie-based auth from another origin. Combining it with `origins: ["*"]` throws at `.build()` — it would let any site make authenticated requests with a visitor's cookies. List origins explicitly. |
 
 ### `pglite(config?)`
 
@@ -148,6 +150,8 @@ Generates typed CRUD procedures — `list`, `get`, `create`, `update`, `delete` 
 | `ownerColumn` | `string`                                                      | —                      | Column storing the creator's user ID. Required when any permission is `"owner"`. When `create` requires a session and this is set, the current user's ID is injected into inserts.                                                               |
 | `listLimit`   | `{ default?: number; max?: number; maxSkip?: number }`        | `50` / `100` / `10000` | Default and max rows per `list` call. `maxSkip` caps the offset so deep pagination cannot force full scans.                                                                                                                                      |
 | `includable`  | `string[]`                                                    | `[]`                   | Relations callers may `include` on `list` and `get`. Included rows are **not** checked against the related resource's permissions, so only allow relations that are safe to expose.                                                              |
+| `writable`    | `string[]`                                                    | all columns            | Allowlist of columns callers may set on `create`/`update`; every other column is server-controlled and dropped from the input. Mutually exclusive with `readonly`.                                                                               |
+| `readonly`    | `string[]`                                                    | `[]`                   | Denylist of columns stripped from `create`/`update` input, leaving the rest writable. Mutually exclusive with `writable`.                                                                                                                        |
 | `live`        | `boolean \| { revalidateMs?: number \| false; max?: number }` | off                    | Registers `{name}.live`, which is `list` as a stream, gated by the `list` permission with owner scoping included. `revalidateMs` (default `30000`) re-checks that permission while the stream is open; `max` (default `100`) caps subscriptions. |
 
 `ResourcePermissions` — each of `list`, `get`, `create`, `update`, and `delete` accepts:

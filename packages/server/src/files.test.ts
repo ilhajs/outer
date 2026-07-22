@@ -209,6 +209,35 @@ describe(".files() access control", () => {
     expect(anonymous.status).toBe(404);
   });
 
+  test("download hardens headers and forces markup uploads to download", async () => {
+    const owner = await signIn(app, "xss@example.com");
+
+    // A benign type is served inline, but always with nosniff + a sandbox CSP.
+    const { json: img } = await (
+      await upload(app, owner, new File(["x"], "a.txt", { type: "text/plain" }))
+    ).json();
+    const txt = await app.handle(
+      new Request(`http://localhost${img.url}`, { headers: { cookie: owner } }),
+    );
+    expect(txt.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(txt.headers.get("content-security-policy")).toContain("sandbox");
+    expect(txt.headers.get("content-disposition")).toContain("inline");
+
+    // An HTML upload must never render inline on the API origin (stored XSS).
+    const { json: html } = await (
+      await upload(
+        app,
+        owner,
+        new File(["<script>alert(1)</script>"], "x.html", { type: "text/html" }),
+      )
+    ).json();
+    const res = await app.handle(
+      new Request(`http://localhost${html.url}`, { headers: { cookie: owner } }),
+    );
+    expect(res.headers.get("content-disposition")).toContain("attachment");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
   test("list only returns the caller's own files", async () => {
     const a = await signIn(app, "list-a@example.com");
     const b = await signIn(app, "list-b@example.com");

@@ -108,8 +108,13 @@ export type RateLimitConfig = {
    * Identifies the caller. Defaults to the signed-in user id, falling back to
    * the client IP from `x-forwarded-for` / `x-real-ip`.
    *
-   * Behind a proxy that strips those headers every caller shares one bucket —
-   * set this explicitly if your host forwards the IP some other way.
+   * **The header fallback is only trustworthy behind a proxy you control.**
+   * `x-forwarded-for` / `x-real-ip` are plain request headers: if requests can
+   * reach the server directly, an anonymous caller spoofs a fresh value per
+   * request and never hits the limit. And behind a proxy that *strips* them,
+   * every anonymous caller collapses into one shared `"unknown"` bucket, so one
+   * abuser locks everyone out. Set this explicitly to key off whatever your host
+   * actually forwards (a verified client IP, an API-key id, etc.).
    */
   key?: (event: H3Event, user: SessionUser | null) => string | Promise<string>;
   /** Return true to bypass the limit for a request. */
@@ -789,6 +794,16 @@ export class Outer<
         `The following resource actions require a signed-in session but \`.auth()\` was never called: ${authRequiredBy.join(", ")}. Call \`.auth({ secret, ... })\` before \`.build()\`.`,
       );
     }
+    // `origins: ["*"]` with `credentials: true` tells the browser every site may
+    // make authenticated requests carrying a visitor's cookie — a CSRF-grade
+    // hole. Browsers reject a literal wildcard alongside credentials, but this
+    // middleware echoes the request origin back, which would sidestep that
+    // safeguard. Refuse the combination rather than silently honor it.
+    if (cors?.origins.includes("*") && cors.credentials) {
+      throw new Error(
+        'cors: `origins: ["*"]` cannot be combined with `credentials: true` — that would let any origin make authenticated requests with a visitor\'s cookies. List the trusted origins explicitly.',
+      );
+    }
     if (files) {
       const tables = this.schemas.at(-1)?.tables ?? {};
       if (!tables["file"]) {
@@ -901,6 +916,17 @@ export class Outer<
       };
     };
 
+    /**
+     * Resolves the context once per request and memoizes it on the H3 event, so
+     * a request that passes through the rate limiter (which needs `user`) and
+     * then a handler doesn't pay for two Better Auth session lookups. The
+     * promise is cached so concurrent awaits share the single resolution.
+     */
+    const contextFor = (event: H3Event): Promise<OuterRpcContext<TDB>> => {
+      const store = event.context as { __outerContext?: Promise<OuterRpcContext<TDB>> };
+      return (store.__outerContext ??= buildContext(event));
+    };
+
     // ORPCError is an intentional application response (400/401/403/404/409, etc.) —
     // only surface genuinely unexpected failures, to avoid noisy/sensitive logs.
     const reportError =
@@ -1008,7 +1034,7 @@ export class Outer<
         if (!guarded(path)) return next();
         if (await rateLimit.skip?.(event)) return next();
 
-        const user = (await buildContext(event)).user ?? null;
+        const user = (await contextFor(event)).user ?? null;
         const key = rateLimit.key
           ? await rateLimit.key(event, user)
           : (user?.id ??
@@ -1065,7 +1091,7 @@ export class Outer<
         });
         const { response } = await openapiHandler.handle(event.req, {
           prefix: "/rest",
-          context: await buildContext(event),
+          context: await contextFor(event),
         });
         return response;
       });
@@ -1096,7 +1122,7 @@ export class Outer<
         }
         const { response } = await mcpHandler.handle(event.req, {
           prefix: mcpPath as `/${string}`,
-          context: await buildContext(event),
+          context: await contextFor(event),
         });
         return response ?? new Response("Not found", { status: 404 });
       });
@@ -1108,7 +1134,7 @@ export class Outer<
 
     for (const { method, path, handler } of this.resources.routes) {
       server = server.on(method, path, async (event) =>
-        handler(event, (await buildContext(event)) as any),
+        handler(event, (await contextFor(event)) as any),
       );
     }
 
@@ -1132,7 +1158,7 @@ export class Outer<
     server = server.all("/rpc/**", async (event) => {
       const { response } = await rpc.handle(event.req, {
         prefix: "/rpc",
-        context: await buildContext(event),
+        context: await contextFor(event),
       });
       return response;
     });
