@@ -60,12 +60,12 @@
   "dependencies": {
     "@orpc/client": "2.0.0-beta.18",
     "@orpc/server": "2.0.0-beta.18",
-    "better-auth": "1.6.23",
+    "better-auth": "1.6.24",
     "kysely": "0.29.2",
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@better-auth/api-key": "1.6.23",
+    "@better-auth/api-key": "1.6.24",
     "@electric-sql/pglite": "0.5.4",
     "@electric-sql/pglite-pgvector": "0.0.5",
     "@orpc/openapi": "2.0.0-beta.18",
