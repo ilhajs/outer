@@ -200,7 +200,10 @@ function makeCol<T extends SQLType>(type: T): ColumnDef<T, false, false, false> 
     index() {
       return { ...this, _index: true };
     },
-    enum(values, options) {
+    enum<const V extends readonly string[], M extends boolean = false>(
+      values: V,
+      options?: { multiple?: M },
+    ) {
       if (!ENUMABLE_TYPES.has(this._type)) {
         throw new Error(`.enum() is only supported on text/varchar columns, got "${this._type}"`);
       }
@@ -212,7 +215,11 @@ function makeCol<T extends SQLType>(type: T): ColumnDef<T, false, false, false> 
           );
         }
       }
-      return { ...this, _enum: values, _multiple: options?.multiple === true } as any;
+      return {
+        ...this,
+        _enum: values,
+        _multiple: options?.multiple === true,
+      } as unknown as ColumnDef<T, false, false, false, V[number], M>;
     },
   };
   return def;

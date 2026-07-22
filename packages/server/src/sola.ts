@@ -164,10 +164,16 @@ function escapeLike(val: unknown): string {
  * LIKE with an explicit `ESCAPE '\'` clause — Postgres defaults to backslash
  * escaping but SQLite has no default escape character, so it must be spelled out.
  */
-function likeExpr(field: string, pattern: string): any {
+function likeExpr(field: string, pattern: string) {
   return sql`${sql.ref(field)} like ${pattern} escape '\\'`;
 }
 
+// The `qb`/`eb` params below are typed `any` on purpose. These helpers apply a
+// filter tree whose shape is only known at runtime (arbitrary columns/operators),
+// so they build the query by conditionally chaining `.where(...)` calls. Kysely's
+// fluent types don't compose across that kind of dynamic chaining — the column
+// name is a runtime string, not a keyof the table — so `any` at this boundary is
+// the standard Kysely pattern. Values stay parameterized; only the builder is untyped.
 function applyWhere({ qb, where }: { qb: any; where: Record<string, any> }): any {
   for (const [field, filter] of Object.entries(where)) {
     if (filter === undefined) continue;

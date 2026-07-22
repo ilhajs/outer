@@ -50,6 +50,9 @@ const v1_0 = schema("1.0.0")
     userId: t.text().references("user", "id"),
   }))
   .files({ attachTo: ["post"] }) // `file` metadata table + a `post_file` pivot
+  // Relations power `include` — e.g. context.db.query.user.findMany({ include: { post: true } })
+  .relation("user", (rel) => rel.hasMany("post", { from: "id", to: "userId" }))
+  .relation("post", (rel) => rel.belongsTo("user", { from: "userId", to: "id" }))
   .build();
 
 const outer = new Outer({
@@ -165,12 +168,13 @@ The `pglite()` default writes to local disk, so any persistent host (VPS, Coolif
 
 A Bun workspace monorepo:
 
-| Path              | Description                                            |
-| ----------------- | ------------------------------------------------------ |
-| `packages/server` | `@outerjs/server` — Outer's core                       |
-| `packages/sdk`    | `@outerjs/sdk` — type-safe client (oRPC + Better Auth) |
-| `templates/*`     | Deployable starters (see table above)                  |
-| `apps/website`    | Documentation website                                  |
+| Path              | Description                                                     |
+| ----------------- | --------------------------------------------------------------- |
+| `packages/server` | `@outerjs/server` — Outer's core                                |
+| `packages/sdk`    | `@outerjs/sdk` — type-safe client (oRPC + Better Auth)          |
+| `templates/*`     | Deployable starters (see table above)                           |
+| `apps/hub`        | `@outerjs/hub` — admin dashboard that drives the `.admin()` API |
+| `apps/website`    | Documentation website                                           |
 
 ## Development
 

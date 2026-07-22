@@ -62,8 +62,8 @@ type OuterDB<TDB> = Kysely<TDB> & {
 };
 
 /** The signed-in user, as Better Auth returns it (plus whatever plugins add). */
-export type SessionUser = { id: string; email: string; role?: string } & Record<string, any>;
-export type UserSession = { id: string; userId: string; expiresAt: Date } & Record<string, any>;
+export type SessionUser = { id: string; email: string; role?: string } & Record<string, unknown>;
+export type UserSession = { id: string; userId: string; expiresAt: Date } & Record<string, unknown>;
 
 export type OuterRpcContext<TDB = any> = {
   headers: Headers;

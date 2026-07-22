@@ -13,4 +13,7 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["OuterDO"] }],
   // Bytes for `.files()` uploads. Create it once with `wrangler r2 bucket create outer-files`.
   "r2_buckets": [{ "binding": "OUTER_FILES", "bucket_name": "outer-files" }],
+  // Backs `context.kv`. Create it with `wrangler kv namespace create OUTER_KV` and paste the
+  // returned id below. `wrangler dev` simulates KV locally, so the placeholder is fine until deploy.
+  "kv_namespaces": [{ "binding": "OUTER_KV", "id": "<your-kv-namespace-id>" }],
 }

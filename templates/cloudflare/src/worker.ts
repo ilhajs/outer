@@ -1,30 +1,19 @@
 import { Outer, type InferRouter } from "@outerjs/server";
 import { fromRecord } from "@outerjs/server/secrets";
-import { type OuterStorage } from "@outerjs/server/storage";
+import { fromUnstorage } from "@outerjs/server/storage";
 import { emailOTP } from "better-auth/plugins";
 import { DurableObject } from "cloudflare:workers";
 import { DurableObjectSqliteDialect } from "kysely-durable-objects";
+import { createStorage } from "unstorage";
+import cloudflareKVBindingDriver from "unstorage/drivers/cloudflare-kv-binding";
+import cloudflareR2BindingDriver from "unstorage/drivers/cloudflare-r2-binding";
 import { z } from "zod";
 
 import { v1_0_0 } from "./schema";
 
-/**
- * `OuterStorage` is three methods on purpose, so a backend needs no adapter package —
- * an R2 binding maps onto it directly. (`fromS3` covers the `@aws-sdk/client-s3`
- * command shape instead; R2's native binding is simpler than that.)
- */
-function fromR2(bucket: R2Bucket): OuterStorage {
-  return {
-    async get(key) {
-      const object = await bucket.get(key);
-      return object ? new Uint8Array(await object.arrayBuffer()) : null;
-    },
-    async set(key, bytes) {
-      await bucket.put(key, bytes);
-    },
-    delete: (key) => bucket.delete(key),
-  };
-}
+// Uploads (R2) and the KV store both plug in through unstorage's Cloudflare
+// binding drivers, so no per-service adapter code lives here — swap the driver
+// to move either off Cloudflare and nothing else changes.
 
 // one DO instance (see idFromName below) = one SQLite DB, like PGlite's local file
 export class OuterDO extends DurableObject<Env> {
@@ -60,8 +49,20 @@ export class OuterDO extends DurableObject<Env> {
           .filter(Boolean),
         credentials: true,
       },
-      // Uploaded bytes go to R2, not the DO — see the OUTER_FILES binding in wrangler.jsonc
-      storage: fromR2(secrets.get("OUTER_FILES")),
+      // Uploaded bytes go to R2, not the DO — see the OUTER_FILES binding in wrangler.jsonc.
+      // The `as any` casts bridge a type-only skew: unstorage ships its own copy of
+      // `@cloudflare/workers-types`, so its `R2Bucket`/`KVNamespace` aren't identical to the
+      // ones in this project's generated `Env` (same story as `ctx.storage.sql as any` above).
+      storage: fromUnstorage(
+        createStorage({
+          driver: cloudflareR2BindingDriver({ binding: secrets.get("OUTER_FILES") as any }),
+        }),
+      ),
+      // Key/value store, surfaced as `context.kv` — see the OUTER_KV binding in wrangler.jsonc.
+      // `OuterKV` is unstorage-shaped, so the storage instance is passed straight through.
+      kv: createStorage({
+        driver: cloudflareKVBindingDriver({ binding: secrets.get("OUTER_KV") as any }),
+      }),
       // Surfaced as `context.secrets` — read the same env values in any procedure
       secrets,
     })

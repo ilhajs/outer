@@ -44,12 +44,15 @@ export function fromUnstorage(storage: UnstorageLike): OuterStorage {
  */
 export function fromS3(
   client: {
-    send(command: unknown): Promise<any>;
+    // `GetObject` responses expose a streaming `Body`; `Put`/`Delete` return metadata we ignore.
+    send(command: unknown): Promise<{
+      Body?: { transformToByteArray?: () => Promise<Uint8Array | ArrayBuffer> };
+    }>;
   },
   commands: {
-    GetObjectCommand: new (input: any) => unknown;
-    PutObjectCommand: new (input: any) => unknown;
-    DeleteObjectCommand: new (input: any) => unknown;
+    GetObjectCommand: new (input: unknown) => unknown;
+    PutObjectCommand: new (input: unknown) => unknown;
+    DeleteObjectCommand: new (input: unknown) => unknown;
   },
   bucket: string,
 ): OuterStorage {
