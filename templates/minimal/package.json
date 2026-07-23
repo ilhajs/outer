@@ -3,9 +3,6 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "engines": {
-    "node": ">=24"
-  },
   "scripts": {
     "dev": "tsdown --watch --onSuccess \"node dist/index.mjs\"",
     "build": "tsdown",
@@ -26,5 +23,8 @@
     "@tsconfig/strictest": "^2.0.8",
     "tsdown": "^0.22.3",
     "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

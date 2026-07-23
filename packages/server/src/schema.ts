@@ -579,21 +579,49 @@ type FileCols = {
 type OwnerCol = { userId: ColumnDef<"text", true, false, false> };
 
 /** Pivot row linking one `file` to one row of the attached table. */
-type AttachmentCols = {
+type AttachmentCols<EntityIdT extends SQLType = "text"> = {
   id: ColumnDef<"text", false, true, false>;
   fileId: ColumnDef<"text", false, false, false>;
-  entityId: ColumnDef<"text", false, false, false>;
+  /** Same type as the attached table's primary key (`serial` PKs store as `integer`). */
+  entityId: ColumnDef<EntityIdT, false, false, false>;
   /** Free-form label so one table can hold several kinds of attachment ("avatar", "cover", …). */
   role: ColumnDef<"text", true, false, false>;
   /** Sort key for ordered galleries. */
   position: ColumnDef<"integer", false, false, true>;
 } & TimestampCols;
 
-function attachmentTableDef(t: TableBuilder, entityTable: string) {
+/**
+ * The attached table's primary key, so `entityId` can mirror its type — an FK
+ * between incompatible types (`text` → `integer`) fails at CREATE TABLE.
+ * `serial` maps to `integer`: the pivot references values, it doesn't generate them.
+ */
+function entityPk(cols: Record<string, AnyColumn> | undefined) {
+  const pk = Object.entries(cols ?? {}).find(([, col]) => col._primaryKey);
+  if (!pk) {
+    return { name: "id", type: "text" as SQLType };
+  }
+  const type = pk[1]._type as SQLType;
+  return { name: pk[0], type: type === "serial" ? ("integer" as const) : type };
+}
+
+/** Maps an attached table's PK column type to the pivot's `entityId` type. */
+type EntityIdType<Cols> = [
+  {
+    [K in keyof Cols]: Cols[K] extends ColumnDef<infer T2, any, true, any, any, any> ? T2 : never;
+  }[keyof Cols],
+] extends [infer PkT]
+  ? [PkT] extends [never]
+    ? "text"
+    : PkT extends "serial"
+      ? "integer"
+      : PkT & SQLType
+  : "text";
+
+function attachmentTableDef(t: TableBuilder, entityTable: string, pk: ReturnType<typeof entityPk>) {
   return {
     id: t.text().primaryKey(),
     fileId: t.text().references("file", "id", { onDelete: "cascade" }).index(),
-    entityId: t.text().references(entityTable, "id", { onDelete: "cascade" }).index(),
+    entityId: t[pk.type]().references(entityTable, pk.name, { onDelete: "cascade" }).index(),
     role: t.text().nullable(),
     position: t.integer().default(0),
     ...timestamps(t),
@@ -613,10 +641,13 @@ export type FilesOptions<Attach extends string = never> = {
   owner?: boolean;
 };
 
-export type FileTables<Attach extends string = never, Owned extends boolean = true> = Record<
-  "file",
-  Owned extends true ? FileCols & OwnerCol : FileCols
-> & { [K in Attach as `${K}_file`]: AttachmentCols };
+export type FileTables<
+  T extends TablesDef = TablesDef,
+  Attach extends keyof T & string = never,
+  Owned extends boolean = true,
+> = Record<"file", Owned extends true ? FileCols & OwnerCol : FileCols> & {
+  [K in Attach as `${K}_file`]: AttachmentCols<EntityIdType<T[K]>>;
+};
 
 // ── Builder ────────────────────────────────────────────────────────────────
 
@@ -669,7 +700,7 @@ type SchemaBuilder<T extends TablesDef> = {
    */
   files<Attach extends keyof T & string = never, Owned extends boolean = true>(
     options?: FilesOptions<Attach> & { owner?: Owned },
-  ): SchemaBuilder<T & FileTables<Attach, Owned>>;
+  ): SchemaBuilder<T & FileTables<T, Attach, Owned>>;
 
   table<Name extends string, Cols extends Record<string, AnyColumn>>(
     name: Name,
@@ -715,17 +746,18 @@ export function schema(version: string): SchemaBuilder<Record<never, never>> {
       }
       for (const entity of options?.attachTo ?? []) {
         const pivot = `${entity}_file`;
-        tables[pivot] = { ...tables[pivot], ...attachmentTableDef(t, entity) };
+        const pk = entityPk(tables[entity]);
+        tables[pivot] = { ...tables[pivot], ...attachmentTableDef(t, entity, pk) };
         relations.push(
           makeRelChain(entity).manyToMany("file", pivot, {
-            from: "id",
+            from: pk.name,
             to: "id",
             pivotFrom: "entityId",
             pivotTo: "fileId",
           }),
           makeRelChain("file").manyToMany(entity, pivot, {
             from: "id",
-            to: "id",
+            to: pk.name,
             pivotFrom: "fileId",
             pivotTo: "entityId",
           }),

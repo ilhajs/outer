@@ -352,6 +352,27 @@ describe("schema().files()", () => {
         .execute(),
     ).rejects.toThrow();
   });
+
+  test("the pivot's entityId matches a serial primary key (integer, not text)", async () => {
+    const db = makeDb();
+    const s = schema("1.0.0")
+      .auth()
+      .table("post", (t) => ({ id: t.serial().primaryKey(), title: t.text() }))
+      .files({ attachTo: ["post"] })
+      .build();
+
+    const { error } = await createMigrator({ db, schemas: [s] }).migrateToLatest();
+    expect(error).toBeUndefined();
+    expect((s.tables["post_file"] as any).entityId._type).toBe("integer");
+
+    // Round-trip through the FK to prove the types line up.
+    await db.insertInto("post").values({ title: "hello" }).execute();
+    await db
+      .insertInto("file")
+      .values({ id: "f1", key: "k1", name: "n", type: "text/plain", size: 1 })
+      .execute();
+    await db.insertInto("post_file").values({ id: "a", fileId: "f1", entityId: 1 }).execute();
+  });
 });
 
 // ── In-place column changes ────────────────────────────────────────────────

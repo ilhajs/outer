@@ -55,20 +55,21 @@ export type FileRecord = {
 /** The procedures `.files()` registers under the `file` namespace. */
 export type FilesRouter = {
   upload: TypedProcedure<
-    { file: File; name?: string; attach?: { table: string; id: string; role?: string } },
+    { file: File; name?: string; attach?: { table: string; id: string | number; role?: string } },
     FileRecord
   >;
   list: TypedProcedure<
-    { attachedTo?: { table: string; id: string }; take?: number; skip?: number } | undefined,
+    | { attachedTo?: { table: string; id: string | number }; take?: number; skip?: number }
+    | undefined,
     FileRecord[]
   >;
   get: TypedProcedure<{ id: string }, FileRecord | null>;
   delete: TypedProcedure<{ id: string }, { id: string }>;
   attach: TypedProcedure<
-    { id: string; table: string; entityId: string; role?: string; position?: number },
+    { id: string; table: string; entityId: string | number; role?: string; position?: number },
     { id: string }
   >;
-  detach: TypedProcedure<{ id: string; table: string; entityId: string }, { id: string }>;
+  detach: TypedProcedure<{ id: string; table: string; entityId: string | number }, { id: string }>;
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -177,7 +178,8 @@ export function buildFileProcedures(params: {
   const perms = { ...DEFAULT_PERMISSIONS, ...config.permissions };
   const pivots = pivotTables(tables);
 
-  const attachInput = z.object({ table: z.string(), id: z.string(), role: z.string().optional() });
+  const entityId = z.union([z.string(), z.number()]);
+  const attachInput = z.object({ table: z.string(), id: entityId, role: z.string().optional() });
 
   const upload = base
     .input(
@@ -244,7 +246,7 @@ export function buildFileProcedures(params: {
     .input(
       z
         .object({
-          attachedTo: z.object({ table: z.string(), id: z.string() }).optional(),
+          attachedTo: z.object({ table: z.string(), id: entityId }).optional(),
           take: z.number().int().min(1).max(200).optional(),
           skip: z.number().int().min(0).optional(),
         })
@@ -316,7 +318,7 @@ export function buildFileProcedures(params: {
       z.object({
         id: z.string(),
         table: z.string(),
-        entityId: z.string(),
+        entityId,
         role: z.string().optional(),
         position: z.number().int().optional(),
       }),
@@ -348,7 +350,7 @@ export function buildFileProcedures(params: {
     });
 
   const detach = base
-    .input(z.object({ id: z.string(), table: z.string(), entityId: z.string() }))
+    .input(z.object({ id: z.string(), table: z.string(), entityId }))
     .handler(async ({ input, context }) => {
       const row = await context.db
         .selectFrom("file")

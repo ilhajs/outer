@@ -102,7 +102,7 @@ An uploaded file's `content-type` is caller-controlled, so the download route ne
 
 ## Attach files to rows
 
-`attachTo` on the schema builder creates one pivot table per name. `post` gets `post_file`, with `fileId`, `entityId`, a nullable `role` so one table can carry several kinds of attachment (`"avatar"`, `"cover"`, and so on), and an integer `position` for ordered galleries.
+`attachTo` on the schema builder creates one pivot table per name. `post` gets `post_file`, with `fileId`, `entityId` (typed to match `post`'s primary key), a nullable `role` so one table can carry several kinds of attachment (`"avatar"`, `"cover"`, and so on), and an integer `position` for ordered galleries.
 
 Both foreign keys are enforced in the database, and a `manyToMany` relation is declared in both directions, so `context.db.query` traverses `post → file` and `file → post`.
 

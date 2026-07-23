@@ -955,7 +955,7 @@ const v1_1 = schema("1.1.0")
 | ---------- | --------------------------------------------------------------------------------------------- |
 | `id`       | PK                                                                                            |
 | `fileId`   | references `file.id`                                                                          |
-| `entityId` | references `x.id`                                                                             |
+| `entityId` | references `x`'s primary key, matching its column type (`serial` PKs store as `integer`)      |
 | `role`     | nullable label, so one table can carry several kinds of attachment (`"avatar"`, `"cover"`, …) |
 | `position` | integer, default `0` — sort key for ordered galleries                                         |
 

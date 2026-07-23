@@ -80,7 +80,7 @@ const v1_0 = schema("1.0.0")
   .build();
 ```
 
-`attachTo` links files to existing tables. Each name `x` gets a pivot table `x_file` with `fileId`, `entityId`, a nullable `role` so one table can carry several kinds of attachment, and an integer `position` for ordered galleries. It also declares a `manyToMany` relation both ways. Only tables already declared on the builder are accepted; unknown names are a type error.
+`attachTo` links files to existing tables. Each name `x` gets a pivot table `x_file` with `fileId`, `entityId` (typed to match `x`'s primary key), a nullable `role` so one table can carry several kinds of attachment, and an integer `position` for ordered galleries. It also declares a `manyToMany` relation both ways. Only tables already declared on the builder are accepted; unknown names are a type error.
 
 `owner` defaults to `true` and adds `file.userId` plus the `user` ↔ `file` relations, so it requires `.auth()`. Pass `owner: false` for files with no per-user owner. The tables are exported as `FileTables`.
 
