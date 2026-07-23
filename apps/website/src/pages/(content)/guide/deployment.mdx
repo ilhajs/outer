@@ -2,7 +2,7 @@
 title: Deployment
 description: Deploy Outer with the zero-infra pglite() default, swap in a Kysely dialect for serverless platforms, and embed the handler in any host framework.
 order: 14
-tags: [deploy, pglite, dialects, vps, serverless]
+tags: [deploy, pglite, dialects, vps, coolify, serverless]
 ---
 
 # Deployment
@@ -15,7 +15,7 @@ The one decision that shapes your deployment is the database. Pick it first.
 
 | Your host                                                                | Use                                                   |
 | ------------------------------------------------------------------------ | ----------------------------------------------------- |
-| VPS, Coolify, Docker, any long-lived Node process                        | [`pglite()`](#run-embedded-postgres-with-pglite)      |
+| VPS, [Coolify](#deploy-to-coolify), Docker, any long-lived Node process  | [`pglite()`](#run-embedded-postgres-with-pglite)      |
 | Vercel Functions, Cloudflare Workers, anything without a persistent disk | [a custom dialect](#swap-in-a-dialect-for-serverless) |
 
 ## Run embedded Postgres with `pglite()`
@@ -110,6 +110,44 @@ The same persistence question applies to file bytes. [`.files()`](/guide/files) 
 | Anything S3-compatible | S3, R2, Backblaze B2, MinIO                        | `fromS3(client, commands, bucket)`    |
 
 On a VPS, the local-disk driver is the zero-infra match for `pglite()`. Mount the directory as a volume if you containerize. On serverless, local disk is as unavailable for bytes as it is for the database, so an object store is not optional.
+
+## Deploy to Coolify
+
+[Coolify](https://coolify.io) with the Railpack build pack runs an Outer template from a Git push with no Dockerfile. Point a new application at your repository (set **Base Directory** if the app lives in a subfolder, e.g. `/templates/minimal`), then configure four things.
+
+### Build pack
+
+Set **Build Pack** to **Railpack**. It detects the Node app, runs the package manager's install and `build`, and starts the app with the `start` script from `/app` inside the container.
+
+### Environment variables
+
+Copy your `.env` (or the template's `.env.example`) and paste it into **Environment Variables → Developer view**, save, then adjust the values for production:
+
+```sh
+BASE_URL=https://your-app.example.com
+AUTH_SECRET=<openssl rand -base64 32>
+```
+
+`AUTH_SECRET` must be a randomly generated value at least 32 characters long — Better Auth signs sessions with it, and warns at startup when the secret is short or low-entropy.
+
+### Persistent storage
+
+PGlite writes to local disk, and each deployment replaces the container — without a volume, the database resets on every push. Under **Persistent Storage**, choose **+ Add → Volume Mount**:
+
+| Field            | Value         |
+| ---------------- | ------------- |
+| Name             | `outer`       |
+| Destination Path | `/app/.outer` |
+
+Railpack runs the app from `/app`, and `pglite()` defaults to `<cwd>/.outer/pglite`, so `/app/.outer` is the directory to persist. The named volume reattaches to every new container, carrying the database — and local-disk uploads, if you point their storage at the same directory — across deployments.
+
+### Webhooks (optional)
+
+To redeploy on every push, connect the app through a GitHub App source or add the webhook from **Webhooks** to your repository, so a push to the configured branch triggers a build.
+
+### Healthcheck (optional)
+
+Outer mounts `GET /health` by default: `200 {"status":"ok","database":"up"}`, or `503` when the database probe fails. Enable Coolify's healthcheck and point it at `/health` so a broken deployment never replaces a healthy container.
 
 ## Embed in a host framework
 
