@@ -9,11 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@better-auth/api-key": "^1.6.24",
     "@fontsource-variable/geist-mono": "^5.3.0",
     "@ilha/router": "^0.8.9",
     "@ilha/store": "^0.7.7",
-    "@outerjs/sdk": "https://pkg.pr.new/ilhajs/outer/@outerjs/sdk@main",
-    "@outerjs/server": "https://pkg.pr.new/ilhajs/outer/@outerjs/server@main",
+    "@outerjs/sdk": "workspace:*",
+    "@outerjs/server": "workspace:*",
     "@scalar/api-reference": "^1.63.0",
     "@sindresorhus/slugify": "^3.0.0",
     "areia": "^0.2.1",

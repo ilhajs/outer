@@ -13,6 +13,7 @@ import {
   type GridFilter,
   type GridSort,
 } from "$lib/grid-filters";
+import { tryFetchMeta } from "$lib/meta";
 import { getClient } from "$lib/outer";
 import { coercePk, isSecretColumn } from "$lib/record-form";
 import { getInstanceById, getTableByName } from "$lib/store";
@@ -62,8 +63,11 @@ export const clientLoad = loader(async ({ head, url, params }) => {
     return {};
   }
 
+  const meta = await tryFetchMeta(instance);
+  // Unreachable — the dashboard layout renders the connection-error screen.
+  if (!meta) return { instanceId, tableName };
+
   const client = getClient(instance.url);
-  const meta = await client._admin.meta();
   const table = getTableByName(meta, tableName);
   if (!table) {
     navigate(`/i/${instanceId}`);

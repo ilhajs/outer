@@ -1,12 +1,13 @@
 import { tableListHref } from "$lib/grid-filters";
+import { tryFetchMeta } from "$lib/meta";
 import { getClient } from "$lib/outer";
 import { buildChanges, coercePk, RecordField } from "$lib/record-form";
 import { getInstanceById, getTableByName } from "$lib/store";
 import { invalidate, loader, navigate, useRoute, type InferLoader } from "@ilha/router";
-import { Button, Icon, LinkButton } from "areia";
+import { Button, Dialog, Icon, LinkButton } from "areia";
 import { toast } from "areia/sonner";
 import ilha from "ilha";
-import { X } from "lucide";
+import { Trash2, X } from "lucide";
 import { each, when } from "quando";
 
 export const clientLoad = loader(async ({ head, params, url }) => {
@@ -19,8 +20,11 @@ export const clientLoad = loader(async ({ head, params, url }) => {
     return {};
   }
 
+  const meta = await tryFetchMeta(instance);
+  // Unreachable — the dashboard layout renders the connection-error screen.
+  if (!meta) return { instanceId, tableName, recordId };
+
   const client = getClient(instance.url);
-  const meta = await client._admin.meta();
   const table = getTableByName(meta, tableName);
   const pkColumn = table?.columns.find((column) => column.primaryKey);
   if (!table || !pkColumn) {
@@ -44,6 +48,23 @@ export const clientLoad = loader(async ({ head, params, url }) => {
 export default ilha
   .input<InferLoader<typeof clientLoad>>()
   .state("saving", false)
+  .on("[data-delete-open-record]@click", async ({ input }) => {
+    const { table, instanceId, tableName, recordId } = input;
+    const pkColumn = table?.columns.find((column) => column.primaryKey);
+    if (!pkColumn || recordId === undefined) return;
+
+    try {
+      const client = getClient(getInstanceById(instanceId!)!.url);
+      await client._admin.data.delete({
+        table: tableName!,
+        where: { [pkColumn.name]: coercePk(pkColumn, recordId) },
+      });
+      toast.success("Record deleted");
+      navigate(tableListHref(instanceId!, tableName!, useRoute().search()));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete record");
+    }
+  })
   .on("#record-form@submit", async ({ input, state, event }) => {
     event.preventDefault();
     const { table, record, instanceId, tableName, recordId } = input;
@@ -105,17 +126,48 @@ export default ilha
               />
             ))}
           </div>
-          <div class="border-areia-border flex items-center justify-end gap-2 border-t p-3">
-            <LinkButton href={closeHref} variant="ghost">
-              Cancel
-            </LinkButton>
-            <Button type="submit" variant="primary" disabled={state.saving()}>
-              {when(
-                state.saving(),
-                () => "Saving…",
-                () => "Save Changes",
-              )}
-            </Button>
+          <div class="border-areia-border flex items-center justify-between gap-2 border-t p-3">
+            <Dialog
+              key={`delete-open-record-${input.recordId}`}
+              role="alertdialog"
+              contentClass="grid gap-4 p-6"
+              content={
+                <>
+                  <Dialog.Title>Delete record</Dialog.Title>
+                  <Dialog.Description>
+                    Delete <span class="font-mono">{input.recordId}</span> from{" "}
+                    <span class="font-medium">{tableName}</span>? This cannot be undone.
+                  </Dialog.Description>
+                  <div class="flex justify-end gap-2">
+                    <Dialog.Close>
+                      <Button variant="secondary">Cancel</Button>
+                    </Dialog.Close>
+                    <Dialog.Close>
+                      <Button variant="destructive" data-delete-open-record>
+                        Delete
+                      </Button>
+                    </Dialog.Close>
+                  </div>
+                </>
+              }
+            >
+              <span class="text-muted-foreground hover:text-areia-danger hover:bg-areia-control-hover inline-flex h-8 cursor-pointer items-center gap-1 rounded-md px-2 text-sm">
+                <Icon icon={Trash2} class="size-4" />
+                Delete
+              </span>
+            </Dialog>
+            <div class="flex items-center gap-2">
+              <LinkButton href={closeHref} variant="ghost">
+                Cancel
+              </LinkButton>
+              <Button type="submit" variant="primary" disabled={state.saving()}>
+                {when(
+                  state.saving(),
+                  () => "Saving…",
+                  () => "Save Changes",
+                )}
+              </Button>
+            </div>
           </div>
         </form>
       </div>

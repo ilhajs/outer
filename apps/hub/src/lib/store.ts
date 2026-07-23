@@ -31,6 +31,15 @@ export const appStore = store(StoreSchema)
     }
     return {};
   })
+  .action("removeInstance", (id: string, { get }) => ({
+    instances: get().instances.filter((instance) => instance.id !== id),
+  }))
+  .action("updateInstance", (update: { id: string; name: string; url: string }, { get }) => ({
+    // Keep the existing id stable so routes and tokens keep pointing at it.
+    instances: get().instances.map((instance) =>
+      instance.id === update.id ? { ...instance, name: update.name, url: update.url } : instance,
+    ),
+  }))
   .build();
 
 persist(appStore, "appStore");

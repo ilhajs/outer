@@ -1,12 +1,21 @@
+import { getClient } from "$lib/outer";
 import type { Instance } from "$lib/store";
-import { useRoute } from "@ilha/router";
+import { navigate, useRoute } from "@ilha/router";
 import type { AdminMeta } from "@outerjs/server";
-import { Button, Icon, LinkButton } from "areia";
+import { Button, Dropdown, Icon, LinkButton } from "areia";
+import { toast } from "areia/sonner";
 import ilha from "ilha";
-import { ArrowRightLeft, BookOpen, FolderOpen, Home, MoreVertical, Settings } from "lucide";
+import { ArrowRightLeft, BookOpen, FolderOpen, Home, LogOut, MoreVertical, Settings } from "lucide";
 import { each, when } from "quando";
 
 const { params, path } = useRoute();
+
+async function signOut(instance: Instance | undefined) {
+  if (!instance) return;
+  const { error } = await getClient(instance.url).auth.signOut();
+  if (error) return void toast.error(error.message);
+  navigate(`/i/${instance.id}/login`);
+}
 
 export const Sidebar = ilha
   .input<{ meta: AdminMeta | undefined; instance: Instance | undefined }>()
@@ -22,7 +31,30 @@ export const Sidebar = ilha
           >
             Hub
           </LinkButton>
-          <Button variant="ghost" shape="square" icon={<Icon icon={MoreVertical} />} />
+          <Dropdown
+            key="sidebar-menu"
+            align="end"
+            onSelect={(value: string) => {
+              if (value === "sign-out") void signOut(input.instance);
+            }}
+            trigger={
+              <Button
+                variant="ghost"
+                shape="square"
+                aria-label="Instance menu"
+                icon={<Icon icon={MoreVertical} />}
+              />
+            }
+          >
+            <Dropdown.Item
+              value="sign-out"
+              variant="danger"
+              class="whitespace-nowrap"
+              icon={<Icon icon={LogOut} class="size-4" />}
+            >
+              Sign Out
+            </Dropdown.Item>
+          </Dropdown>
         </div>
         <LinkButton
           href={`/i/${input.instance?.id}`}

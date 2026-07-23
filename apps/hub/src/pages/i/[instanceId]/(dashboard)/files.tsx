@@ -3,6 +3,7 @@
  * read through the admin API (`_admin.data.*` over the `file` table). Selecting
  * a card opens a detail pane, mirroring the record master–detail shell.
  */
+import { tryFetchMeta } from "$lib/meta";
 import { getClient } from "$lib/outer";
 import { getInstanceById } from "$lib/store";
 import { invalidate, loader, navigate, type InferLoader } from "@ilha/router";
@@ -48,8 +49,11 @@ export const clientLoad = loader(async ({ head, params, url }) => {
     return {};
   }
 
+  const meta = await tryFetchMeta(instance);
+  // Unreachable — the dashboard layout renders the connection-error screen.
+  if (!meta) return { instanceId };
+
   const client = getClient(instance.url);
-  const meta = await client._admin.meta();
   // `.files()` registers a `file` table; without it there's nothing to browse.
   const hasFiles = meta.tables.some((table) => table.name === "file");
   if (!hasFiles) {

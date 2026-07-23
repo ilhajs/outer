@@ -4,10 +4,11 @@
  * through the admin API (`_admin.meta`, `_admin.data.list` counts,
  * `_admin.migrations`).
  */
+import { tryFetchMeta } from "$lib/meta";
 import { getClient } from "$lib/outer";
 import { getInstanceById } from "$lib/store";
 import { loader, navigate, type MergeLoaders } from "@ilha/router";
-import type { AdminMeta, AdminMigrationStatus } from "@outerjs/server";
+import type { AdminMigrationStatus } from "@outerjs/server";
 import { Badge, Icon, Link, LinkButton, Table } from "areia";
 import { format, formatDistanceToNow } from "date-fns";
 import ilha from "ilha";
@@ -39,9 +40,11 @@ export const clientLoad = loader(async ({ head, params }) => {
     return {};
   }
 
-  const client = getClient(instance.url);
-  const meta = (await client._admin.meta()) as AdminMeta;
+  const meta = await tryFetchMeta(instance);
+  // Unreachable — the dashboard layout renders the connection-error screen.
+  if (!meta) return { instanceId };
 
+  const client = getClient(instance.url);
   // One count query per table — `take: 1` keeps the payload tiny; we only read `count`.
   const counts = await Promise.all(
     meta.tables.map(async (table): Promise<TableCount> => {

@@ -268,6 +268,7 @@ const MultiEnumRecordField = ilha
     return (
       <div class="grid gap-1.5">
         <Combobox
+          key={`combo-${column.name}`}
           multiple
           label={fieldLabel(column)}
           placeholder="Select values…"
