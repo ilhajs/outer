@@ -163,6 +163,7 @@ The `pglite()` default writes to local disk, so any persistent host (VPS, Coolif
 ## Documentation
 
 - [SPEC.md](./SPEC.md) — the full API reference: builder chain, schema and migrations, resource permissions, the Sola query API, realtime, MCP, type extraction.
+- [ROADMAP.md](./ROADMAP.md) — what's shipped in Outer and [Outer Hub](https://hub.outer.now), and what's coming next.
 - Guides and API reference on the website (`apps/website`).
 
 ## Repo layout
@@ -174,7 +175,7 @@ A Bun workspace monorepo:
 | `packages/server` | `@outerjs/server` — Outer's core                                |
 | `packages/sdk`    | `@outerjs/sdk` — type-safe client (oRPC + Better Auth)          |
 | `templates/*`     | Deployable starters (see table above)                           |
-| `apps/hub`        | `@outerjs/hub` — admin dashboard that drives the `.admin()` API |
+| `apps/hub`        | `@outerjs/hub` — admin dashboard ([hub.outer.now](https://hub.outer.now)) that drives the `.admin()` API |
 | `apps/website`    | Documentation website                                           |
 
 ## Development

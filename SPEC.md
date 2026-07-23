@@ -1289,10 +1289,14 @@ Use `withEventMeta` to attach an event `id` to each yield. On reconnect, oRPC pa
 
 ---
 
+## Outer Hub
+
+The admin dashboard — comparable to PocketBase's dashboard or Supabase Studio — is shipped as **Outer Hub** (`apps/hub`), hosted at [hub.outer.now](https://hub.outer.now). It is a static SPA that takes an Outer instance URL and authenticates against it via the instance's own auth (email OTP with an admin role); saved instances live in the browser's localStorage, and every request goes straight from the browser to the instance — nothing is stored or proxied centrally. It consumes the `.admin()` API (see above) for schema introspection, migration status, and table CRUD, plus `.files()` for a storage browser, `/openapi.json` for an embedded Scalar API reference, and Better Auth's `@better-auth/api-key` endpoints for API-token management. For Hub to reach an instance, the instance must enable `.admin()` and list Hub's origin in `cors` (the templates allow `https://hub.outer.now` by default). Hub is open source — build `apps/hub` and serve `dist/` from any static host to run your own, allowing that origin in `cors` instead.
+
 ## Roadmap
 
-Alpha focuses on persistent-hosting deployments (VPS, Coolify) with `pglite()` as the recommended default. One thing is planned next:
+Alpha focuses on persistent-hosting deployments (VPS, Coolify) with `pglite()` as the recommended default. Planned next:
 
-- **Admin dashboard/UI** — comparable to PocketBase's dashboard or Supabase Studio. The server side is done: `.admin()` (see above) exposes schema introspection, migration status, and table CRUD under `/rpc/_admin/**`, guarded by the admin role. What remains is the dashboard app itself — a static SPA that takes an Outer instance URL and authenticates against it (hosted centrally, run locally, or later mountable at `/admin` via a separate `outer-admin` package).
+- **Typed vector columns** — first-class `vector` column support in `schema()`, typed through to queries (pgvector already ships with `pglite()`; today vector columns are raw SQL).
 
 Serverless/edge support (Vercel Functions, Cloudflare Workers) is no longer blocked — `db: { dialect, kind }` (see "Custom dialects" above) lets you swap PGlite for a network-attached Postgres or a `"sqlite"`-family dialect, with working, verified templates for both (`templates/cloudflare`, Durable Objects; `templates/vercel-neon`, Neon Postgres). `mysql`/`mssql` `kind`s still aren't implemented (Kysely ships dialects for both, but Outer's DDL generation and error mapping don't cover them).

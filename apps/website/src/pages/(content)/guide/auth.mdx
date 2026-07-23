@@ -123,7 +123,7 @@ Without `cors`, no `Access-Control-Allow-Origin` header is set. Same-origin requ
 
 ## Admin API
 
-`.admin()` mounts an introspection and table-CRUD API under `/rpc/_admin/**` for building admin dashboards:
+`.admin()` mounts an introspection and table-CRUD API under `/rpc/_admin/**` for admin dashboards. [Outer Hub](/guide/hub) is the ready-made one — enable `.admin()`, allow its origin in `cors`, and manage the instance from [hub.outer.now](https://hub.outer.now). The API itself:
 
 | Procedure                                   | Purpose              |
 | ------------------------------------------- | -------------------- |
@@ -145,4 +145,5 @@ For a dashboard hosted on another origin, list its origin in `cors` and prefer t
 ## Next steps
 
 - [Permissions](/guide/permissions) — guard procedures and resources with the session
+- [Outer Hub](/guide/hub) — the admin dashboard built on this API
 - [MCP](/guide/mcp) — expose procedures to agents, authenticated with API keys

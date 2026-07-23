@@ -1,0 +1,62 @@
+---
+title: Outer Hub
+description: Manage any Outer instance from Outer Hub at hub.outer.now — browse and edit tables, manage files and API tokens, and explore your API, straight from the browser with no central server.
+order: 15
+tags: [hub, admin, dashboard, tables, files, api-keys, scalar]
+---
+
+# Outer Hub
+
+[Outer Hub](https://hub.outer.now) is the admin dashboard for Outer instances — the counterpart to PocketBase's dashboard or Supabase Studio. You add an instance by URL, sign in with an admin account, and get a table browser, record editing, a storage browser, API tokens, and an embedded API reference.
+
+Hub is a static app. Saved instances live in your browser's localStorage, and every request goes straight from your browser to your instance — nothing is stored or proxied centrally.
+
+## Connect your instance
+
+Hub talks to the [admin API](/guide/auth#admin-api), so the instance must enable `.admin()` and allow Hub's origin in `cors`:
+
+```ts
+new Outer({
+  db: pglite(),
+  cors: { origins: ["https://hub.outer.now"], credentials: true },
+})
+  .schema(v1_0) // built with schema().auth(), so the admin fields exist
+  .auth({ secret, plugins: [emailOTP({ ... })] })
+  .admin()
+  .build();
+```
+
+The templates ship with `https://hub.outer.now` in `CORS_ORIGINS` by default, so a fresh instance connects without changes.
+
+Then:
+
+1. Open [hub.outer.now](https://hub.outer.now) and click **Add Instance**. Hub tests the connection before saving.
+2. Sign in with email OTP. The account's `user.role` must include an admin role — the templates seed one from `ADMIN_EMAIL`.
+
+## What you get
+
+| Area              | What it does                                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------------------------ |
+| **Dashboard**     | Tables with record counts, schema versions, and migration status at a glance                                 |
+| **Table browser** | Sort, search, and filter any table; create, edit, and delete records with schema-driven forms                |
+| **Files**         | Browse, preview, rename, and delete uploads when the instance enables [`.files()`](/guide/files)             |
+| **API reference** | An embedded [Scalar](https://scalar.com) explorer for the instance's `/openapi.json` (requires `.openapi()`) |
+| **API tokens**    | Create and revoke Better Auth API keys for [MCP](/guide/mcp) and other headless clients                      |
+| **Settings**      | Edit the saved instance name and URL                                                                         |
+
+Forms drive themselves from your schema: enum columns render as selects, `{ multiple: true }` enums as multi-selects, booleans as switches, timestamps as date pickers, and foreign keys link to the referenced record.
+
+## Self-host it
+
+Hub lives in the repo at [`apps/hub`](https://github.com/ilhajs/outer/tree/main/apps/hub). Build it and serve `dist/` from any static host, then allow that origin in `cors` instead:
+
+```bash
+cd apps/hub
+bun install
+bun run build
+```
+
+## Next steps
+
+- [Auth](/guide/auth#admin-api) — the `.admin()` API Hub is built on
+- [MCP](/guide/mcp) — use a Hub-issued API token to connect agents

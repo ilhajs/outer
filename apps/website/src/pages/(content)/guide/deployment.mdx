@@ -192,11 +192,3 @@ If your frontend is deployed on a different origin than the Outer server, add [`
 | `ALL`  | `/rpc/**`       | oRPC handler                                                                  |
 | `ALL`  | `/rest/**`      | Plain-JSON OpenAPI handler (only mounted when `.openapi()` was called)        |
 | `GET`  | `/files/:id`    | File download (only mounted when `.files()` was called; path configurable)    |
-
-## Roadmap
-
-Alpha focuses on persistent-hosting deployments, with `pglite()` as the recommended default. One thing is planned next:
-
-- **Admin dashboard** — comparable to PocketBase's dashboard or Supabase Studio. The server side is done: [`.admin()`](/guide/auth#admin-api) exposes schema introspection, migration status, and table CRUD under `/rpc/_admin/**`, guarded by the admin role. What remains is the dashboard app itself, a static SPA that takes an Outer instance URL and authenticates against it.
-
-Serverless and edge support is no longer blocked. `db: { dialect, kind }` lets you swap PGlite for network-attached Postgres or a `"sqlite"`-family dialect, with verified templates for both. The `mysql` and `mssql` kinds remain unimplemented.

@@ -21,6 +21,7 @@ import {
   Database,
   HardDrive,
   KeyRound,
+  LayoutDashboard,
   Lock,
   Radio,
   Route,
@@ -358,6 +359,38 @@ export default ilha
           </div>
         </section>
 
+        {/* ── Outer Hub callout ────────────────────────────────────────── */}
+        <section class="container mx-auto max-w-6xl px-5 pb-16 sm:px-6 sm:pb-24 lg:px-8">
+          <div class="border-areia-border bg-areia-background flex flex-col gap-6 rounded-2xl border p-5 sm:p-8 md:flex-row md:items-center md:justify-between lg:p-10">
+            <div class="max-w-2xl space-y-3 sm:space-y-4">
+              <span class="bg-areia-control flex size-9 items-center justify-center rounded-lg">
+                <Icon icon={LayoutDashboard} class="size-5" />
+              </span>
+              <h2 class="text-xl leading-snug font-semibold tracking-tight sm:text-2xl">
+                Outer Hub: the dashboard, without the hosted lock-in.
+              </h2>
+              <p class="text-areia-subtle text-[0.9375rem] leading-[1.65] sm:text-base sm:leading-7">
+                Browse and edit tables, manage files and API tokens, and explore your API — for any
+                instance, from your browser. Hub is a static app: your instance URL lives in
+                localStorage and every request goes straight to your server, never through ours.
+              </p>
+            </div>
+            <div class="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row sm:gap-3">
+              <LinkButton
+                href="https://hub.outer.now"
+                external
+                variant="primary"
+                class="w-full sm:w-auto"
+              >
+                Open Outer Hub
+              </LinkButton>
+              <LinkButton href="/guide/hub" variant="outline" class="w-full sm:w-auto">
+                Read the guide
+              </LinkButton>
+            </div>
+          </div>
+        </section>
+
         {/* ── Type-safety callout ──────────────────────────────────────── */}
         <section class="container mx-auto max-w-6xl px-5 pb-16 sm:px-6 sm:pb-24 lg:px-8">
           <div class="border-areia-border bg-areia-background grid gap-8 rounded-2xl border p-5 sm:p-8 md:grid-cols-2 md:items-center lg:p-10">
@@ -386,9 +419,10 @@ export default ilha
                 Install it, write your schema, ship.
               </h2>
               <p class="text-areia-subtle text-[0.9375rem] leading-[1.65] sm:text-base sm:leading-7">
-                Schema, auth, permissions, files, realtime, and a four-surface API are in the box
-                today. A dashboard and typed vector columns are next. MIT licensed, no telemetry,
-                nothing phoning home — the whole thing runs on hardware you already pay for.
+                Schema, auth, permissions, files, realtime, a four-surface API, and the Outer Hub
+                dashboard are in the box today. Typed vector columns are next. MIT licensed, no
+                telemetry, nothing phoning home — the whole thing runs on hardware you already pay
+                for.
               </p>
             </div>
             <div class="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row sm:gap-3">
