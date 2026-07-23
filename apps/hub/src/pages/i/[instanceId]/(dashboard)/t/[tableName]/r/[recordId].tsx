@@ -143,7 +143,11 @@ export default ilha
                       <Button variant="secondary">Cancel</Button>
                     </Dialog.Close>
                     <Dialog.Close>
-                      <Button variant="destructive" data-delete-open-record>
+                      <Button
+                        data-testid="record-delete-confirm"
+                        variant="destructive"
+                        data-delete-open-record
+                      >
                         Delete
                       </Button>
                     </Dialog.Close>
@@ -151,7 +155,10 @@ export default ilha
                 </>
               }
             >
-              <span class="text-muted-foreground hover:text-areia-danger hover:bg-areia-control-hover inline-flex h-8 cursor-pointer items-center gap-1 rounded-md px-2 text-sm">
+              <span
+                data-testid="record-delete"
+                class="text-muted-foreground hover:text-areia-danger hover:bg-areia-control-hover inline-flex h-8 cursor-pointer items-center gap-1 rounded-md px-2 text-sm"
+              >
                 <Icon icon={Trash2} class="size-4" />
                 Delete
               </span>
@@ -160,7 +167,12 @@ export default ilha
               <LinkButton href={closeHref} variant="ghost">
                 Cancel
               </LinkButton>
-              <Button type="submit" variant="primary" disabled={state.saving()}>
+              <Button
+                data-testid="record-save"
+                type="submit"
+                variant="primary"
+                disabled={state.saving()}
+              >
                 {when(
                   state.saving(),
                   () => "Saving…",

@@ -269,6 +269,7 @@ const MultiEnumRecordField = ilha
       <div class="grid gap-1.5">
         <Combobox
           key={`combo-${column.name}`}
+          data-testid={`field-${column.name}`}
           multiple
           label={fieldLabel(column)}
           placeholder="Select values…"
@@ -319,6 +320,7 @@ export function RecordField(props: { column: Column; value?: unknown; disabled?:
     return (
       <Select
         key={`field-${column.name}`}
+        data-testid={`field-${column.name}`}
         name={column.name}
         label={label}
         disabled={disabled}
@@ -334,6 +336,7 @@ export function RecordField(props: { column: Column; value?: unknown; disabled?:
     return (
       <Switch
         key={`field-${column.name}`}
+        data-testid={`field-${column.name}`}
         name={column.name}
         label={label}
         checked={value === true}
@@ -344,6 +347,7 @@ export function RecordField(props: { column: Column; value?: unknown; disabled?:
   if (column.type === "jsonb") {
     return (
       <Textarea
+        data-testid={`field-${column.name}`}
         name={column.name}
         label={label}
         rows={4}
@@ -354,6 +358,7 @@ export function RecordField(props: { column: Column; value?: unknown; disabled?:
   }
   return (
     <Input
+      data-testid={`field-${column.name}`}
       name={column.name}
       label={label}
       disabled={disabled}

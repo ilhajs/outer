@@ -98,7 +98,12 @@ export default ilha
             <LinkButton href={closeHref} variant="ghost">
               Cancel
             </LinkButton>
-            <Button type="submit" variant="primary" disabled={state.saving()}>
+            <Button
+              data-testid="record-create"
+              type="submit"
+              variant="primary"
+              disabled={state.saving()}
+            >
               {when(
                 state.saving(),
                 () => "Creating…",

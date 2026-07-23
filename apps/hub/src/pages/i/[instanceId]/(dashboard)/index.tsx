@@ -103,7 +103,9 @@ export default ilha.input<DashboardLoader>().render(({ input }) => {
     <div class="flex min-h-0 flex-1 flex-col gap-6 overflow-auto p-4">
       <header class="flex flex-wrap items-center justify-between gap-2">
         <div class="flex flex-col gap-1">
-          <h1 class="text-2xl font-semibold">{instance?.name ?? meta.name}</h1>
+          <h1 data-testid="instance-title" class="text-2xl font-semibold">
+            {instance?.name ?? meta.name}
+          </h1>
           <p class="text-muted-foreground flex flex-wrap items-center gap-2 text-sm">
             <span>{meta.name}</span>
             <span aria-hidden>·</span>

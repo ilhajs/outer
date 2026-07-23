@@ -213,12 +213,18 @@ function TimestampCell(props: { value: unknown; column: Column; cellKey: string 
   );
 }
 
-function ValueCell(props: { value: unknown; column: Column; href?: string; cellKey: string }) {
+function ValueCell(props: {
+  value: unknown;
+  column: Column;
+  href?: string;
+  cellKey: string;
+  testId?: string;
+}) {
   const full = formatCell(props.value, props.column.type);
   const short = truncateMiddle(full);
   const linkHref = props.href ?? externalHref(full);
   const text = linkHref ? (
-    <Link href={linkHref} external={!props.href}>
+    <Link data-testid={props.testId} href={linkHref} external={!props.href}>
       {short}
     </Link>
   ) : (
@@ -270,7 +276,15 @@ function DataCell(props: {
     : column.references
       ? props.recordHref(column.references.table, value)
       : undefined;
-  return <ValueCell value={value} column={column} href={href} cellKey={cellKey} />;
+  return (
+    <ValueCell
+      value={value}
+      column={column}
+      href={href}
+      cellKey={cellKey}
+      testId={column.primaryKey ? "record-link" : undefined}
+    />
+  );
 }
 
 function DeleteCell(props: { row: Row; pk: Column; cellKey: string }) {
@@ -513,7 +527,12 @@ export default defineLayout((Children) =>
                 {count} record{count === 1 ? "" : "s"}
               </span>
             </h2>
-            <LinkButton variant="secondary" href={newHref} icon={<Icon icon={Plus} />}>
+            <LinkButton
+              data-testid="add-record"
+              variant="secondary"
+              href={newHref}
+              icon={<Icon icon={Plus} />}
+            >
               Add Record
             </LinkButton>
           </header>

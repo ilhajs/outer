@@ -39,6 +39,7 @@ export const Sidebar = ilha
             }}
             trigger={
               <Button
+                data-testid="sidebar-menu"
                 variant="ghost"
                 shape="square"
                 aria-label="Instance menu"
@@ -47,6 +48,7 @@ export const Sidebar = ilha
             }
           >
             <Dropdown.Item
+              data-testid="sign-out"
               value="sign-out"
               variant="danger"
               class="whitespace-nowrap"
@@ -70,6 +72,7 @@ export const Sidebar = ilha
             const isActive = params().tableName === table.name;
             return (
               <LinkButton
+                data-testid={`sidebar-table-${table.name}`}
                 variant={isActive ? "outline" : undefined}
                 href={`/i/${input.instance?.id}/t/${table.name}`}
                 class="w-full"

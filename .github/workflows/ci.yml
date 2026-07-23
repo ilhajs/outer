@@ -29,6 +29,43 @@ jobs:
 
       - run: bunx pkg-pr-new publish ./packages/server ./packages/sdk
 
+  e2e:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # The e2e fixture server (templates/minimal dist) runs on Node and targets node24
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - run: bun install
+
+      # templates/* are not workspaces — the fixture server needs its own install
+      - run: bun install
+        working-directory: templates/minimal
+
+      - run: bunx playwright install --with-deps chromium
+        working-directory: apps/hub
+
+      - run: bun run test:e2e
+        working-directory: apps/hub
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            apps/hub/playwright-report
+            apps/hub/test-results
+          retention-days: 7
+
   deploy-website:
     runs-on: ubuntu-latest
     needs: publish

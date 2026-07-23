@@ -168,6 +168,7 @@ export default ilha
                       </button>
                     </p>
                     <Input
+                      data-testid="login-otp"
                       name="otp"
                       label="Verification Code"
                       placeholder="000000"
@@ -179,6 +180,7 @@ export default ilha
                 ),
                 () => (
                   <Input
+                    data-testid="login-email"
                     type="email"
                     name="email"
                     label="Email Address"
@@ -188,7 +190,13 @@ export default ilha
                   />
                 ),
               )}
-              <Button type="submit" variant="primary" class="w-full" disabled={state.busy()}>
+              <Button
+                data-testid="login-submit"
+                type="submit"
+                variant="primary"
+                class="w-full"
+                disabled={state.busy()}
+              >
                 {when(
                   state.busy(),
                   () => (verifying ? "Signing In…" : "Sending Code…"),
