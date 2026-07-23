@@ -1,10 +1,10 @@
 import { type AdminMeta } from "@outerjs/server";
 import { parseSet, toSet } from "@outerjs/server/schema";
-import { Button, Checkbox, ClipboardText, Icon, Input, Select, Switch, Textarea } from "areia";
+import { Button, ClipboardText, Combobox, Icon, Input, Select, Switch, Textarea } from "areia";
 import { format } from "date-fns";
 import ilha from "ilha";
 import { Eye, EyeOff } from "lucide";
-import { when } from "quando";
+import { each, when } from "quando";
 
 export type Column = AdminMeta["tables"][number]["columns"][number];
 export type Row = Record<string, unknown>;
@@ -254,6 +254,35 @@ const SecretRecordField = ilha
     );
   });
 
+/**
+ * Multi-value enum field (e.g. `user.role`): a searchable Combobox in multiple
+ * mode. Selection lives in island state; a hidden input per selected value keeps
+ * the shared FormData pipeline (`readField` → `getAll` → `toSet`) unchanged.
+ */
+const MultiEnumRecordField = ilha
+  .input<{ column: Column; value?: unknown; disabled?: boolean }>()
+  .state("selected", (input) => parseSet(input.value))
+  .render(({ input, state }) => {
+    const column = input.column!;
+    const options = column.enum ?? [];
+    return (
+      <div class="grid gap-1.5">
+        <Combobox
+          multiple
+          label={fieldLabel(column)}
+          placeholder="Select values…"
+          disabled={input.disabled}
+          items={options.map((option) => ({ label: option, value: option }))}
+          description={`Any combination of: ${options.join(", ")}`}
+          bind:value={state.selected}
+        />
+        {each(state.selected()).as((option) => (
+          <input type="hidden" name={column.name} value={option} disabled={input.disabled} />
+        ))}
+      </div>
+    );
+  });
+
 /** One form control for a column, picked by column type. Name/label/value all derive from the schema. */
 export function RecordField(props: { column: Column; value?: unknown; disabled?: boolean }) {
   const { column, value, disabled } = props;
@@ -271,26 +300,16 @@ export function RecordField(props: { column: Column; value?: unknown; disabled?:
   }
 
   // A `{ multiple: true }` enum holds several values at once (user.role), so it
-  // gets a checkbox group; each checked box submits under the same name.
+  // gets a searchable multi-select Combobox; each selected value submits under
+  // the same name.
   if (column.enum && column.enum.length > 0 && column.multiple) {
-    const selected = new Set(parseSet(value));
     return (
-      <Checkbox.Group
+      <MultiEnumRecordField
         key={`field-${column.name}`}
-        legend={label}
+        column={column}
+        value={value}
         disabled={disabled}
-        description={`Any combination of: ${column.enum.join(", ")}`}
-      >
-        {column.enum.map((option) => (
-          <Checkbox.Item
-            name={column.name}
-            value={option}
-            label={option}
-            checked={selected.has(option)}
-            disabled={disabled}
-          />
-        ))}
-      </Checkbox.Group>
+      />
     );
   }
 

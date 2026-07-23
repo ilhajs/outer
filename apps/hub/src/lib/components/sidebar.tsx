@@ -3,7 +3,7 @@ import { useRoute } from "@ilha/router";
 import type { AdminMeta } from "@outerjs/server";
 import { Button, Icon, LinkButton } from "areia";
 import ilha from "ilha";
-import { ArrowRightLeft, BookOpen, FolderOpen, Home, MoreVertical } from "lucide";
+import { ArrowRightLeft, BookOpen, FolderOpen, Home, MoreVertical, Settings } from "lucide";
 import { each, when } from "quando";
 
 const { params, path } = useRoute();
@@ -33,7 +33,7 @@ export const Sidebar = ilha
           Dashboard
         </LinkButton>
         <div class="flex flex-col">
-          <div class="text-sm font-semibold text-areia-surface-muted-foreground mb-1">Tables</div>
+          <div class="text-areia-surface-muted-foreground mb-1 text-sm font-semibold">Tables</div>
           {each(input.meta?.tables ?? []).as((table) => {
             const isActive = params().tableName === table.name;
             return (
@@ -48,7 +48,7 @@ export const Sidebar = ilha
           })}
         </div>
         <div class="flex flex-col">
-          <div class="text-sm font-semibold text-areia-surface-muted-foreground mb-1">System</div>
+          <div class="text-areia-surface-muted-foreground mb-1 text-sm font-semibold">System</div>
           {when(input.meta?.tables.some((table) => table.name === "file") ?? false, () => (
             <LinkButton
               variant={path().endsWith("/files") ? "outline" : undefined}
@@ -69,6 +69,14 @@ export const Sidebar = ilha
               API Reference
             </LinkButton>
           ))}
+          <LinkButton
+            variant={path().endsWith("/settings") ? "outline" : undefined}
+            href={`/i/${input.instance?.id}/settings`}
+            class="w-full"
+            icon={<Icon icon={Settings} />}
+          >
+            Settings
+          </LinkButton>
         </div>
       </div>
       <LinkButton href="/i" variant="outline" class="w-full" icon={<Icon icon={ArrowRightLeft} />}>

@@ -17,7 +17,7 @@
     "@orpc/openapi": "2.0.0-beta.15",
     "@outerjs/sdk": "https://pkg.pr.new/ilhajs/outer/@outerjs/sdk@main",
     "@outerjs/server": "https://pkg.pr.new/ilhajs/outer/@outerjs/server@main",
-    "areia": "^0.1.43",
+    "areia": "^0.2.1",
     "better-auth": "1.6.23",
     "ilha": "^0.9.5",
     "nitro": "^3.0.260610-beta",

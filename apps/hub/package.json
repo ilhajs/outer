@@ -16,7 +16,7 @@
     "@outerjs/server": "https://pkg.pr.new/ilhajs/outer/@outerjs/server@main",
     "@scalar/api-reference": "^1.63.0",
     "@sindresorhus/slugify": "^3.0.0",
-    "areia": "^0.1.43",
+    "areia": "^0.2.1",
     "better-auth": "^1.6.23",
     "date-fns": "^4.4.0",
     "ilha": "^0.9.5",

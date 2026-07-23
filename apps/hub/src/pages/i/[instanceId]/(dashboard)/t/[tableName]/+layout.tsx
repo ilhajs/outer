@@ -503,7 +503,7 @@ export default defineLayout((Children) =>
       const grid = (
         <div class="flex h-full min-h-0 flex-col overflow-hidden">
           <header class="flex items-center justify-between gap-2 p-2">
-            <h2 class="flex items-baseline gap-2 text-lg font-semibold">
+            <h2 class="flex items-baseline gap-2 text-2xl font-semibold">
               {tableName}
               <span class="text-muted-foreground text-sm font-normal tabular-nums">
                 {count} record{count === 1 ? "" : "s"}

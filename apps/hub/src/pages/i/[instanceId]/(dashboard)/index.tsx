@@ -8,7 +8,7 @@ import { getClient } from "$lib/outer";
 import { getInstanceById } from "$lib/store";
 import { loader, navigate, type MergeLoaders } from "@ilha/router";
 import type { AdminMeta, AdminMigrationStatus } from "@outerjs/server";
-import { Badge, Icon, LinkButton, Table } from "areia";
+import { Badge, Icon, Link, LinkButton, Table } from "areia";
 import { format, formatDistanceToNow } from "date-fns";
 import ilha from "ilha";
 import {
@@ -160,7 +160,7 @@ export default ilha.input<DashboardLoader>().render(({ input }) => {
 
       {/* Tables */}
       <section class="flex flex-col gap-2">
-        <h2 class="text-sm font-semibold text-areia-surface-muted-foreground">Tables</h2>
+        <h2 class="text-areia-surface-muted-foreground text-sm font-semibold">Tables</h2>
         <div class="border-areia-border overflow-hidden rounded-lg border">
           <Table>
             <Table.Header>
@@ -205,7 +205,7 @@ export default ilha.input<DashboardLoader>().render(({ input }) => {
 
       {/* Migrations */}
       <section class="flex flex-col gap-2">
-        <h2 class="text-sm font-semibold text-areia-surface-muted-foreground">Migrations</h2>
+        <h2 class="text-areia-surface-muted-foreground text-sm font-semibold">Migrations</h2>
         <div class="border-areia-border overflow-hidden rounded-lg border">
           <Table>
             <Table.Header>
@@ -261,6 +261,16 @@ export default ilha.input<DashboardLoader>().render(({ input }) => {
           </Table>
         </div>
       </section>
+
+      <footer class="text-muted-foreground mt-auto flex items-center justify-end gap-3 text-xs">
+        <Link href="https://outer.now/getting-started/" external>
+          Docs
+        </Link>
+        <span aria-hidden>·</span>
+        <Link href="https://github.com/ilhajs/outer" external>
+          GitHub
+        </Link>
+      </footer>
     </div>
   );
 });
