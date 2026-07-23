@@ -42,7 +42,7 @@ src/
   app.css      # Tailwind + Areia styles
 ```
 
-The demo includes email-OTP sign-in and a `foo` procedure backed by Nitro's KV storage, plus [Areia](https://areia.ilha.build) UI components.
+The demo includes email-OTP sign-in and a `foo` procedure backed by Nitro's KV storage, plus [Areia](https://areia.ilha.build) UI components. Set `ADMIN_EMAIL` in `.env` to seed an admin account — it can manage the instance from [Outer Hub](https://hub.outer.now) (allowed in `CORS_ORIGINS` by default).
 
 ## File uploads
 

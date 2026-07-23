@@ -170,13 +170,13 @@ The `pglite()` default writes to local disk, so any persistent host (VPS, Coolif
 
 A Bun workspace monorepo:
 
-| Path              | Description                                                     |
-| ----------------- | --------------------------------------------------------------- |
-| `packages/server` | `@outerjs/server` — Outer's core                                |
-| `packages/sdk`    | `@outerjs/sdk` — type-safe client (oRPC + Better Auth)          |
-| `templates/*`     | Deployable starters (see table above)                           |
+| Path              | Description                                                                                              |
+| ----------------- | -------------------------------------------------------------------------------------------------------- |
+| `packages/server` | `@outerjs/server` — Outer's core                                                                         |
+| `packages/sdk`    | `@outerjs/sdk` — type-safe client (oRPC + Better Auth)                                                   |
+| `templates/*`     | Deployable starters (see table above)                                                                    |
 | `apps/hub`        | `@outerjs/hub` — admin dashboard ([hub.outer.now](https://hub.outer.now)) that drives the `.admin()` API |
-| `apps/website`    | Documentation website                                           |
+| `apps/website`    | Documentation website                                                                                    |
 
 ## Development
 

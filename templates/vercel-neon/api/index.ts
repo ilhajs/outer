@@ -3,6 +3,7 @@ import { Outer, type InferRouter } from "@outerjs/server";
 import { schema, timestamps } from "@outerjs/server/schema";
 import { type OuterStorage } from "@outerjs/server/storage";
 import { del, get, put } from "@vercel/blob";
+import { emailOTP } from "better-auth/plugins";
 import { NeonDialect } from "kysely-neon";
 import { createStorage } from "unstorage";
 import vercelRuntimeCacheDriver from "unstorage/drivers/vercel-runtime-cache";
@@ -14,6 +15,21 @@ const env = z
     DATABASE_URL: z.string(),
     BASE_URL: z.string().default("http://localhost:3000"),
     AUTH_SECRET: z.string().default("dev-only-secret"),
+    // seeded admin account (signs in via email OTP) — `npm run migrate` seeds it; leave unset to skip
+    ADMIN_EMAIL: z.email().optional(),
+    // namespaces this instance's auth cookies — set a unique value per instance so several
+    // Outer instances on the same host keep separate sessions
+    COOKIE_PREFIX: z.string().default("outer-vercel"),
+    // comma-separated browser origins allowed cross-origin; the default is the hosted hub
+    CORS_ORIGINS: z
+      .string()
+      .default("https://hub.outer.now")
+      .transform((s) =>
+        s
+          .split(",")
+          .map((o) => o.trim())
+          .filter(Boolean),
+      ),
     // Added to the project automatically when you create a Blob store; pull it locally
     // with `vercel env pull`. The @vercel/blob SDK reads it from process.env on its own.
     BLOB_READ_WRITE_TOKEN: z.string(),
@@ -67,6 +83,8 @@ const outer = new Outer({
     dialect: new NeonDialect({ neon: neon(env.DATABASE_URL) }),
     kind: "postgres", // Neon is real Postgres
   },
+  // credentials lets browsers (e.g. Outer Hub) send the session cookie cross-origin
+  cors: { origins: env.CORS_ORIGINS, credentials: true },
   // Serverless functions have no persistent disk, so uploaded bytes go to Vercel Blob
   storage: vercelBlob,
   // `context.kv`, backed by Vercel's Runtime Cache — built into the runtime, no store to
@@ -77,7 +95,22 @@ const outer = new Outer({
   .schema(v1_0_0)
   .auth({
     secret: env.AUTH_SECRET,
+    advanced: { cookiePrefix: env.COOKIE_PREFIX },
     emailAndPassword: { enabled: true },
+    user: {
+      // `input: false` blocks signups from setting their own role — only the seed (or an admin) can
+      additionalFields: { role: { type: "string", defaultValue: "user", input: false } },
+    },
+    plugins: [
+      emailOTP({
+        // OTP is sign-in only: it can't create accounts, so the seeded admin stays the only admin
+        disableSignUp: true,
+        async sendVerificationOTP({ email, otp }) {
+          // HINT: use Resend (or any email provider) here; the log is for local development
+          console.log(">>>OTP", { email, otp });
+        },
+      }),
+    ],
   })
   .openapi()
   .admin()
@@ -106,7 +139,7 @@ const outer = new Outer({
 export type Router = InferRouter<typeof outer>;
 
 // reused by scripts/migrate.ts — migrations run there, not per-request (see README)
-export { outer };
+export { outer, env };
 
 // must be a named `fetch` export, not `export default` — see README
 export async function fetch(request: Request): Promise<Response> {

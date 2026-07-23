@@ -15,17 +15,37 @@ const env = z
   .object({
     VITE_APP_URL: z.string().default("http://localhost:3000"),
     authSecret: z.string().min(1).default("dev-only-secret"),
+    // seeded admin account — signs in via email OTP; leave unset to skip seeding
+    ADMIN_EMAIL: z.email().optional(),
+    // namespaces this instance's auth cookies — set a unique value per instance so several
+    // Outer instances on the same host (localhost ports share one cookie jar) keep separate sessions
+    COOKIE_PREFIX: z.string().default("outer-ilha"),
+    // comma-separated browser origins allowed cross-origin; the default is the hosted hub
+    CORS_ORIGINS: z
+      .string()
+      .default("https://hub.outer.now")
+      .transform((s) =>
+        s
+          .split(",")
+          .map((o) => o.trim())
+          .filter(Boolean),
+      ),
   })
   .parse({
     VITE_APP_URL: import.meta.env.VITE_APP_URL,
     // vite.config's runtimeConfig default is "" — treat empty as unset so the default applies
     authSecret: runtimeConfig.authSecret || undefined,
+    ADMIN_EMAIL: process.env.ADMIN_EMAIL,
+    COOKIE_PREFIX: process.env.COOKIE_PREFIX,
+    CORS_ORIGINS: process.env.CORS_ORIGINS,
   });
 
 const outer = new Outer({
   name: "Outer",
   baseUrl: env.VITE_APP_URL,
   db: pglite(),
+  // credentials lets browsers (e.g. Outer Hub) send the session cookie cross-origin
+  cors: { origins: env.CORS_ORIGINS, credentials: true },
   // The `fs` mount from vite.config.ts. Swap that driver for `s3` in production
   // and nothing here changes.
   storage: fromUnstorage(useStorage("fs")),
@@ -36,6 +56,7 @@ const outer = new Outer({
   .schema(v1_0_0)
   .auth({
     secret: env.authSecret,
+    advanced: { cookiePrefix: env.COOKIE_PREFIX },
     plugins: [
       admin(),
       emailOTP({
@@ -94,6 +115,26 @@ if (error) {
   } else {
     console.info("[Outer] No migrations to apply");
   }
+}
+
+// Seed the single admin account so `.admin()` (and Outer Hub) are usable out of the box.
+// Idempotent — re-running promotes an existing user with this email instead of duplicating.
+if (!error && env.ADMIN_EMAIL) {
+  await outer.db
+    .insertInto("user")
+    .values({
+      id: crypto.randomUUID(),
+      name: "Admin",
+      email: env.ADMIN_EMAIL,
+      emailVerified: true,
+      role: "admin",
+      banned: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .onConflict((oc) => oc.column("email").doUpdateSet({ role: "admin" }))
+    .execute();
+  console.info("[Outer] Admin account seeded");
 }
 
 export default { fetch: (req: Request) => outer.handle(req) };

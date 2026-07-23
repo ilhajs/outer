@@ -9,9 +9,9 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
-    "@orpc/openapi": "2.0.0-beta.15",
-    "@orpc/zod": "2.0.0-beta.15",
-    "@outerjs/server": "https://pkg.pr.new/ilhajs/outer/@outerjs/server@main",
+    "@orpc/openapi": "2.0.0-beta.18",
+    "@orpc/zod": "2.0.0-beta.18",
+    "@outerjs/server": "https://pkg.pr.new/ilhajs/outer/@outerjs/server@cd298198bd8bb8949dbfa7931d69c81f20e34100",
     "@vercel/blob": "^2.6.1",
     "@vercel/functions": "^3.7.5",
     "kysely": "0.29.2",
