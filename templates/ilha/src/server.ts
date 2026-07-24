@@ -1,6 +1,7 @@
 import { v1_0_0 } from "$lib/schemas/v1-0-0";
 import { Outer, type InferRouter } from "@outerjs/server";
 import { pglite } from "@outerjs/server/pglite";
+import { fromSchema } from "@outerjs/server/secrets";
 import { fromUnstorage } from "@outerjs/server/storage";
 import { admin, emailOTP } from "better-auth/plugins";
 import { useRuntimeConfig } from "nitro/runtime-config";
@@ -11,10 +12,14 @@ import { z } from "zod";
 const runtimeConfig = useRuntimeConfig();
 
 // TODO: Set NITRO_AUTH_SECRET and VITE_APP_URL in production — the fallbacks are for local development only
-const env = z
-  .object({
+// One schema validates the env and stays the single source of truth: `fromSchema` parses
+// once, throws on bad config, and hands back a typed accessor. Pass `secrets` to
+// `new Outer({ secrets })` so procedures read the same values via `context.secrets`.
+// Nitro maps `NITRO_AUTH_SECRET` → `runtimeConfig.authSecret`; Vite injects `VITE_APP_URL`.
+const secrets = fromSchema(
+  z.object({
     VITE_APP_URL: z.string().default("http://localhost:3000"),
-    authSecret: z.string().min(1).default("dev-only-secret"),
+    AUTH_SECRET: z.string().min(1).default("dev-only-secret"),
     // seeded admin account — signs in via email OTP; leave unset to skip seeding
     ADMIN_EMAIL: z.email().optional(),
     // namespaces this instance's auth cookies — set a unique value per instance so several
@@ -30,33 +35,36 @@ const env = z
           .map((o) => o.trim())
           .filter(Boolean),
       ),
-  })
-  .parse({
+  }),
+  {
     VITE_APP_URL: import.meta.env.VITE_APP_URL,
     // vite.config's runtimeConfig default is "" — treat empty as unset so the default applies
-    authSecret: runtimeConfig.authSecret || undefined,
+    AUTH_SECRET: runtimeConfig.authSecret || undefined,
     ADMIN_EMAIL: process.env.ADMIN_EMAIL,
     COOKIE_PREFIX: process.env.COOKIE_PREFIX,
     CORS_ORIGINS: process.env.CORS_ORIGINS,
-  });
+  },
+);
 
 const outer = new Outer({
   name: "Outer",
-  baseUrl: env.VITE_APP_URL,
+  baseUrl: secrets.get("VITE_APP_URL"),
   db: pglite(),
   // credentials lets browsers (e.g. Outer Hub) send the session cookie cross-origin
-  cors: { origins: env.CORS_ORIGINS, credentials: true },
+  cors: { origins: secrets.get("CORS_ORIGINS"), credentials: true },
   // The `fs` mount from vite.config.ts. Swap that driver for `s3` in production
   // and nothing here changes.
   storage: fromUnstorage(useStorage("fs")),
   // Nitro's unstorage instance, surfaced as `context.kv`. On Cloudflare/Vercel
   // point the default mount at their KV driver and nothing here changes.
   kv: useStorage(),
+  // Surfaced as `context.secrets` — read the same validated values in any procedure
+  secrets,
 })
   .schema(v1_0_0)
   .auth({
-    secret: env.authSecret,
-    advanced: { cookiePrefix: env.COOKIE_PREFIX },
+    secret: secrets.get("AUTH_SECRET"),
+    advanced: { cookiePrefix: secrets.get("COOKIE_PREFIX") },
     plugins: [
       admin(),
       emailOTP({
@@ -119,13 +127,14 @@ if (error) {
 
 // Seed the single admin account so `.admin()` (and Outer Hub) are usable out of the box.
 // Idempotent — re-running promotes an existing user with this email instead of duplicating.
-if (!error && env.ADMIN_EMAIL) {
+const adminEmail = secrets.get("ADMIN_EMAIL");
+if (!error && adminEmail) {
   await outer.db
     .insertInto("user")
     .values({
       id: crypto.randomUUID(),
       name: "Admin",
-      email: env.ADMIN_EMAIL,
+      email: adminEmail,
       emailVerified: true,
       role: "admin",
       banned: false,

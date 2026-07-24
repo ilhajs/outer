@@ -1,4 +1,4 @@
-import { env, outer } from "../api/index.ts";
+import { outer, secrets } from "../api/index.ts";
 
 // runs against whichever DATABASE_URL is in scope — see README
 const { error, results } = await outer.migrator.migrateToLatest();
@@ -16,13 +16,14 @@ console.info(
 
 // Seed the single admin account so `.admin()` (and Outer Hub) are usable out of the box.
 // Idempotent — re-running promotes an existing user with this email instead of duplicating.
-if (env.ADMIN_EMAIL) {
+const adminEmail = secrets.get("ADMIN_EMAIL");
+if (adminEmail) {
   await outer.db
     .insertInto("user")
     .values({
       id: crypto.randomUUID(),
       name: "Admin",
-      email: env.ADMIN_EMAIL,
+      email: adminEmail,
       emailVerified: true,
       role: "admin",
       banned: false,
