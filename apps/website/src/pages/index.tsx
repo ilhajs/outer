@@ -10,7 +10,7 @@ import {
   LandingMdxPreview,
   LandingRealtimePreview,
 } from "$lib/landing-previews";
-import { Badge, ClipboardText, Icon, LinkButton, LayerCard } from "areia";
+import { Badge, ClipboardText, Icon, LinkButton, LayerCard, Radio } from "areia";
 import ilha from "ilha";
 import { Icon as SocialIcon } from "imprensa/icons";
 import {
@@ -23,7 +23,7 @@ import {
   KeyRound,
   LayoutDashboard,
   Lock,
-  Radio,
+  Radio as RadioIcon,
   Route,
   Server,
   ShieldCheck,
@@ -106,8 +106,13 @@ const compareRows: { pain: string; relief: string }[] = [
 ];
 
 export default ilha
+  .state("template", "minimal")
+  .derived(
+    "cloneCommand",
+    ({ state }) => `npx giget@latest gh:ilhajs/outer/templates/${state.template()}`,
+  )
   .onMount(({ host }) => bindHeroTechCardTracking(host))
-  .render(() => (
+  .render(({ state, derived }) => (
     <div class="bg-areia-surface-elevated/50 text-areia-foreground flex min-h-screen flex-col">
       <Topbar />
 
@@ -144,11 +149,40 @@ export default ilha
                   GitHub
                 </LinkButton>
               </div>
-              <ClipboardText
-                text="npx giget@latest gh:ilhajs/outer/templates/minimal my-outer-app"
-                tooltip
-                class="w-full max-w-md px-0.5 text-left sm:px-0"
-              />
+              <div class="flex w-full flex-col gap-2">
+                <Radio.Group legend="Template" name="template" orientation="horizontal">
+                  <Radio.Item
+                    label="Minimal"
+                    value="minimal"
+                    bind:group={state.template}
+                    name="template"
+                    checked
+                  />
+                  <Radio.Item
+                    label="Ilha"
+                    value="ilha"
+                    bind:group={state.template}
+                    name="template"
+                  />
+                  <Radio.Item
+                    label="Cloudflare"
+                    value="cloudflare"
+                    bind:group={state.template}
+                    name="template"
+                  />
+                  <Radio.Item
+                    label="Vercel"
+                    value="vercel"
+                    bind:group={state.template}
+                    name="template"
+                  />
+                </Radio.Group>
+                <ClipboardText
+                  text={derived.cloneCommand()}
+                  tooltip
+                  class="w-full max-w-lg px-0.5 text-left sm:px-0"
+                />
+              </div>
             </div>
 
             <div data-hero-snippet class="min-w-0">
@@ -281,7 +315,7 @@ export default ilha
               <LayerCard.Title>
                 <span class="flex items-start gap-2.5 text-left leading-snug sm:items-center sm:gap-3">
                   <span class="bg-areia-control flex size-6 shrink-0 items-center justify-center rounded-lg">
-                    <Icon icon={Radio} class="size-4" />
+                    <Icon icon={RadioIcon} class="size-4" />
                   </span>
                   Realtime without extra infrastructure
                 </span>

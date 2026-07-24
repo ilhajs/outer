@@ -32,12 +32,12 @@ The server listens on `http://localhost:3000`. Call `POST /rpc/user/me` to check
 
 ### Pick a different template
 
-| Template      | What you get                                                                                                                 | Command                                                                                                       |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `minimal`     | The smallest Outer server — `new Outer(...).start()` behind [srvx](https://srvx.h3.dev), no frontend.                        | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/minimal my-outer-app" class="max-w-xs" />     |
-| `ilha`        | Full-stack starter: Outer as a [Nitro](https://nitro.build) server entry, [Ilha](https://ilha.build) + Vite on the frontend. | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/ilha my-outer-app" class="max-w-xs" />        |
-| `cloudflare`  | Outer on Cloudflare Workers — a Durable Object's SQLite for data, R2 for uploads, instead of PGlite.                         | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/cloudflare my-outer-app" class="max-w-xs" />  |
-| `vercel-neon` | Outer on Vercel Functions — [Neon](https://neon.tech) Postgres for data, Vercel Blob for uploads, instead of PGlite.         | <ClipboardText text="npx giget@latest gh:ilhajs/outer/templates/vercel-neon my-outer-app" class="max-w-xs" /> |
+| Template      | What you get                                                                                                                 | Command                                                  |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `minimal`     | The smallest Outer server — `new Outer(...).start()` behind [srvx](https://srvx.h3.dev), no frontend.                        | `npx giget@latest gh:ilhajs/outer/templates/minimal`     |
+| `ilha`        | Full-stack starter: Outer as a [Nitro](https://nitro.build) server entry, [Ilha](https://ilha.build) + Vite on the frontend. | `npx giget@latest gh:ilhajs/outer/templates/ilha`        |
+| `cloudflare`  | Outer on Cloudflare Workers — a Durable Object's SQLite for data, R2 for uploads, instead of PGlite.                         | `npx giget@latest gh:ilhajs/outer/templates/cloudflare`  |
+| `vercel-neon` | Outer on Vercel Functions — [Neon](https://neon.tech) Postgres for data, Vercel Blob for uploads, instead of PGlite.         | `npx giget@latest gh:ilhajs/outer/templates/vercel-neon` |
 
 ## Write your first server
 
