@@ -1,9 +1,9 @@
 import { PGlite } from "@electric-sql/pglite";
 import { Kysely, PGliteDialect } from "kysely";
 
-import type { AuthConfig } from "./index";
 import { createMigrator } from "./migrator";
 import type { SchemaResult } from "./schema";
+import type { AuthConfig } from "./types";
 
 /**
  * Better Auth defaults to scrypt, which is deliberately expensive — a single

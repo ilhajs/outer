@@ -658,6 +658,20 @@ export type SchemaResult<T extends TablesDef> = {
   _db: InferDB<T>;
 };
 
+/** Prefer `Overlay` columns on name collision (matches runtime merge: later wins). */
+type MergeTableCols<Base, Overlay> = Omit<Base, keyof Overlay & keyof Base> & Overlay;
+
+/** Deep-merge two table maps the way `.table()` / `.extend()` merge at runtime. */
+type MergeTablesDef<Base extends TablesDef, Overlay extends TablesDef> = {
+  [K in keyof Base | keyof Overlay]: K extends keyof Overlay
+    ? K extends keyof Base
+      ? MergeTableCols<Base[K], Overlay[K]>
+      : Overlay[K]
+    : K extends keyof Base
+      ? Base[K]
+      : never;
+};
+
 type SchemaBuilder<T extends TablesDef> = {
   /**
    * Registers the Better Auth core tables (`user`, `session`, `account`,
@@ -705,12 +719,28 @@ type SchemaBuilder<T extends TablesDef> = {
   table<Name extends string, Cols extends Record<string, AnyColumn>>(
     name: Name,
     define: (t: TableBuilder) => Cols,
-  ): SchemaBuilder<T & Record<Name, Cols>>;
+  ): SchemaBuilder<MergeTablesDef<T, Record<Name, Cols>>>;
 
   relation(
     fromTable: keyof T & string,
     define: (rel: RelationChain) => RelationDef,
   ): SchemaBuilder<T>;
+
+  /**
+   * Deep-merges another schema's tables and relations into this builder.
+   * Existing builder columns win on collision (same as re-declaring via
+   * `.table()`). Relations are concatenated and deduped by identity.
+   *
+   * ```ts
+   * const v1_1 = schema("1.1.0")
+   *   .extend(v1_0)
+   *   .table("post", (t) => ({ tags: t.text().nullable() }))
+   *   .build();
+   * ```
+   */
+  extend<TPrev extends TablesDef>(
+    previous: SchemaResult<TPrev>,
+  ): SchemaBuilder<MergeTablesDef<TPrev, T>>;
 
   build(): SchemaResult<T>;
 };
@@ -772,6 +802,24 @@ export function schema(version: string): SchemaBuilder<Record<never, never>> {
     },
     relation(fromTable, define) {
       relations.push(define(makeRelChain(fromTable)));
+      return builder;
+    },
+    extend(previous) {
+      // Merge tables: previous tables are the base, current tables overlay
+      for (const [name, cols] of Object.entries(previous.tables)) {
+        tables[name] = { ...cols, ...tables[name] };
+      }
+      // Merge relations: add previous relations not already present
+      const existing = new Set(
+        relations.map((r) => `${r.kind}:${r.fromTable}:${r.toTable}:${r.fromCol}:${r.toCol}`),
+      );
+      for (const rel of previous.relations) {
+        const key = `${rel.kind}:${rel.fromTable}:${rel.toTable}:${rel.fromCol}:${rel.toCol}`;
+        if (!existing.has(key)) {
+          relations.push(rel);
+          existing.add(key);
+        }
+      }
       return builder;
     },
     build() {

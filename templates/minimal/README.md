@@ -1,6 +1,6 @@
 # Outer + srvx
 
-The smallest possible Outer server: no frontend, no framework — just `new Outer(...).build()` behind [srvx](https://srvx.h3.dev), a tiny universal fetch-based HTTP server, bundled with [tsdown](https://tsdown.dev).
+The smallest possible Outer server: no frontend, no framework — just `await new Outer(...).start()` behind [srvx](https://srvx.h3.dev), a tiny universal fetch-based HTTP server, bundled with [tsdown](https://tsdown.dev).
 
 `outer.handle` is a plain `(request: Request) => Promise<Response>`, so `srvx` is only one option here — swap it out freely:
 

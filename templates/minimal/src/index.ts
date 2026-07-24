@@ -44,7 +44,7 @@ const secrets = fromSchema(
   process.env,
 );
 
-const outer = new Outer({
+const outer = await new Outer({
   name: "Outer",
   db: pglite(),
   baseUrl: secrets.get("BASE_URL"),
@@ -92,24 +92,13 @@ const outer = new Outer({
       return { count: Number(rows[0]?.count ?? 0) };
     }),
   )
-  .build();
-
-const { error, results } = await outer.migrator.migrateToLatest();
-
-if (error) {
-  console.error(error);
-} else {
-  console.info(
-    results?.length
-      ? `[Outer] ${results.length} migrations applied`
-      : "[Outer] No migrations to apply",
-  );
-}
+  // `.start()` builds the server and applies pending migrations (throws on failure).
+  .start();
 
 // Seed the single admin account: no password, so email OTP is its only sign-in path.
 // Idempotent — re-running promotes an existing user with this email instead of duplicating.
 const adminEmail = secrets.get("ADMIN_EMAIL");
-if (!error && adminEmail) {
+if (adminEmail) {
   await outer.db
     .insertInto("user")
     .values({

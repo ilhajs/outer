@@ -46,7 +46,7 @@ const secrets = fromSchema(
   },
 );
 
-const outer = new Outer({
+const outer = await new Outer({
   name: "Outer",
   baseUrl: secrets.get("VITE_APP_URL"),
   db: pglite(),
@@ -111,24 +111,13 @@ const outer = new Outer({
       }),
     { permission: "authenticated" },
   )
-  .build();
-
-const { error, results } = await outer.migrator.migrateToLatest();
-
-if (error) {
-  console.error(error);
-} else {
-  if (results?.length) {
-    console.info(`[Outer] ${results.length} migrations applied`);
-  } else {
-    console.info("[Outer] No migrations to apply");
-  }
-}
+  // `.start()` builds the server and applies pending migrations (throws on failure).
+  .start();
 
 // Seed the single admin account so `.admin()` (and Outer Hub) are usable out of the box.
 // Idempotent — re-running promotes an existing user with this email instead of duplicating.
 const adminEmail = secrets.get("ADMIN_EMAIL");
-if (!error && adminEmail) {
+if (adminEmail) {
   await outer.db
     .insertInto("user")
     .values({

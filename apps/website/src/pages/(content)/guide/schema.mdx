@@ -34,7 +34,29 @@ const v1_0 = schema("1.0.0")
   .build();
 ```
 
-Keep schema versions in their own file. You add versions over time and never edit old ones.
+Keep schema versions in their own file. You add versions over time and never edit old ones — or derive the next version from the previous one with [`.extend()`](#extend-a-previous-version).
+
+## Extend a previous version
+
+`.extend(previous)` deep-merges another schema's tables and relations into the current builder. Builder columns win on collision (same as re-declaring via `.table()`). Relations are concatenated and deduped by identity.
+
+```ts
+const v1_0 = schema("1.0.0")
+  .auth()
+  .table("post", (t) => ({
+    id: t.serial().primaryKey(),
+    title: t.text(),
+  }))
+  .build();
+
+const v1_1 = schema("1.1.0")
+  .extend(v1_0) // inherits user, session, account, verification, post
+  .table("post", (t) => ({ tags: t.text().nullable() })) // adds tags
+  .build();
+// v1_1.post has id, title, and tags
+```
+
+Call `.extend()` anywhere in the chain. Tables you declare before it still win on column collisions, because the builder's current columns overlay the previous ones.
 
 ## Auth tables
 

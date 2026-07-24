@@ -1,13 +1,13 @@
 ---
 title: API reference
-description: Every option you can pass to new Outer(...), every builder method, the schema() builder, and the built server.
+description: Every option you can pass to new Outer(...), every builder method including .start() and .use(), the schema() builder, and the built server.
 order: 14
 tags: [api, reference, outer, schema, resource, auth, admin]
 ---
 
 # API reference
 
-Complete reference for `@outerjs/server`: the `Outer` constructor, every builder method and its config, the `schema()` builder, and the object `.build()` returns.
+Complete reference for `@outerjs/server`: the `Outer` constructor, every builder method and its config, the `schema()` builder, plugins, and the object `.build()` / `.start()` returns.
 
 For task-oriented explanations, start with the guides — [Schema](/guide/schema), [Permissions](/guide/permissions), and [Procedures](/guide/procedures).
 
@@ -96,9 +96,9 @@ Both packages are optional peers you install yourself: `bun add @electric-sql/pg
 
 ## Builder methods
 
-Call them in this order: `.schema()` → `.middleware()` → `.procedure()` → `.build()`.
+Call them in this order: `.schema()` → `.middleware()` → `.procedure()` → `.start()` (or `.build()`).
 
-`.auth()`, `.openapi()`, `.mcp()`, `.admin()`, `.files()`, `.route()`, and `.resource()` can appear anywhere before `.build()`. `.resource()` needs a prior `.schema()` that defines its table.
+`.auth()`, `.openapi()`, `.mcp()`, `.admin()`, `.files()`, `.route()`, `.resource()`, and `.use()` can appear anywhere before `.start()` / `.build()`. `.resource()` needs a prior `.schema()` that defines its table.
 
 ### `.schema(schemaResult)`
 
@@ -233,20 +233,59 @@ Enables the admin API — meta and schema introspection, migration status, and t
 | `listLimit` | `{ default?: number; max?: number }` | `50` / `200` | Default and max rows per `_admin.data.list` call.                                              |
 | `roles`     | `string[]`                           | `["admin"]`  | Roles granted admin access. Match Better Auth's admin plugin `adminRoles` if you customize it. |
 
+### `.use(plugin)`
+
+Registers an [`OuterPlugin`](#outerplugin). Can appear anywhere before `.start()` / `.build()`. Double-registering the same `plugin.name` throws. Full guide: [Plugins](/guide/plugins).
+
 ### `.build()`
 
-Finalizes the chain and returns a `BuiltOuter`. Throws if any resource permission or `.admin()` requires auth but `.auth()` was never called.
+Finalizes the chain and returns a `BuiltOuter`. Throws if any resource permission or `.admin()` requires auth but `.auth()` was never called. Does **not** run migrations — call `migrator.migrateToLatest()` yourself, or use [`.start()`](#start) instead.
+
+### `.start()`
+
+Convenience for the common `build()` + `migrateToLatest()` pair. Returns a `Promise<BuiltOuter>` and throws if migration fails. Prefer this on self-hosted startups; keep `.build()` when you need manual migration control (deploy scripts, logging the result).
+
+```ts
+const server = await new Outer({ db: pglite() }).schema(v1_0).start();
+```
 
 ## `BuiltOuter`
 
-| Member             | Description                                                                                                                                                                                       |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `handle(request)`  | Plain Fetch handler (`Request => Promise<Response>`). Plug it into srvx, `Bun.serve`, Next.js route handlers, and others.                                                                         |
-| `client(headers?)` | In-process router client that skips HTTP entirely, for SSR. Pass the incoming request's `Headers` — or a function returning them, evaluated per call — so permissions see the caller's session.   |
-| `migrator`         | Kysely migrator over the registered schema versions. Call `await outer.migrator.migrateToLatest()` on startup.                                                                                    |
-| `router`           | The internal oRPC router. Use `InferRouter<typeof outer>` for type-safe client generation.                                                                                                        |
-| `db`               | The same typed `context.db` handed to procedures (Kysely plus `query` and `transact`), for out-of-band work such as seeding after migrations.                                                     |
-| `close()`          | Releases the database pool — including the embedded PGlite — and any rate-limit timers. Call it from your `SIGTERM`/`SIGINT` handler, and in tests that build more than one instance. Idempotent. |
+| Member             | Description                                                                                                                                                                                        |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `handle(request)`  | Plain Fetch handler (`Request => Promise<Response>`). Plug it into srvx, `Bun.serve`, Next.js route handlers, and others.                                                                          |
+| `client(headers?)` | In-process router client that skips HTTP entirely, for SSR. Pass the incoming request's `Headers` — or a function returning them, evaluated per call — so permissions see the caller's session.    |
+| `migrator`         | Kysely migrator over the registered schema versions. Prefer [`.start()`](#start) on boot; call `await outer.migrator.migrateToLatest()` when you need the result object or a separate deploy step. |
+| `router`           | The internal oRPC router. Use `InferRouter<typeof outer>` for type-safe client generation.                                                                                                         |
+| `db`               | The same typed `context.db` handed to procedures (Kysely plus `query` and `transact`), for out-of-band work such as seeding after migrations.                                                      |
+| `close()`          | Releases the database pool — including the embedded PGlite — and any rate-limit timers. Call it from your `SIGTERM`/`SIGINT` handler, and in tests that build more than one instance. Idempotent.  |
+
+## `OuterPlugin`
+
+Extension point for third-party and app-specific features. Pass an instance to [`.use()`](#useplugin). Full guide: [Plugins](/guide/plugins).
+
+```ts
+type OuterPlugin = {
+  name: string;
+  configure?(): void;
+  validate?(ctx: PluginContext): void;
+  build?(ctx: PluginContext): PluginResult | void;
+};
+
+type PluginResult = {
+  procedures?: Record<string, AnyProcedure>;
+  routes?: Array<{ method: string; path: string; handler: (event, context) => unknown }>;
+  middleware?: Array<(event, next) => Promise<unknown>>;
+};
+```
+
+| Hook        | When                                                   | Purpose                                                 |
+| ----------- | ------------------------------------------------------ | ------------------------------------------------------- |
+| `configure` | At `.use()` time                                       | Fail fast on bad config.                                |
+| `validate`  | During build, after Outer’s built-in checks            | Reject the build (for example if `.auth()` is missing). |
+| `build`     | After built-in procedures (admin, files) are assembled | Return procedures, routes, and/or middleware to mount.  |
+
+Plugin middleware runs after CORS and rate-limit middleware, before routes. `PluginContext` exposes `resources` (read-only), `base` (oRPC builder), `schemas`, and `name`.
 
 ## `schema()` builder
 
@@ -342,6 +381,19 @@ Declares a relation used by `context.db.query` (Sola) and by resource `include`.
 | `hasOne`     | `rel.hasOne(to, { from, to })`                                                                                                                                 |
 | `belongsTo`  | `rel.belongsTo(to, { from, to })`                                                                                                                              |
 | `manyToMany` | `rel.manyToMany(to, via, { from, to, pivotFrom, pivotTo })` — `via` is the pivot table; `pivotFrom` and `pivotTo` are the pivot columns referencing each side. |
+
+### `.extend(previous)`
+
+Deep-merges another `SchemaResult`'s tables and relations into this builder. Existing builder columns win on collision (same as re-declaring via `.table()`). Relations are concatenated and deduped by identity. Call it anywhere in the chain:
+
+```ts
+const v1_1 = schema("1.1.0")
+  .extend(v1_0)
+  .table("post", (t) => ({ tags: t.text().nullable() }))
+  .build();
+```
+
+Full guide: [Schema → Extend a previous version](/guide/schema#extend-a-previous-version).
 
 ### `.build()`
 

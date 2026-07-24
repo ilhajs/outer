@@ -1,0 +1,98 @@
+---
+title: Plugins
+description: Package procedures, routes, and middleware behind .use() without editing Outer itself.
+order: 16
+tags: [plugins, use, extension]
+---
+
+# Plugins
+
+A plugin packages procedures, raw routes, and H3 middleware behind one `.use()` call. Built-in features (`.auth()`, `.admin()`, `.files()`, `.mcp()`, `.openapi()`) stay as they are — plugins are the extension point for third-party and app-specific features.
+
+## Write a plugin
+
+An `OuterPlugin` has a unique `name` and optional hooks:
+
+```ts
+import type { OuterPlugin } from "@outerjs/server";
+
+export const pingPlugin: OuterPlugin = {
+  name: "ping",
+  build(ctx) {
+    return {
+      procedures: {
+        ping: ctx.base.handler(() => "pong"),
+      },
+    };
+  },
+};
+```
+
+Register it anywhere in the chain before `.start()` / `.build()`:
+
+```ts
+const server = await new Outer({ db: pglite() }).schema(v1_0).use(pingPlugin).start();
+```
+
+`POST /rpc/ping` is now mounted. Double-registering the same `name` throws.
+
+## Lifecycle hooks
+
+| Hook        | When                                                   | Purpose                                                                                   |
+| ----------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `configure` | At `.use()` time                                       | Fail fast on bad config. Store options on the plugin object.                              |
+| `validate`  | At the start of build, after Outer’s built-in checks   | Reject the build — for example if `.auth()` is missing. Pure validation, no side effects. |
+| `build`     | After built-in procedures (admin, files) are assembled | Return procedures, routes, and/or middleware to mount.                                    |
+
+```ts
+const needsAuth: OuterPlugin = {
+  name: "needs-auth",
+  validate(ctx) {
+    if (!ctx.resources.auth) throw new Error("This plugin requires .auth()");
+  },
+  build(ctx) {
+    return {
+      procedures: {
+        "secure.ping": ctx.base.handler(() => "pong"),
+      },
+      routes: [
+        {
+          method: "get",
+          path: "/plugin-health",
+          handler: () => ({ ok: true }),
+        },
+      ],
+      middleware: [
+        async (event, next) => {
+          event.res.headers.set("x-plugin", "needs-auth");
+          return next();
+        },
+      ],
+    };
+  },
+};
+```
+
+## What `build` can return
+
+| Field        | Shape                                 | Behavior                                                                                                 |
+| ------------ | ------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `procedures` | `Record<string, AnyProcedure>`        | Registered like `.procedure()` — keys are dot-names (`"webhook.receive"` → `POST /rpc/webhook/receive`). |
+| `routes`     | `{ method, path, handler }[]`         | Mounted like `.route()`, before `/rpc/**`.                                                               |
+| `middleware` | `(event, next) => Promise<unknown>[]` | Runs after CORS and rate-limit middleware, before routes.                                                |
+
+`build` receives a `PluginContext`:
+
+| Field       | Description                                                                     |
+| ----------- | ------------------------------------------------------------------------------- |
+| `resources` | Read-only snapshot of the resources bag (`auth`, `storage`, `cors`, …).         |
+| `base`      | The oRPC base builder with the current context type — chain `.handler()` on it. |
+| `schemas`   | Schema versions registered so far.                                              |
+| `name`      | The Outer instance name, if any.                                                |
+
+Prefer returning procedures over mutating `resources`. Routes and middleware from plugins are collected and mounted by Outer.
+
+## Next steps
+
+- [Procedures](/guide/procedures) — hand-written endpoints without a plugin
+- [API reference](/api-reference#useplugin) — full `OuterPlugin` types

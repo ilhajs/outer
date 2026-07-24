@@ -81,6 +81,27 @@ describe("migrator", () => {
     expect(await columnExists(db2, "item", "price")).toBe(true);
   });
 
+  test("extend() across two versions migrates added columns", async () => {
+    const dbExt = makeDb();
+    const v1 = schema("1.0.0")
+      .table("note", (t) => ({ id: t.serial().primaryKey(), title: t.text() }))
+      .build();
+    const v2 = schema("1.1.0")
+      .extend(v1)
+      .table("note", (t) => ({ body: t.text().nullable() }))
+      .build();
+
+    const { error, results } = await createMigrator({
+      db: dbExt,
+      schemas: [v1, v2],
+    }).migrateToLatest();
+    expect(error).toBeUndefined();
+    expect(results).toHaveLength(2);
+    expect(await tableExists(dbExt, "note")).toBe(true);
+    expect(await columnExists(dbExt, "note", "title")).toBe(true);
+    expect(await columnExists(dbExt, "note", "body")).toBe(true);
+  });
+
   test("second schema version drops a column", async () => {
     const db3 = makeDb();
     const v1 = schema("1.0.0")

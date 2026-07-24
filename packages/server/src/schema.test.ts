@@ -249,3 +249,62 @@ describe("schema builder", () => {
     expect(parseSet(toSet(["a", "b"]))).toEqual(["a", "b"]);
   });
 });
+
+describe("extend()", () => {
+  test("inherits all tables from a previous schema", () => {
+    const v1 = schema("1.0.0")
+      .table("post", (t) => ({ id: t.serial().primaryKey(), title: t.text() }))
+      .build();
+    const v2 = schema("2.0.0").extend(v1).build();
+    expect(v2.tables.post).toBeDefined();
+    expect(v2.tables.post.id).toBeDefined();
+    expect(v2.tables.post.title).toBeDefined();
+  });
+
+  test("new columns merge with inherited table", () => {
+    const v1 = schema("1.0.0")
+      .table("post", (t) => ({ id: t.serial().primaryKey(), title: t.text() }))
+      .build();
+    const v2 = schema("2.0.0")
+      .extend(v1)
+      .table("post", (t) => ({ body: t.text().nullable() }))
+      .build();
+    expect(v2.tables.post.id).toBeDefined();
+    expect(v2.tables.post.title).toBeDefined();
+    expect(v2.tables.post.body).toBeDefined();
+    expect(v2.tables.post.body._nullable).toBe(true);
+  });
+
+  test("builder columns win on collision", () => {
+    const v1 = schema("1.0.0")
+      .table("post", (t) => ({ id: t.serial().primaryKey(), title: t.text() }))
+      .build();
+    const v2 = schema("2.0.0")
+      .extend(v1)
+      .table("post", (t) => ({ title: t.text().nullable() })) // override
+      .build();
+    expect(v2.tables.post.title._nullable).toBe(true);
+  });
+
+  test("inherits relations and deduplicates", () => {
+    const v1 = schema("1.0.0").auth().build();
+    const v2 = schema("2.0.0").extend(v1).build();
+    // auth adds user->session, user->account relations
+    expect(v2.relations.length).toBeGreaterThan(0);
+    expect(
+      v2.relations.filter((r) => r.fromTable === "user" && r.toTable === "session").length,
+    ).toBe(1);
+  });
+
+  test("extend + new table", () => {
+    const v1 = schema("1.0.0")
+      .table("post", (t) => ({ id: t.serial().primaryKey(), title: t.text() }))
+      .build();
+    const v2 = schema("2.0.0")
+      .extend(v1)
+      .table("comment", (t) => ({ id: t.serial().primaryKey(), body: t.text() }))
+      .build();
+    expect(v2.tables.post).toBeDefined();
+    expect(v2.tables.comment).toBeDefined();
+  });
+});

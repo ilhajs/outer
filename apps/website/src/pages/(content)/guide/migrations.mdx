@@ -1,6 +1,6 @@
 ---
 title: Migrations
-description: Register schema versions with .schema(), apply them with migrateToLatest(), and understand what the diff refuses to do.
+description: Register schema versions with .schema(), apply them with .start() or migrateToLatest(), and understand what the diff refuses to do.
 order: 3
 tags: [migrations, schema, versions]
 ---
@@ -17,15 +17,34 @@ Pass each schema version to `.schema()` on the builder, in order:
 new Outer({ db: pglite() })
   .schema(v1_0)
   .schema(v1_1) // each call adds a migration step and updates the DB type
-  .build();
+  .start();
 ```
 
 Each call also advances the type of `context.db` to `InferDB<T>`, so procedures registered after a `.schema()` call see the new columns.
 
-## Apply migrations
+To avoid restating every table when only one column changed, derive the next version with [`.extend()`](/guide/schema#extend-a-previous-version):
 
 ```ts
-await server.migrator.migrateToLatest();
+const v1_1 = schema("1.1.0")
+  .extend(v1_0)
+  .table("post", (t) => ({ tags: t.text().nullable() }))
+  .build();
+```
+
+## Apply migrations
+
+Prefer `.start()` when you self-host — it builds the server and applies every pending migration, and throws if anything fails:
+
+```ts
+const server = await new Outer({ db: pglite() }).schema(v1_0).schema(v1_1).start();
+```
+
+Use `.build()` plus the migrator when you need the result object, or when migrations run outside the request path:
+
+```ts
+const server = new Outer({ db: pglite() }).schema(v1_0).schema(v1_1).build();
+const { error, results } = await server.migrator.migrateToLatest();
+if (error) throw error;
 ```
 
 Outer diffs consecutive schema versions with a custom `SchemaMigrationProvider`. Each `schema("x.y.z")` call becomes one Kysely migration keyed by its version string.
@@ -39,7 +58,7 @@ Run this on startup when you self-host. On serverless, run it from a deploy-time
 
 Kysely applies migrations in lexicographic order of their version-string keys, which disagrees with numeric order once a segment reaches double digits: `"1.10.0"` sorts before `"1.2.0"`.
 
-`migrateToLatest()` detects the mismatch up front and returns an error telling you to zero-pad the segments, for example `"1.02.00"`. It never applies migrations out of order silently.
+`migrateToLatest()` detects the mismatch up front and returns an error telling you to zero-pad the segments, for example `"1.02.00"`. It never applies migrations out of order silently. `.start()` surfaces the same error by throwing.
 
 ## Changed columns are refused, not ignored
 
@@ -61,5 +80,6 @@ A rename reads to the diff as a drop plus an add, which it performs happily — 
 
 ## Next steps
 
+- [Schema](/guide/schema) — evolve versions with `.extend()`
 - [Resources](/guide/resources) — generate CRUD over the migrated tables
 - [Deployment](/guide/deployment) — when and where to run migrations

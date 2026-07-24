@@ -35,7 +35,8 @@ const v1_0 = schema("1.0.0")
   }))
   .build();
 
-function buildOuter() {
+async function startOuter() {
+  // `.start()` builds the server and applies pending migrations
   return new Outer({ name: "My API", baseUrl: process.env.APP_URL, db: pglite() })
     .schema(v1_0)
     .auth({ secret: process.env.AUTH_SECRET! })
@@ -43,14 +44,13 @@ function buildOuter() {
       permissions: { create: "authenticated", update: "owner", delete: "owner" },
       ownerColumn: "userId",
     })
-    .build();
+    .start();
 }
 
-const g = globalThis as unknown as { outer?: ReturnType<typeof buildOuter> };
+const g = globalThis as unknown as { outer?: Awaited<ReturnType<typeof startOuter>> };
 
 if (!g.outer) {
-  g.outer = buildOuter();
-  await g.outer.migrator.migrateToLatest();
+  g.outer = await startOuter();
 }
 
 export const outer = g.outer;

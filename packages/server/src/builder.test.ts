@@ -186,3 +186,116 @@ describe("close()", () => {
     await expect(app.db.selectFrom("post").selectAll().execute()).rejects.toThrow();
   });
 });
+
+describe("start()", () => {
+  test("builds and migrates in one call", async () => {
+    const itemSchema = schema("1.0.0")
+      .table("item", (t) => ({
+        id: t.serial().primaryKey(),
+        name: t.text(),
+      }))
+      .build();
+    const server = await new Outer({ db: await testDb([itemSchema])() }).schema(itemSchema).start();
+    // Tables exist because migration ran
+    const res = await server.handle(new Request("http://localhost/health"));
+    expect(res.status).toBe(200);
+    await server.close();
+  });
+
+  test("throws on migration error", async () => {
+    const { PGlite } = await import("@electric-sql/pglite");
+    const { PGliteDialect } = await import("kysely");
+    const v1 = schema("1.0.0")
+      .table("thing", (t) => ({ id: t.serial().primaryKey(), name: t.text() }))
+      .build();
+    const v2 = schema("2.0.0")
+      .table("thing", (t) => ({ id: t.serial().primaryKey(), name: t.text().nullable() }))
+      .build();
+    const dialect = new PGliteDialect({ pglite: new PGlite() });
+    await expect(
+      new Outer({ db: { dialect, kind: "postgres" } }).schema(v1).schema(v2).start(),
+    ).rejects.toThrow();
+  });
+});
+
+describe("schema() version ordering", () => {
+  test("rejects a version that is not greater than the previous one", async () => {
+    const v1 = schema("1.0.0")
+      .table("t", (t) => ({ id: t.serial().primaryKey() }))
+      .build();
+    const v2 = schema("2.0.0")
+      .table("t", (t) => ({ id: t.serial().primaryKey() }))
+      .build();
+    const outer = new Outer({ db: await postDb() }).schema(v2);
+    expect(() => outer.schema(v1)).toThrow(/must be greater than the previous version/);
+  });
+
+  test("rejects versions that sort differently lexicographically vs numerically", async () => {
+    const v1 = schema("1.2.0")
+      .table("t", (t) => ({ id: t.serial().primaryKey() }))
+      .build();
+    const v2 = schema("1.10.0")
+      .table("t", (t) => ({ id: t.serial().primaryKey() }))
+      .build();
+    const outer = new Outer({ db: await postDb() }).schema(v1);
+    expect(() => outer.schema(v2)).toThrow(/not lexicographically/);
+  });
+});
+
+describe("baseUrl default", () => {
+  test("defaults to localhost + PORT outside production", async () => {
+    const prevNodeEnv = process.env["NODE_ENV"];
+    const prevPort = process.env["PORT"];
+    process.env["NODE_ENV"] = "development";
+    process.env["PORT"] = "4123";
+    try {
+      // OpenAPI servers URL is the observable baseUrl surface
+      const withOpenapi = new Outer({ db: await postDb() }).schema(s).openapi().build();
+      const res = await withOpenapi.handle(new Request("http://localhost/openapi.json"));
+      const body = (await res.json()) as { servers?: { url: string }[] };
+      expect(body.servers?.[0]?.url).toBe("http://localhost:4123/rest");
+      await withOpenapi.close();
+    } finally {
+      if (prevNodeEnv === undefined) delete process.env["NODE_ENV"];
+      else process.env["NODE_ENV"] = prevNodeEnv;
+      if (prevPort === undefined) delete process.env["PORT"];
+      else process.env["PORT"] = prevPort;
+    }
+  });
+
+  test("does not invent a baseUrl in production", async () => {
+    const prevNodeEnv = process.env["NODE_ENV"];
+    process.env["NODE_ENV"] = "production";
+    try {
+      const withOpenapi = new Outer({ db: await postDb() }).schema(s).openapi().build();
+      const res = await withOpenapi.handle(new Request("http://localhost/openapi.json"));
+      const body = (await res.json()) as { servers?: { url: string }[] };
+      expect(body.servers?.[0]?.url).toBe("/rest");
+      await withOpenapi.close();
+    } finally {
+      if (prevNodeEnv === undefined) delete process.env["NODE_ENV"];
+      else process.env["NODE_ENV"] = prevNodeEnv;
+    }
+  });
+});
+
+describe("resources clone isolation", () => {
+  test("chain clones do not share mutable route arrays", async () => {
+    const base = new Outer({ db: await postDb() }).schema(s);
+    // `.auth()` clones the resources bag; `.route()` mutates that clone in place
+    const a = base
+      .auth({ secret: "test-secret-that-is-long-enough" })
+      .route("get", "/a", () => ({ a: true }));
+    const b = base
+      .auth({ secret: "test-secret-that-is-long-enough" })
+      .route("get", "/b", () => ({ b: true }));
+    const appA = a.build();
+    const appB = b.build();
+    expect((await appA.handle(new Request("http://localhost/a"))).status).toBe(200);
+    expect((await appA.handle(new Request("http://localhost/b"))).status).toBe(404);
+    expect((await appB.handle(new Request("http://localhost/b"))).status).toBe(200);
+    expect((await appB.handle(new Request("http://localhost/a"))).status).toBe(404);
+    await appA.close();
+    await appB.close();
+  });
+});
