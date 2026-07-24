@@ -37,3 +37,4 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .outer
 templates/*/bun.lock
 templates/*/package-lock.json
+test-results

@@ -9,20 +9,20 @@
     "start": "node dist/index.mjs"
   },
   "dependencies": {
-    "@electric-sql/pglite": "0.5.4",
-    "@electric-sql/pglite-pgvector": "0.0.5",
-    "@orpc/openapi": "2.0.0-beta.18",
-    "@orpc/zod": "2.0.0-beta.18",
-    "@outerjs/server": "https://pkg.pr.new/ilhajs/outer/@outerjs/server@cd298198bd8bb8949dbfa7931d69c81f20e34100",
-    "better-auth": "1.6.24",
-    "srvx": "^0.11.18",
-    "unstorage": "2.0.0-alpha.7",
+    "@electric-sql/pglite": "^0.5.4",
+    "@electric-sql/pglite-pgvector": "^0.0.5",
+    "@orpc/openapi": "^2.0.0-beta.19",
+    "@orpc/zod": "^2.0.0-beta.19",
+    "@outerjs/server": "^0.1.0",
+    "better-auth": "^1.6.25",
+    "srvx": "^0.12.4",
+    "unstorage": "^2.0.0-alpha.7",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tsconfig/strictest": "^2.0.8",
     "@types/node": "^26.1.1",
-    "tsdown": "^0.22.3",
+    "tsdown": "^0.22.14",
     "typescript": "^6.0.3"
   },
   "engines": {

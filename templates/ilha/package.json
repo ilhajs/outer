@@ -10,28 +10,28 @@
     "start": "node .output/server/index.mjs"
   },
   "dependencies": {
-    "@electric-sql/pglite": "0.5.4",
-    "@electric-sql/pglite-pgvector": "0.0.5",
+    "@electric-sql/pglite": "^0.5.4",
+    "@electric-sql/pglite-pgvector": "^0.0.5",
     "@ilha/router": "^0.8.9",
     "@ilha/store": "^0.7.7",
-    "@orpc/client": "2.0.0-beta.18",
-    "@orpc/openapi": "2.0.0-beta.18",
-    "@orpc/zod": "2.0.0-beta.18",
-    "@outerjs/sdk": "https://pkg.pr.new/ilhajs/outer/@outerjs/sdk@cd298198bd8bb8949dbfa7931d69c81f20e34100",
-    "@outerjs/server": "https://pkg.pr.new/ilhajs/outer/@outerjs/server@cd298198bd8bb8949dbfa7931d69c81f20e34100",
+    "@orpc/client": "^2.0.0-beta.19",
+    "@orpc/openapi": "^2.0.0-beta.19",
+    "@orpc/zod": "^2.0.0-beta.19",
+    "@outerjs/sdk": "^0.1.0",
+    "@outerjs/server": "^0.1.0",
     "areia": "^0.2.1",
-    "better-auth": "1.6.24",
+    "better-auth": "^1.6.25",
     "ilha": "^0.9.5",
     "nitro": "^3.0.260610-beta",
     "quando": "^0.1.6",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.2",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.1.1",
-    "tailwindcss": "^4.3.2",
+    "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
-    "vite": "^8.1.0"
+    "vite": "^8.1.5"
   },
   "engines": {
     "node": ">=24"
