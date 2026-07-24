@@ -9,19 +9,21 @@ Outer is a batteries-included TypeScript backend framework built on Kysely, oRPC
 ```ts
 import { pglite } from "@outerjs/server/pglite";
 
-const server = new Outer({ name: "My API", baseUrl: "http://localhost:3000", db: pglite() })
+const server = await new Outer({ name: "My API", db: pglite() })
   .schema(v1_0)
   .schema(v1_1)        // each call adds a migration step and updates the DB type
   .auth({ secret: process.env.AUTH_SECRET! })
   .middleware(...)
+  .use(myPlugin)       // optional third-party / app plugins
   .procedure("user.me", (base) => base.handler(...))
-  .build();
+  .start();            // build() + migrateToLatest() — throws on migration error
 
-await server.migrator.migrateToLatest();
 serve({ fetch: (req) => server.handle(req) });
 ```
 
-Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`. `.auth()`, `.openapi()`, `.mcp()`, `.admin()`, and `.files()` can appear anywhere in the chain.
+Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.start()` (or `.build()`). `.auth()`, `.openapi()`, `.mcp()`, `.admin()`, `.files()`, and `.use()` can appear anywhere in the chain.
+
+Prefer `.start()` for self-hosted startups. Use `.build()` when you need manual migration control (deploy scripts, logging the result object).
 
 ---
 
@@ -29,13 +31,13 @@ Order matters: `.schema()` → `.middleware()` → `.procedure()` → `.build()`
 
 The core builder and its context types come from the package root. The schema DSL, secret accessors, and storage adapters are also published as subpath entries, so you can import just the surface you use:
 
-| Import                    | Members                                                                                     |
-| ------------------------- | ------------------------------------------------------------------------------------------- |
-| `@outerjs/server`         | `Outer`, `ORPCError`, `mcp`, `liveIterable`, `memoryRateLimitStore`, and all context types  |
-| `@outerjs/server/pglite`  | `pglite`                                                                                    |
-| `@outerjs/server/schema`  | `schema`, `timestamps`, `parseSet`, `toSet`, `InferDB`, `SchemaResult`, and the table types |
-| `@outerjs/server/secrets` | `fromEnv`, `fromRecord`, `fromSchema`, `memorySecrets`, `OuterSecrets`, `StandardSchemaV1`  |
-| `@outerjs/server/storage` | `fromUnstorage`, `fromS3`, `memoryStorage`, `OuterStorage`                                  |
+| Import                    | Members                                                                                                                                                                       |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@outerjs/server`         | `Outer`, `BuiltOuter`, `ORPCError`, `mcp`, `liveIterable`, `memoryRateLimitStore`, `compareVersions`, `OuterPlugin` / `PluginContext` / `PluginResult`, and all context types |
+| `@outerjs/server/pglite`  | `pglite`                                                                                                                                                                      |
+| `@outerjs/server/schema`  | `schema`, `timestamps`, `parseSet`, `toSet`, `InferDB`, `SchemaResult`, and the table types                                                                                   |
+| `@outerjs/server/secrets` | `fromEnv`, `fromRecord`, `fromSchema`, `memorySecrets`, `OuterSecrets`, `StandardSchemaV1`                                                                                    |
+| `@outerjs/server/storage` | `fromUnstorage`, `fromS3`, `memoryStorage`, `OuterStorage`                                                                                                                    |
 
 The `schema`, `secrets`, and `storage` members are only available from their subpaths — the root exports the builder and context types.
 
@@ -46,7 +48,7 @@ The `schema`, `secrets`, and `storage` members are only available from their sub
 | Param        | Type                     | Default         | Description                                                                                                                            |
 | ------------ | ------------------------ | --------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`       | `string`                 | `"Outer API"`   | API title in OpenAPI spec                                                                                                              |
-| `baseUrl`    | `string`                 | —               | Default `baseURL` passed to Better Auth when `.auth()` is called (override per-call via `.auth({ baseURL })`)                          |
+| `baseUrl`    | `string`                 | see below       | Public origin (no trailing slash) for Better Auth and OpenAPI `servers`. Override per-call via `.auth({ baseURL })`                    |
 | `db.dialect` | `Dialect`                | —               | Required. A Kysely `Dialect` — see below                                                                                               |
 | `db.kind`    | `"postgres" \| "sqlite"` | —               | Required. Drives DDL generation, Better Auth's schema, and DB error mapping — must match `db.dialect`                                  |
 | `db.live`    | `LiveProvider`           | —               | Change feed backing [live queries](#live-queries). `pglite()` supplies one; without it `live*()` throws                                |
@@ -58,13 +60,15 @@ The `schema`, `secrets`, and `storage` members are only available from their sub
 | `health`     | `boolean \| { path }`    | `true`          | Mounts `GET /health` with a `select 1` probe. `false` omits it; a `.route()` on the same path wins                                     |
 | `rateLimit`  | `RateLimitConfig`        | —               | Per-caller limit on `/rpc/**` and `/rest/**`. Off by default; `/api/auth/**` is excluded                                               |
 
+**`baseUrl` default.** When omitted and `NODE_ENV !== "production"`, Outer defaults to `http://localhost:${PORT || 3000}` so local auth and OpenAPI work without boilerplate. In production you must set it explicitly (or pass `.auth({ baseURL })`).
+
 ### `onError`
 
 ```ts
 new Outer({ db, onError: (error, { source }) => logger.error({ err: error, source }) });
 ```
 
-`source` is `"rpc" | "rest" | "route"`. Deliberate `ORPCError` responses (400/401/403/404/409, …) are application behaviour, not failures, so they are never reported. Without a hook, unexpected errors go to `console.error`; pass `() => {}` to silence them entirely.
+`source` is an `ErrorSource`: `"rpc" | "route" | "rest" | "mcp"`. By default the constructor types it to the sources that always fire (`"rpc" | "route"` via `ErrorSourcesOf`). `.openapi()` adds `"rest"`; `.mcp()` adds `"mcp"`. `BuiltOuter.errorSources` is branded with the enabled set. Deliberate `ORPCError` responses (400/401/403/404/409, …) are application behaviour, not failures, so they are never reported. Without a hook, unexpected errors go to `console.error`; pass `() => {}` to silence them entirely.
 
 ### `health`
 
@@ -337,6 +341,8 @@ Admin CRUD deliberately bypasses per-resource permissions (the admin role is the
 ## `.schema(s: SchemaResult<T>)`
 
 Registers a schema version for migrations and advances the DB type to `InferDB<T>`. Multiple calls accumulate in order — the migrator diffs consecutive versions.
+
+Throws immediately when the new version is not **greater** than the previous one in the chain, or when the registered set would sort differently under numeric vs lexicographic order (Kysely applies migrations lexicographically, so `"1.10.0"` before `"1.2.0"` would silently reorder — zero-pad segments, e.g. `"1.02.00"`). The same checks also run inside the migrator; catching them at `.schema()` fails fast at declaration time.
 
 Returns a new `Outer<OuterRpcContext<InferDB<T>>, InferDB<T>>`. After this call, `context.db` is typed as `Kysely<InferDB<T>>`.
 
@@ -655,14 +661,55 @@ Unlike `OuterStorage` (a narrow byte contract `.files()` calls internally), KV h
 
 ---
 
+## `.use(plugin): this`
+
+Registers an `OuterPlugin`. Can appear anywhere before `.start()` / `.build()`. Double-registering the same `plugin.name` throws.
+
+```ts
+import type { OuterPlugin } from "@outerjs/server";
+
+const ping: OuterPlugin = {
+  name: "ping",
+  build(ctx) {
+    return {
+      procedures: { ping: ctx.base.handler(() => "pong") },
+      routes: [{ method: "get", path: "/plugin-health", handler: () => ({ ok: true }) }],
+      middleware: [
+        async (event, next) => {
+          event.res.headers.set("x-plugin", "ping");
+          return next();
+        },
+      ],
+    };
+  },
+};
+
+await new Outer({ db: pglite() }).schema(v1_0).use(ping).start();
+```
+
+| Hook        | When                                                   | Purpose                                                     |
+| ----------- | ------------------------------------------------------ | ----------------------------------------------------------- |
+| `configure` | At `.use()` time                                       | Fail fast on bad config; store options on the plugin object |
+| `validate`  | During build, after Outer’s built-in checks            | Reject the build (e.g. if `.auth()` is missing)             |
+| `build`     | After built-in procedures (admin, files) are assembled | Return `procedures`, `routes`, and/or `middleware` to mount |
+
+Plugin middleware runs after CORS and rate-limit middleware, before routes. `PluginContext` exposes a frozen resources snapshot, the oRPC `base` builder, `schemas`, and `name`. Built-in features (`.auth()`, `.admin()`, `.files()`, …) stay as they are — plugins are the extension point for third-party and app-specific features.
+
+---
+
 ## `.build(): BuiltOuter`
 
-Seals the router and constructs the HTTP server. Returns a `BuiltOuter` with:
+Seals the router and constructs the HTTP server. Does **not** run migrations — call `migrator.migrateToLatest()` yourself, or use [`.start()`](#start-promisebuiltouter) instead.
+
+Internally, `build()` runs three phases: `validateConfig` (preconditions), `assembleRouter` (procedures, migrator, typed DB, context factory), and `mountServer` (H3 middleware and routes).
+
+Returns a `BuiltOuter` with:
 
 - `handle(request: Request): Promise<Response>` — fetch-compatible handler
 - `migrator` — Kysely `Migrator` instance (see Migrations)
 - `db` — the same typed `context.db` handed to procedures (Kysely + `query` + `transact`), for out-of-band work like seeding after migrations (e.g. upserting a single admin account from an `ADMIN_EMAIL` env var, as the minimal template does)
-- `client(headers?)` — in-process `RouterClient<TRouter>` (oRPC's `createRouterClient`) that calls procedures directly, skipping HTTP and the oRPC wire protocol. For SSR (Server Components, server functions) where Outer runs in the same process as the frontend. `headers` is a `Headers` or a `() => Headers | Promise<Headers>` (evaluated per call — pass the framework's request-headers accessor so permissions and `context.auth` see the caller's session); defaults to empty headers. The session is resolved from those headers exactly as the HTTP path does, so `context.user` and every permission check behave identically.
+- `client(headers?)` — in-process `RouterClient<TRouter>` (oRPC's `createRouterClient`) that calls procedures directly, skipping HTTP and the oRPC wire protocol. For SSR (Server Components, server functions) where Outer runs in the same process as the frontend. `headers` is a `Headers` or a `() => Headers | Promise<Headers>` (evaluated per call — pass the framework's request-headers accessor so permissions and `context.auth` see the caller's session); defaults to empty headers. Session resolution **reuses the same context factory** as the HTTP path, so `context.user`, `storage`, `secrets`, `kv`, and every permission check behave identically.
+- `errorSources` — type brand for the `onError` sources this instance can emit (`ErrorSourcesOf` based on whether `.openapi()` / `.mcp()` were enabled)
 - `close()` — releases the database pool (and the embedded PGlite instance with it) plus any rate-limit timers. Call it from your `SIGTERM`/`SIGINT` handler, and in tests that build more than one instance. Idempotent; the instance must not be used afterwards.
 
 ```ts
@@ -678,6 +725,18 @@ import { headers } from "next/headers";
 const api = outer.client(() => headers());
 const posts = await api.post.list({});
 ```
+
+---
+
+## `.start(): Promise<BuiltOuter>`
+
+Convenience for the common `build()` + `migrateToLatest()` pair. Returns the built server after migrations succeed, and **throws** if migration fails.
+
+```ts
+const server = await new Outer({ db: pglite() }).schema(v1_0).start();
+```
+
+Prefer this on self-hosted startups. Keep `.build()` when you need the migrator result object, a separate deploy-time migration step (serverless), or to run seed work between build and migrate.
 
 ---
 
@@ -807,6 +866,18 @@ const v1_0 = schema("1.0.0")
   .relation("user", (rel) => rel.hasMany("post", { from: "id", to: "authorId" }))
   .relation("post", (rel) => rel.belongsTo("user", { from: "authorId", to: "id" }))
   .build();
+```
+
+### `.extend(previous)`
+
+Deep-merges another `SchemaResult`'s tables and relations into the current builder. Builder columns win on collision (same as re-declaring via `.table()`). Relations are concatenated and deduped by identity. Call it anywhere in the chain:
+
+```ts
+const v1_1 = schema("1.1.0")
+  .extend(v1_0) // inherits user, post, and their relations
+  .table("post", (t) => ({ tags: t.text().nullable() })) // adds tags
+  .build();
+// v1_1.post has id, title, body, authorId, and tags
 ```
 
 ### Column types
@@ -977,11 +1048,21 @@ Outer deliberately stops at the schema: it does not read, write, or serve the by
 
 ## Migrations
 
+Prefer `.start()` when you self-host — it builds and migrates in one step and throws on failure:
+
 ```ts
-const { error, results } = await server.migrator.migrateToLatest();
+const server = await new Outer({ db: pglite() }).schema(v1_0).schema(v1_1).start();
 ```
 
-Uses a custom `SchemaMigrationProvider` that diffs consecutive schema versions. Each `schema("x.y.z")` call becomes one Kysely migration keyed by its version string. Diffing (which schema is "previous" vs "current") happens in numeric-per-segment version order. Kysely itself still applies migrations in plain lexicographic order of the version-string keys — for double-digit segments this can disagree with numeric order (`"1.10.0"` sorts before `"1.2.0"` as a string). `getMigrations()` detects this mismatch and throws before migrating, telling you to zero-pad segments (e.g. `"1.02.00"`) so lexicographic and numeric order match.
+Use `.build()` plus the migrator when you need the result object or a separate deploy-time step:
+
+```ts
+const server = new Outer({ db: pglite() }).schema(v1_0).schema(v1_1).build();
+const { error, results } = await server.migrator.migrateToLatest();
+if (error) throw error;
+```
+
+Uses a custom `SchemaMigrationProvider` that diffs consecutive schema versions. Each `schema("x.y.z")` call becomes one Kysely migration keyed by its version string. Diffing (which schema is "previous" vs "current") happens in numeric-per-segment version order. Kysely itself still applies migrations in plain lexicographic order of the version-string keys — for double-digit segments this can disagree with numeric order (`"1.10.0"` sorts before `"1.2.0"` as a string). Both `.schema()` (at declaration time) and `getMigrations()` detect this mismatch and throw, telling you to zero-pad segments (e.g. `"1.02.00"`) so lexicographic and numeric order match. `.schema()` also requires each new version to be strictly greater than the previous one in the chain.
 
 **Up** — creates new tables, adds new columns (with their indexes), drops removed columns.  
 **Down** — reverses: drops added tables/columns, restores dropped ones.
@@ -1295,8 +1376,10 @@ The admin dashboard — comparable to PocketBase's dashboard or Supabase Studio 
 
 ## Roadmap
 
-Alpha focuses on persistent-hosting deployments (VPS, Coolify) with `pglite()` as the recommended default. Planned next:
+See [ROADMAP.md](./ROADMAP.md) for what ships today and what comes next. Highlights still open:
 
-- **Typed vector columns** — first-class `vector` column support in `schema()`, typed through to queries (pgvector already ships with `pglite()`; today vector columns are raw SQL).
+- **Typed vector columns** — first-class `vector` column support in `schema()`, typed through to queries (pgvector already ships with `pglite()`; today vector columns are raw SQL)
+- **npm releases** — publish `@outerjs/server` and `@outerjs/sdk` to npm proper (currently pkg.pr.new builds)
+- **More SQL kinds** — `mysql` / `mssql` DDL generation and error mapping (Kysely dialects already exist)
 
-Serverless/edge support (Vercel Functions, Cloudflare Workers) is no longer blocked — `db: { dialect, kind }` (see "Custom dialects" above) lets you swap PGlite for a network-attached Postgres or a `"sqlite"`-family dialect, with working, verified templates for both (`templates/cloudflare`, Durable Objects; `templates/vercel-neon`, Neon Postgres). `mysql`/`mssql` `kind`s still aren't implemented (Kysely ships dialects for both, but Outer's DDL generation and error mapping don't cover them).
+Serverless/edge support (Vercel Functions, Cloudflare Workers) is no longer blocked — `db: { dialect, kind }` (see "Custom dialects" above) lets you swap PGlite for a network-attached Postgres or a `"sqlite"`-family dialect, with working, verified templates for both (`templates/cloudflare`, Durable Objects; `templates/vercel-neon`, Neon Postgres).

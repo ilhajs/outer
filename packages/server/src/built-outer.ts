@@ -47,7 +47,7 @@ export class BuiltOuter<
       contextFactory ??
       createContextFactory<TDB>({
         typedDb: db,
-        auth,
+        auth: this.auth,
         storage: undefined,
         secrets: undefined,
         kv: undefined,

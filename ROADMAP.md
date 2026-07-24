@@ -7,6 +7,8 @@ What Outer ships today, and what comes next. For the full technical reference, s
 ### Outer (server + SDK)
 
 - **Typed schema builder** — `schema()` with versioned migrations, enums, references, and auto-generated DDL (`postgres` and `sqlite` kinds)
+- **Schema `extend()`** — derive the next version from a previous `SchemaResult`; columns merge (builder wins), relations dedupe
+- **Schema version checks at chain time** — `.schema()` rejects non-ascending versions and numeric/lexicographic mismatches before migrate
 - **Resources** — one `.resource()` call per table for typed `list` / `get` / `create` / `update` / `delete` with clean error mapping
 - **Procedures, four surfaces** — define once with `.procedure()`, served as typed RPC, REST, an OpenAPI spec, and an MCP tool
 - **Auth** — Better Auth mounted via `.auth()`, with email OTP, API keys (`@better-auth/api-key`), and session-aware `context.user`
@@ -16,9 +18,14 @@ What Outer ships today, and what comes next. For the full technical reference, s
 - **Key/value store** — `context.kv` over any unstorage driver
 - **Secrets** — `fromSchema()` env validation surfaced as `context.secrets`
 - **Admin API** — `.admin()` exposes schema introspection, migration status, and table CRUD under `/rpc/_admin/**`, guarded by the admin role
+- **Plugin system** — `.use(plugin)` for third-party and app procedures, routes, and middleware (`OuterPlugin` / `PluginResult`)
+- **`.start()`** — `build()` + `migrateToLatest()` in one call; throws on migration error (`.build()` remains for manual control)
+- **Phased `build()`** — internal `validateConfig` → `assembleRouter` → `mountServer`; shared context factory for HTTP and `client()`
+- **Typed `onError` sources** — `ErrorSource` / `ErrorSourcesOf`; `rest` and `mcp` only when those features are enabled
+- **Dev `baseUrl` default** — `http://localhost:${PORT || 3000}` outside production when `baseUrl` is omitted
 - **Embedded Postgres** — `pglite()` with pgvector bundled, plus custom Kysely dialects for serverless (Cloudflare Durable Objects, Neon)
 - **Typed client** — `@outerjs/sdk` infers the full router type from the server; no codegen
-- **Templates** — `minimal`, `ilha`, `cloudflare`, `vercel-neon`, ready to clone with `giget`
+- **Templates** — `minimal`, `ilha`, `cloudflare`, `vercel-neon`, ready to clone with `giget` (self-hosted templates use `.start()`)
 
 ### Outer Hub ([hub.outer.now](https://hub.outer.now))
 
@@ -30,7 +37,7 @@ What Outer ships today, and what comes next. For the full technical reference, s
 - **API tokens** — create and revoke real Better Auth API keys for MCP and other headless clients
 - **API reference** — embedded Scalar explorer for the instance's `/openapi.json`
 - **Connection-error handling** — a clear recovery screen (retry / fix URL) when an instance is unreachable
-- **E2E coverage** — Playwright suite (auth + table CRUD) running in CI against a real instance
+- **E2E coverage** — Playwright suite (auth + table CRUD) running in CI against a real instance (fixture builds monorepo `packages/server`)
 
 ## Next
 
