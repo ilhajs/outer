@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@tsconfig/strictest": "^2.0.8",
+    "@types/node": "^26.1.1",
     "tsdown": "^0.22.3",
     "typescript": "^6.0.3"
   },
