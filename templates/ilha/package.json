@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && tsc",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "node .output/server/index.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.4",
