@@ -178,7 +178,7 @@ export default ilha
                   />
                 </Radio.Group>
                 <ClipboardText
-                  text={derived.cloneCommand()}
+                  text={derived.cloneCommand() ?? ""}
                   tooltip
                   class="w-full max-w-lg px-0.5 text-left sm:px-0"
                 />
