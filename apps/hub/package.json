@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build && tsc",
     "preview": "vite preview",
-    "test:e2e": "playwright test"
+    "test:e2e": "bun run --cwd ../.. build && playwright test"
   },
   "dependencies": {
     "@better-auth/api-key": "1.6.24",

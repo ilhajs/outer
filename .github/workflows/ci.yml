@@ -47,6 +47,9 @@ jobs:
 
       - run: bun install
 
+      # Hub uses workspace:@outerjs/{sdk,server}; their package exports point at dist/.
+      - run: bun run build
+
       # templates/* are not workspaces — the fixture server needs its own install
       - run: bun install
         working-directory: templates/minimal
