@@ -1,6 +1,6 @@
 {
   "name": "@outerjs/sdk",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Type-safe client for Outer servers — merges an oRPC client with an opt-in Better Auth client",
   "keywords": [
     "authentication",

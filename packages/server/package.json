@@ -1,6 +1,6 @@
 {
   "name": "@outerjs/server",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "The tiny backend you never knew you needed",
   "keywords": [
     "authentication",
@@ -63,26 +63,26 @@
     "@orpc/client": "2.0.0-beta.19",
     "@orpc/server": "2.0.0-beta.19",
     "better-auth": "1.6.25",
-    "h3": "^2.0.1-rc.25",
+    "h3": "2.0.1-rc.25",
     "kysely": "0.29.4",
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@better-auth/api-key": "1.6.25",
-    "@electric-sql/pglite": "0.5.4",
-    "@electric-sql/pglite-pgvector": "0.0.5",
-    "@orpc/openapi": "2.0.0-beta.19",
-    "@orpc/zod": "2.0.0-beta.19",
-    "orpc-mcp": "0.1.1",
+    "@better-auth/api-key": "^1.6.25",
+    "@electric-sql/pglite": "^0.5.4",
+    "@electric-sql/pglite-pgvector": "^0.0.5",
+    "@orpc/openapi": "^2.0.0-beta.19",
+    "@orpc/zod": "^2.0.0-beta.19",
+    "orpc-mcp": "^0.1.1",
     "srvx": "^0.12.4",
-    "unstorage": "2.0.0-alpha.7"
+    "unstorage": "^2.0.0-alpha.7"
   },
   "peerDependencies": {
     "@better-auth/api-key": "^1.6.25",
-    "@electric-sql/pglite": "0.5.4",
-    "@electric-sql/pglite-pgvector": "0.0.5",
-    "@orpc/openapi": "2.0.0-beta.19",
-    "@orpc/zod": "2.0.0-beta.19",
+    "@electric-sql/pglite": "^0.5.4",
+    "@electric-sql/pglite-pgvector": "^0.0.5",
+    "@orpc/openapi": "^2.0.0-beta.19",
+    "@orpc/zod": "^2.0.0-beta.19",
     "orpc-mcp": "^0.1.1"
   },
   "peerDependenciesMeta": {
