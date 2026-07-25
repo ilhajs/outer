@@ -6,14 +6,36 @@
   "compatibility_flags": ["nodejs_compat"],
   // Seeds a single admin account on the first request after deploy, signing in via
   // email OTP only. Remove (or leave empty) to skip seeding.
-  "vars": { "ADMIN_EMAIL": "admin@example.com" },
-  "durable_objects": {
-    "bindings": [{ "name": "OUTER_DO", "class_name": "OuterDO" }],
+  "vars": {
+    "ADMIN_EMAIL": "admin@example.com",
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["OuterDO"] }],
-  // Bytes for `.files()` uploads. Create it once with `wrangler r2 bucket create outer-files`.
-  "r2_buckets": [{ "binding": "OUTER_FILES", "bucket_name": "outer-files" }],
-  // Backs `context.kv`. Create it with `wrangler kv namespace create OUTER_KV` and paste the
-  // returned id below. `wrangler dev` simulates KV locally, so the placeholder is fine until deploy.
-  "kv_namespaces": [{ "binding": "OUTER_KV", "id": "<your-kv-namespace-id>" }],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "OUTER_DO",
+        "class_name": "OuterDO",
+      },
+    ],
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["OuterDO"],
+    },
+  ],
+  // Bytes for `.files()` uploads. Wrangler will automatically provision this bucket on first deploy.
+  "r2_buckets": [
+    {
+      "binding": "OUTER_FILES",
+      "bucket_name": "outer-files",
+    },
+  ],
+  // Backs `context.kv`. Wrangler will automatically provision this namespace on deploy.
+  // `wrangler dev` simulates KV locally, so no setup is required.
+  "kv_namespaces": [
+    {
+      "binding": "OUTER_KV",
+      "id": "0c2ccaa6d45148358509a1c47f8d3995",
+    },
+  ],
 }
