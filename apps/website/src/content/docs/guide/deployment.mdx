@@ -1,0 +1,192 @@
+---
+title: Deployment
+description: Deploy Outer with the zero-infra pglite() default, swap in a Kysely dialect for serverless platforms, and embed the handler in any host framework.
+sidebar:
+  order: 14
+---
+
+`BuiltOuter.handle(request)` is a plain Fetch handler — `Request => Promise<Response>`. Outer therefore mounts as the server entry for any framework that speaks `fetch`: Nitro, Hono, H3, Next.js route handlers, and others.
+
+The one decision that shapes your deployment is the database. Pick it first.
+
+## Choose a database
+
+| Your host                                                                | Use                                                   |
+| ------------------------------------------------------------------------ | ----------------------------------------------------- |
+| VPS, [Coolify](#deploy-to-coolify), Docker, any long-lived Node process  | [`pglite()`](#run-embedded-postgres-with-pglite)      |
+| Vercel Functions, Cloudflare Workers, anything without a persistent disk | [a custom dialect](#swap-in-a-dialect-for-serverless) |
+
+## Run embedded Postgres with `pglite()`
+
+Install the optional peer dependency and import the helper from the `/pglite` subpath:
+
+```bash
+bun add @electric-sql/pglite
+```
+
+```ts
+import { Outer } from "@outerjs/server";
+import { pglite } from "@outerjs/server/pglite";
+
+new Outer({ db: pglite() }); // or pglite({ dataDir: "..." }); defaults to <cwd>/.outer/pglite
+```
+
+[PGlite](https://pglite.dev) is real Postgres, running embedded and writing to local disk, so there is no external infrastructure to provision. Reach for it first — it is what makes Outer deployable to a VPS or Coolify box with nothing else to run.
+
+It lives behind a subpath so PGlite's WASM stays out of deploy bundles where it is dead weight, such as Cloudflare Workers and Vercel Functions.
+
+Because PGlite writes to local disk, the host needs a persistent, writable filesystem across requests. That rules out serverless and edge platforms unless you swap in a different dialect.
+
+### Bundled PGlite extensions
+
+`pglite()` loads two extensions into the instance it builds, so you get the lower-level Postgres features without assembling a client yourself.
+
+**`vector` (pgvector)** is ready immediately. `CREATE EXTENSION IF NOT EXISTS vector` is queued at construction, ahead of any dialect query, so `vector` columns and the distance operators (`<->`, `<=>`, `<#>`) work from the first migration onward. There is no `t.vector()` column type yet — declare it with raw SQL and query it through `context.db`:
+
+```ts
+await sql`CREATE TABLE doc (id serial primary key, embedding vector(3))`.execute(context.db);
+
+const nearest = await context.db
+  .selectFrom("doc")
+  .select("id")
+  .orderBy(sql`embedding <-> ${sql.lit("[1,2,3]")}`)
+  .limit(5)
+  .execute();
+```
+
+**`live` (reactive queries)** powers [live queries in Sola](/guide/database#live-queries). You never touch the extension directly; `pglite()` wires it up as a `LiveProvider`.
+
+`pglite()` returns `{ dialect, kind, live, client }`. Sola uses `live`. `client` is the PGlite instance itself, for anything neither the query builder nor Sola covers — Kysely's `PGliteDialect` keeps its own reference private, so this is your only handle to it.
+
+## Swap in a dialect for serverless
+
+For platforms without a persistent filesystem, or to point at an existing database, pass any [Kysely `Dialect`](https://kysely.dev/docs/dialects) directly:
+
+```ts
+import { D1Dialect } from "kysely-d1"; // or PostgresDialect, kysely-durable-objects, etc.
+
+new Outer({
+  db: { dialect: new D1Dialect({ database: env.DB }), kind: "sqlite" },
+});
+```
+
+`kind` tells Outer which SQL family to generate DDL for — column types like `serial`, `jsonb`, and `uuid` do not exist in SQLite, so they are remapped — and which constraint-error codes to recognize when turning database errors into `CONFLICT` and `BAD_REQUEST` responses. It must match the dialect.
+
+Two values are supported:
+
+- `"postgres"` — PGlite, or any network Postgres via `PostgresDialect`.
+- `"sqlite"` — Cloudflare D1, Durable Objects via `kysely-durable-objects`, libSQL/Turso, and similar.
+
+Kysely also ships `mysql` and `mssql` dialects, and Better Auth supports both, but Outer does not generate correct DDL for them yet. `kind` is deliberately typed to the two verified options.
+
+On serverless, run migrations from a deploy-time script rather than at cold start.
+
+### Verified templates
+
+- `templates/cloudflare` — Cloudflare Workers with Durable Objects, R2 for uploads.
+- `templates/vercel-neon` — Vercel Functions with Neon Postgres, Vercel Blob for uploads.
+
+Both ship with a `deploy` script:
+
+```sh
+$ npm run deploy
+
+# templates/cloudflare   -> wrangler deploy
+# templates/vercel-neon  -> vercel deploy --prod
+```
+
+## Choose storage for uploads
+
+The same persistence question applies to file bytes. [`.files()`](/guide/files) needs an `OuterStorage` on the constructor, and the right backing store is the one your host actually persists.
+
+| Host                   | Backing store                                      | Adapter                               |
+| ---------------------- | -------------------------------------------------- | ------------------------------------- |
+| VPS / Coolify / Docker | Local disk via unstorage `fs-lite`                 | `fromUnstorage(createStorage(...))`   |
+| Nitro                  | A Nitro storage mount                              | `fromUnstorage(useStorage("fs"))`     |
+| Cloudflare Workers     | R2 bucket binding                                  | small object literal over the binding |
+| Vercel Functions       | [Vercel Blob](https://vercel.com/docs/vercel-blob) | small object literal over the SDK     |
+| Anything S3-compatible | S3, R2, Backblaze B2, MinIO                        | `fromS3(client, commands, bucket)`    |
+
+On a VPS, the local-disk driver is the zero-infra match for `pglite()`. Mount the directory as a volume if you containerize. On serverless, local disk is as unavailable for bytes as it is for the database, so an object store is not optional.
+
+## Deploy to Coolify
+
+[Coolify](https://coolify.io) with the Railpack build pack runs an Outer template from a Git push with no Dockerfile. Point a new application at your repository (set **Base Directory** if the app lives in a subfolder, e.g. `/templates/minimal`), then configure four things.
+
+### Build pack
+
+Set **Build Pack** to **Railpack**. It detects the Node app, runs the package manager's install and `build`, and starts the app with the `start` script from `/app` inside the container.
+
+### Environment variables
+
+Copy your `.env` (or the template's `.env.example`) and paste it into **Environment Variables → Developer view**, save, then adjust the values for production:
+
+```sh
+BASE_URL=https://your-app.example.com
+AUTH_SECRET=<openssl rand -base64 32>
+```
+
+`AUTH_SECRET` must be a randomly generated value at least 32 characters long — Better Auth signs sessions with it, and warns at startup when the secret is short or low-entropy.
+
+### Persistent storage
+
+PGlite writes to local disk, and each deployment replaces the container — without a volume, the database resets on every push. Under **Persistent Storage**, choose **+ Add → Volume Mount**:
+
+| Field            | Value         |
+| ---------------- | ------------- |
+| Name             | `outer`       |
+| Destination Path | `/app/.outer` |
+
+Railpack runs the app from `/app`, and `pglite()` defaults to `<cwd>/.outer/pglite`, so `/app/.outer` is the directory to persist. The named volume reattaches to every new container, carrying the database — and local-disk uploads, if you point their storage at the same directory — across deployments.
+
+### Webhooks (optional)
+
+To redeploy on every push, connect the app through a GitHub App source or add the webhook from **Webhooks** to your repository, so a push to the configured branch triggers a build.
+
+### Healthcheck (optional)
+
+Outer mounts `GET /health` by default: `200 {"status":"ok","database":"up"}`, or `503` when the database probe fails. Enable Coolify's healthcheck and point it at `/health` so a broken deployment never replaces a healthy container.
+
+## Embed in a host framework
+
+The handler is host-agnostic. Export whatever shape the host expects and delegate to `outer.handle`:
+
+```ts
+// e.g. a Nitro server entry (see templates/ilha)
+export default { fetch: (req: Request) => outer.handle(req) };
+```
+
+Use `.middleware()` to pull the host runtime's own utilities into `context`, alongside `context.db` and `context.auth`, so every procedure can reach them:
+
+```ts
+import { useStorage } from "nitro/storage";
+import { runTask } from "nitro/task";
+
+const outer = new Outer(...)
+  .schema(v1_0)
+  .auth({ secret: useRuntimeConfig().authSecret })
+  // .auth() already resolves context.user and context.session —
+  // middleware is for host utilities, not for the session
+  .middleware(async ({ next }) => next({ context: { kv: useStorage(), runTask } }))
+  .procedure("foo", (base) =>
+    base.handler(async ({ context }) => {
+      await context.kv.setItem("foo", "bar");
+      return { foo: await context.kv.getItem("foo") };
+    }),
+  )
+  .build();
+```
+
+The pattern is the same on every host. Swap `nitro/storage` and `nitro/task` for whatever the framework provides — Cloudflare bindings, Next.js `headers()`, and so on.
+
+If your frontend is deployed on a different origin than the Outer server, add [`new Outer({ cors: { origins } })`](/guide/auth#cors). Without it, browsers block cross-origin calls to `/rpc/**` and `/api/auth/**`.
+
+## HTTP routes
+
+| Method | Path            | Handler                                                                       |
+| ------ | --------------- | ----------------------------------------------------------------------------- |
+| `GET`  | `/openapi.json` | OpenAPI 3.x spec (only mounted when `.openapi({ enabled: true })` was called) |
+| `ALL`  | `/api/auth/**`  | Better Auth handler (only mounted when `.auth()` was called)                  |
+| `ALL`  | `/rpc/**`       | oRPC handler                                                                  |
+| `ALL`  | `/rest/**`      | Plain-JSON OpenAPI handler (only mounted when `.openapi()` was called)        |
+| `GET`  | `/files/:id`    | File download (only mounted when `.files()` was called; path configurable)    |

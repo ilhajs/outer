@@ -1,0 +1,179 @@
+---
+title: TanStack Start
+description: Mount Outer inside a TanStack Start app with two server routes, add a typed client, and call procedures from loaders without a network hop.
+sidebar:
+  order: 2
+---
+
+TanStack Start's server routes hand you the raw `Request` and expect a `Response` back — exactly the shape of `outer.handle(request)`. Two catch-all routes give you a full backend inside the same Start app, and the router types flow end to end into your components.
+
+## 1. Install
+
+```bash
+bun add @outerjs/server @outerjs/sdk
+bun add @electric-sql/pglite # for the embedded pglite() default (self-hosted deploys)
+```
+
+## 2. Define the server
+
+Create the Outer instance in a shared module. Vite re-evaluates modules on HMR in dev, and `pglite()` allows only one live instance per data directory — so cache the instance and the migration run on `globalThis`:
+
+```ts
+// src/lib/outer.ts
+import { Outer } from "@outerjs/server";
+import { schema } from "@outerjs/server/schema";
+import { pglite } from "@outerjs/server/pglite";
+
+const v1_0 = schema("1.0.0")
+  .auth() // Better Auth tables: user, session, account, verification
+  .table("post", (t) => ({
+    id: t.serial().primaryKey(),
+    title: t.text(),
+    userId: t.text(),
+  }))
+  .build();
+
+async function startOuter() {
+  // `.start()` builds the server and applies pending migrations
+  return new Outer({ name: "My API", baseUrl: process.env.APP_URL, db: pglite() })
+    .schema(v1_0)
+    .auth({ secret: process.env.AUTH_SECRET! })
+    .resource("post", {
+      permissions: { create: "authenticated", update: "owner", delete: "owner" },
+      ownerColumn: "userId",
+    })
+    .start();
+}
+
+const g = globalThis as unknown as { outer?: Awaited<ReturnType<typeof startOuter>> };
+
+if (!g.outer) {
+  g.outer = await startOuter();
+}
+
+export const outer = g.outer;
+```
+
+## 3. Mount the routes
+
+Outer serves everything under `/rpc/**` and `/api/auth/**`. A splat segment — a file named `$.ts` — catches the rest of the path, and Start passes the full URL through, so Outer routes on it directly.
+
+```ts
+// src/routes/rpc/$.ts
+import { createFileRoute } from "@tanstack/react-router";
+import { outer } from "@/lib/outer";
+
+const handler = ({ request }: { request: Request }) => outer.handle(request);
+
+export const Route = createFileRoute("/rpc/$")({
+  server: {
+    handlers: {
+      GET: handler,
+      POST: handler,
+      PUT: handler,
+      PATCH: handler,
+      DELETE: handler,
+      OPTIONS: handler,
+    },
+  },
+});
+```
+
+```ts
+// src/routes/api/auth/$.ts
+import { createFileRoute } from "@tanstack/react-router";
+import { outer } from "@/lib/outer";
+
+const handler = ({ request }: { request: Request }) => outer.handle(request);
+
+export const Route = createFileRoute("/api/auth/$")({
+  server: {
+    handlers: {
+      GET: handler,
+      POST: handler,
+    },
+  },
+});
+```
+
+If you enable `.openapi()`, add the same delegating handler at `src/routes/openapi[.]json.ts` for `GET` and `src/routes/rest/$.ts` for all methods.
+
+## 4. Create a typed client
+
+`@outerjs/sdk` gives you a typed RPC and auth client. The `import type` of the server module is erased at build time, so nothing server-side leaks into the client bundle:
+
+```ts
+// src/lib/client.ts
+import { createClient } from "@outerjs/sdk";
+import type { InferRouter } from "@outerjs/server";
+import type { outer } from "./outer";
+
+type Router = InferRouter<typeof outer>;
+
+export const client = createClient<Router>({
+  baseUrl: import.meta.env.VITE_APP_URL,
+})
+  .auth()
+  .build();
+```
+
+Procedures slot straight into TanStack Query's `queryFn` and `mutationFn`, which Start ships with:
+
+```tsx
+// src/routes/posts.tsx
+import { useQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
+import { client } from "@/lib/client";
+
+export const Route = createFileRoute("/posts")({
+  component: Posts,
+});
+
+function Posts() {
+  const { data: posts } = useQuery({
+    queryKey: ["posts"],
+    queryFn: () => client.post.list({}),
+  });
+
+  return (
+    <ul>
+      {posts?.map((p) => (
+        <li key={p.id}>{p.title}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+`client.auth.*` is the full Better Auth client, so you get `client.auth.signIn.email({ email, password })`, `client.auth.useSession()`, and the rest.
+
+## Call procedures from server functions and loaders
+
+On the server, skip the network. Outer lives in the same process, so `outer.client()` gives you an in-process [router client](https://orpc.dev/docs/client/server-side) — the same typed surface as the SDK, but each call invokes the procedure directly, with no serialization, fetch, or wire protocol.
+
+Forward the incoming request's headers so permissions and `context.auth` see the caller's session:
+
+```ts
+// src/lib/api.server.ts
+import { getRequest } from "@tanstack/react-start/server";
+import { outer } from "@/lib/outer";
+
+export const api = outer.client(() => getRequest().headers);
+```
+
+```ts
+// src/lib/server-posts.ts
+import { createServerFn } from "@tanstack/react-start";
+import { api } from "@/lib/api.server";
+
+export const listPosts = createServerFn().handler(() => api.post.list({}));
+```
+
+Route loaders call `listPosts()`. They get the in-process path during SSR and an RPC back to the server function on client-side navigation, and `createServerFn` deduplicates for free.
+
+## Deploy
+
+- **Self-hosted (VPS, Coolify, Docker).** The `pglite()` default works as-is: it writes to local disk, so any long-lived Node or Bun process with a persistent filesystem is a zero-infra deploy. Mount the data directory — `.outer/pglite` by default — as a volume if you containerize.
+- **Serverless and edge targets.** There is no persistent disk, so swap `pglite()` for a serverless-friendly Kysely dialect: [Neon](https://neon.tech) Postgres (see `templates/vercel-neon`) or a Cloudflare Durable Object (see `templates/cloudflare`). Run migrations from a deploy-time script instead of at cold start.
+
+The same split applies to [file uploads](/guide/files): local disk via unstorage when self-hosted, an object store — R2, Vercel Blob, any S3-compatible bucket — when not. Pass either as `new Outer({ storage })`.

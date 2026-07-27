@@ -1,0 +1,96 @@
+---
+title: Realtime
+description: Stream updates over SSE with oRPC event iterators, fan out application events with EventPublisher, and resume dropped connections.
+sidebar:
+  order: 9
+---
+
+Outer streams over SSE using oRPC's built-in event iterators. The existing `/rpc/**` handler streams async generators, so you add no infrastructure.
+
+## Choose a streaming approach
+
+Pick based on where the truth lives.
+
+| Approach                                         | Follows          | Use it for                                                         |
+| ------------------------------------------------ | ---------------- | ------------------------------------------------------------------ |
+| [Live queries](/guide/database#live-queries)     | The database     | Anything that is a row: lists, counts, dashboards.                 |
+| [`EventPublisher`](#fan-out-with-eventpublisher) | Your application | Events that are not row changes: a job finishing, a presence ping. |
+
+With a live query, you subscribe to a query and every change reaches subscribers whatever caused it. With `EventPublisher`, you publish explicitly.
+
+## Stream from a procedure
+
+Declare the payload with `eventIterator` and return an async generator:
+
+```ts
+import { eventIterator } from "@orpc/server";
+
+.procedure("notifications.stream", (base) =>
+  base
+    .output(eventIterator(z.object({ message: z.string() })))
+    .handler(async function* ({ context, signal }) {
+      while (!signal?.aborted) {
+        const notification = await waitForNotification(context.db);
+        yield { message: notification.text };
+      }
+    })
+)
+```
+
+Check `signal` in the loop condition so a disconnecting client ends the generator.
+
+## Fan out with `EventPublisher`
+
+To broadcast events across procedures — for example, so one user's mutation reaches every subscriber — create an `EventPublisher` at module scope and reference it from your procedures:
+
+```ts
+import { EventPublisher, withEventMeta } from "@orpc/server";
+
+const postEvents = new EventPublisher<{ created: { id: number; title: string } }>();
+
+const server = new Outer(...)
+  .procedure("post.create", (base) =>
+    base.input(z.object({ title: z.string() })).handler(async ({ context, input }) => {
+      const row = await context.db.insertInto("post").values(input).returningAll().executeTakeFirstOrThrow();
+      postEvents.publish("created", row);
+      return row;
+    })
+  )
+  .procedure("post.live", (base) =>
+    base
+      .output(eventIterator(z.object({ id: z.number(), title: z.string() })))
+      .handler(async function* ({ signal }) {
+        for await (const payload of postEvents.subscribe("created", { signal })) {
+          yield withEventMeta(payload, { id: String(payload.id) });
+        }
+      })
+  )
+  .build();
+```
+
+Every write path has to remember to publish. When that is a burden, use a live query instead.
+
+## Resume after a dropped connection
+
+Attach an event `id` to each yield with `withEventMeta`. On reconnect, oRPC passes the last seen ID to the handler as `lastEventId`, so you can replay what the client missed:
+
+```ts
+.handler(async function* ({ lastEventId }) {
+  // fetch missed events from the DB when lastEventId is set
+  if (lastEventId) { /* replay from DB */ }
+  for await (const event of publisher.subscribe("updated", { signal })) {
+    yield withEventMeta(event, { id: event.id });
+  }
+})
+```
+
+## `EventPublisher` and multiple instances
+
+`EventPublisher` is in-memory and tied to a single process. It works correctly on a VPS, on Coolify, or on any long-lived single-instance deployment.
+
+On multi-instance platforms — Cloudflare Workers, Vercel serverless functions, horizontally scaled Node — events published in one instance never reach subscribers in another. There, route events through external pub/sub (Redis, Cloudflare Durable Objects) and subscribe from that instead of from a module-level publisher.
+
+## Next steps
+
+- [Live queries](/guide/database#live-queries) — subscribe to the database instead
+- [Deployment](/guide/deployment) — how this interacts with each host

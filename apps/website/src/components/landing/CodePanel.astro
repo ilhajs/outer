@@ -1,0 +1,16 @@
+---
+interface Props {
+  html: string;
+  class?: string;
+}
+
+const { html, class: className } = Astro.props;
+---
+
+<div
+  class:list={[
+    "landing-code min-w-0 overflow-x-auto text-left text-xs leading-relaxed sm:text-[0.8125rem]",
+    className,
+  ]}
+  set:html={html}
+/>

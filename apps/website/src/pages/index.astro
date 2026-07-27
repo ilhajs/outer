@@ -1,0 +1,461 @@
+---
+import { Icon } from "astro-icon/components";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import Header from "../components/Header.astro";
+import CodePanel from "../components/landing/CodePanel.astro";
+import HeroTechCards from "../components/landing/HeroTechCards.astro";
+import { TemplateCloneForm } from "../components/landing/LandingIslands";
+import { Badge } from "../components/ui/badge";
+import { LinkButton } from "../components/ui/link-button";
+import { highlightLandingCode } from "../lib/landing-highlight";
+import { landingSnippets } from "../lib/landing-snippets";
+import { config } from "virtual:nimbus/config";
+
+const META_DESCRIPTION =
+  "Outer is the open-source backend you own 100% — embedded Postgres, auth, typed RPC, and generated CRUD in a single deploy. An alternative to Supabase, PocketBase, and Firebase with no vendor lock-in.";
+
+const cloudLogos = [
+  { src: "/logo/cloudflare-svgrepo-com.svg", alt: "Cloudflare" },
+  { src: "/logo/vercel-svgrepo-com.svg", alt: "Vercel", class: "scale-150" },
+  { src: "/logo/aws-svgrepo-com.svg", alt: "AWS" },
+  { src: "/logo/google-cloud-svgrepo-com.svg", alt: "Google Cloud" },
+  { src: "/logo/azure-svgrepo-com.svg", alt: "Azure" },
+] as const;
+
+const differentiators = [
+  {
+    icon: "ph:sparkle",
+    title: "pgvector, out of the box",
+    description:
+      "PGlite is real embedded Postgres with pgvector bundled in. Vector search on a $4 VPS — no managed tier, no add-on to switch on.",
+  },
+  {
+    icon: "ph:path",
+    title: "One router. Four surfaces.",
+    description:
+      "Define a procedure once and it's served as typed RPC, REST, an OpenAPI spec, and an MCP tool. No second definition to keep in sync.",
+  },
+  {
+    icon: "ph:robot",
+    title: "Your API, your agent's toolbox",
+    description:
+      "`.mcp()` hands agents your shipped business logic — not raw database access — inheriting the exact permissions your app already enforces.",
+  },
+  {
+    icon: "ph:lightning",
+    title: "Schema to SSR, no HTTP hop",
+    description:
+      "`outer.client()` calls procedures in-process during server rendering. Same types, no serialization, no localhost round-trip.",
+  },
+] as const;
+
+const uploadTraits = [
+  {
+    icon: "ph:lock",
+    title: "Private by default",
+    description: "Only the uploader reads a file. Everyone else gets a 404, never a 403.",
+  },
+  {
+    icon: "ph:hard-drives",
+    title: "Bytes stay yours",
+    description: "Local disk on a VPS, R2, S3, or Vercel Blob — the database holds only metadata.",
+  },
+  {
+    icon: "ph:cloud-arrow-up",
+    title: "Typed, like the rest",
+    description: "Pass a File to the SDK and the request becomes multipart on its own.",
+  },
+] as const;
+
+const compareRows = [
+  {
+    pain: "Your data lives in someone else's database, behind their dashboard and their billing.",
+    relief: "Your data lives in your Postgres, on your infra. `.outer/pglite` is a folder you own.",
+  },
+  {
+    pain: "Auth is a black box you configure through a settings UI.",
+    relief:
+      "Auth is Better Auth — real code you can read, extend, and call directly from `context.auth`.",
+  },
+  {
+    pain: "REST/GraphQL client code is generated after the fact and quietly drifts from your schema.",
+    relief: "The client type is inferred straight from your server. If it compiles, it matches.",
+  },
+  {
+    pain: "Scaling past the free tier means picking a new pricing plan.",
+    relief: "Scaling means giving the box you already pay for more CPU and RAM.",
+  },
+] as const;
+
+const [
+  heroHtml,
+  clientHtml,
+  fileTreeHtml,
+  mdxHtml,
+  buildHtml,
+  filesHtml,
+  realtimeHtml,
+] = await Promise.all([
+  highlightLandingCode(landingSnippets.hero.code, "typescript"),
+  highlightLandingCode(landingSnippets.client.code, "typescript"),
+  highlightLandingCode(landingSnippets.fileTree.code, "typescript"),
+  highlightLandingCode(landingSnippets.mdx.code, "typescript"),
+  highlightLandingCode(landingSnippets.build.code, "shell"),
+  highlightLandingCode(landingSnippets.files.code, "typescript"),
+  highlightLandingCode(landingSnippets.realtime.code, "typescript"),
+]);
+---
+
+<BaseLayout title={`${config.title} — Own your backend`} description={META_DESCRIPTION}>
+  <div class="bg-background text-foreground flex min-h-screen flex-col">
+    <Header showSidebar={false} />
+
+    <main class="flex-1">
+      <section class="container mx-auto max-w-6xl px-5 pt-14 pb-12 sm:px-6 sm:pt-20 sm:pb-16 lg:px-8 lg:pt-24">
+        <div class="grid items-center gap-10 md:grid-cols-2 md:gap-8 lg:grid-cols-[1.05fr_1fr] lg:gap-12">
+          <div class="flex min-w-0 flex-col items-start gap-5 text-left sm:gap-6">
+            <Badge text="Self-hosted · MIT licensed · Alpha" />
+            <h1
+              class="text-[1.9rem] leading-[1.12] font-semibold tracking-tight text-balance sm:text-4xl sm:leading-[1.1] lg:text-[2.75rem] lg:leading-[1.08]"
+            >
+              The open-source backend for the agentic internet.
+            </h1>
+            <p class="text-muted-foreground max-w-xl text-[0.9375rem] leading-[1.65] text-balance sm:text-lg sm:leading-7">
+              Define a procedure once and serve it as typed RPC, REST, OpenAPI, and an MCP tool your
+              agents can call. Real Postgres with pgvector, running on the same box as your app —
+              no managed cloud to rent.
+            </p>
+            <div class="flex w-full max-w-md flex-row gap-2 px-0.5 sm:gap-3 sm:px-0">
+              <LinkButton
+                href="/guide/getting-started"
+                variant="primary"
+                class="flex-1 justify-center px-2 text-sm whitespace-nowrap sm:px-3 sm:text-base"
+              >
+                <Icon name="ph:database" class="size-4 shrink-0" />
+                Get started
+              </LinkButton>
+              <LinkButton
+                variant="secondary"
+                href="https://github.com/ilhajs/outer"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="flex-1 justify-center px-2 text-sm whitespace-nowrap sm:px-3 sm:text-base"
+              >
+                <Icon name="ph:github-logo" class="size-4 shrink-0" />
+                GitHub
+              </LinkButton>
+            </div>
+            <TemplateCloneForm client:load />
+          </div>
+
+          <div data-hero-snippet class="min-w-0">
+            <CodePanel html={heroHtml} />
+          </div>
+        </div>
+
+        <div class="mt-2">
+          <p class="text-muted-foreground pt-8 text-center text-xs tracking-wide uppercase sm:pt-10">
+            Built entirely on tools you already trust
+          </p>
+          <HeroTechCards />
+          <p class="text-muted-foreground mt-10 text-center text-xs tracking-wide uppercase sm:mt-12">
+            Deploys to
+          </p>
+          <div class="mt-5 flex flex-wrap items-center justify-center gap-x-8 gap-y-5 sm:gap-x-12">
+            {
+              cloudLogos.map((logo) => (
+                <img
+                  src={logo.src}
+                  alt={logo.alt}
+                  loading="lazy"
+                  class={`h-9 w-auto opacity-60 grayscale transition hover:opacity-100 hover:grayscale-0 sm:h-11 dark:invert ${logo.class ?? ""}`}
+                />
+              ))
+            }
+          </div>
+        </div>
+      </section>
+
+      <section class="container mx-auto max-w-6xl px-5 pt-4 pb-16 sm:px-6 sm:pt-6 sm:pb-24 lg:px-8">
+        <div class="mb-8 max-w-2xl space-y-3 sm:mb-10 sm:space-y-4">
+          <Badge text="Never choose between zero-infra and full-power" />
+          <h2 class="text-xl leading-snug font-semibold tracking-tight sm:text-3xl sm:leading-tight">
+            Full-power Postgres and an agent-ready API, with nothing to run but your app.
+          </h2>
+        </div>
+        <div class="grid gap-5 sm:grid-cols-2 sm:gap-6">
+          {
+            differentiators.map((item) => (
+              <div class="border-border bg-card flex items-start gap-4 rounded-2xl border p-5 sm:p-6">
+                <span class="bg-muted flex size-9 shrink-0 items-center justify-center rounded-lg">
+                  <Icon name={item.icon} class="size-5" />
+                </span>
+                <div class="min-w-0 space-y-1.5">
+                  <h3 class="text-base leading-snug font-semibold tracking-tight sm:text-lg">
+                    {item.title}
+                  </h3>
+                  <p class="text-muted-foreground text-[0.9375rem] leading-relaxed">
+                    {item.description}
+                  </p>
+                </div>
+              </div>
+            ))
+          }
+        </div>
+      </section>
+
+      <section class="container mx-auto max-w-6xl px-5 pt-4 pb-16 sm:px-6 sm:pt-6 sm:pb-24 lg:px-8">
+        <div class="mb-8 max-w-2xl space-y-3 sm:mb-10 sm:space-y-4">
+          <Badge text="Why leave a hosted BaaS" />
+          <h2 class="text-xl leading-snug font-semibold tracking-tight sm:text-3xl sm:leading-tight">
+            You already have a server. You don't need to rent a second backend on top of it.
+          </h2>
+        </div>
+        <div class="border-border bg-card divide-border divide-y overflow-hidden rounded-2xl border">
+          {
+            compareRows.map((row) => (
+              <div class="grid gap-3 p-4 sm:grid-cols-2 sm:gap-6 sm:p-5">
+                <div class="flex items-start gap-2.5">
+                  <Icon name="ph:x-circle" class="text-danger mt-0.5 size-4 shrink-0" />
+                  <p class="text-muted-foreground text-[0.9375rem] leading-relaxed sm:text-base">
+                    {row.pain}
+                  </p>
+                </div>
+                <div class="flex items-start gap-2.5">
+                  <Icon name="ph:check-circle" class="text-success mt-0.5 size-4 shrink-0" />
+                  <p class="text-[0.9375rem] leading-relaxed sm:text-base">{row.relief}</p>
+                </div>
+              </div>
+            ))
+          }
+        </div>
+      </section>
+
+      <section class="container mx-auto max-w-6xl px-5 pt-4 pb-16 sm:px-6 sm:pt-0 sm:pb-24 lg:px-8">
+        <div class="mb-8 max-w-2xl space-y-3 sm:mb-10 sm:space-y-4 md:mb-12">
+          <Badge text="What's in the box" />
+          <h2 class="text-xl leading-snug font-semibold tracking-tight sm:text-3xl sm:leading-tight">
+            Everything a small backend needs, none of the infra.
+          </h2>
+        </div>
+        <div class="grid gap-5 sm:gap-6 md:grid-cols-2 md:gap-7">
+          <div class="border-border bg-card flex h-full flex-col overflow-hidden rounded-2xl border">
+            <div class="border-border flex items-start gap-2.5 border-b p-5 text-left leading-snug sm:items-center sm:gap-3 sm:p-6">
+              <span class="bg-muted flex size-6 shrink-0 items-center justify-center rounded-lg">
+                <Icon name="ph:database" class="size-4" />
+              </span>
+              <h3 class="text-base font-semibold tracking-tight sm:text-lg">
+                Typed schema, auto-generated CRUD
+              </h3>
+            </div>
+            <div class="flex flex-1 flex-col gap-5 p-5 text-[0.9375rem] leading-relaxed sm:p-6 sm:text-base sm:leading-7">
+              <p class="m-0">
+                One <code>.resource()</code> call turns a table into <code>list</code>,{" "}
+                <code>get</code>, <code>create</code>, <code>update</code>, <code>delete</code> —
+                with clean 409/400/404 errors instead of raw 500s.
+              </p>
+              <CodePanel html={fileTreeHtml} />
+            </div>
+          </div>
+
+          <div class="border-border bg-card flex h-full flex-col overflow-hidden rounded-2xl border">
+            <div class="border-border flex items-start gap-2.5 border-b p-5 text-left leading-snug sm:items-center sm:gap-3 sm:p-6">
+              <span class="bg-muted flex size-6 shrink-0 items-center justify-center rounded-lg">
+                <Icon name="ph:key" class="size-4" />
+              </span>
+              <h3 class="text-base font-semibold tracking-tight sm:text-lg">
+                Auth and permissions, built in
+              </h3>
+            </div>
+            <div class="flex flex-1 flex-col gap-5 p-5 text-[0.9375rem] leading-relaxed sm:p-6 sm:text-base sm:leading-7">
+              <p class="m-0">
+                <code>.auth()</code> mounts Better Auth directly. Declare <code>public</code>,{" "}
+                <code>authenticated</code>, <code>owner</code>, or <code>admin</code> per procedure
+                — ownership checks happen automatically.
+              </p>
+              <CodePanel html={mdxHtml} />
+            </div>
+          </div>
+
+          <div class="border-border bg-card flex h-full flex-col overflow-hidden rounded-2xl border">
+            <div class="border-border flex items-start gap-2.5 border-b p-5 text-left leading-snug sm:items-center sm:gap-3 sm:p-6">
+              <span class="bg-muted flex size-6 shrink-0 items-center justify-center rounded-lg">
+                <Icon name="ph:broadcast" class="size-4" />
+              </span>
+              <h3 class="text-base font-semibold tracking-tight sm:text-lg">
+                Realtime without extra infrastructure
+              </h3>
+            </div>
+            <div class="flex flex-1 flex-col gap-5 p-5 text-[0.9375rem] leading-relaxed sm:p-6 sm:text-base sm:leading-7">
+              <p class="m-0">
+                An async generator in a <code>.procedure()</code> handler is all it takes to stream
+                updates over SSE, with resumable delivery via <code>withEventMeta</code> — no
+                message broker to run.
+              </p>
+              <CodePanel html={realtimeHtml} />
+            </div>
+          </div>
+
+          <div class="border-border bg-card flex h-full flex-col overflow-hidden rounded-2xl border">
+            <div class="border-border flex items-start gap-2.5 border-b p-5 text-left leading-snug sm:items-center sm:gap-3 sm:p-6">
+              <span class="bg-muted flex size-6 shrink-0 items-center justify-center rounded-lg">
+                <Icon name="ph:desktop-tower" class="size-4" />
+              </span>
+              <h3 class="text-base font-semibold tracking-tight sm:text-lg">
+                Deploy to a VPS, or go serverless
+              </h3>
+            </div>
+            <div class="flex flex-1 flex-col gap-5 p-5 text-[0.9375rem] leading-relaxed sm:p-6 sm:text-base sm:leading-7">
+              <p class="m-0">
+                <code>pglite()</code> ships a zero-infra embedded Postgres for a VPS or Coolify box.
+                Need serverless instead? Swap in any Kysely <code>Dialect</code> with the same
+                builder chain.
+              </p>
+              <CodePanel html={buildHtml} />
+            </div>
+          </div>
+
+          <div class="border-border bg-card flex h-full flex-col overflow-hidden rounded-2xl border md:col-span-2">
+            <div class="border-border flex items-start gap-2.5 border-b p-5 text-left leading-snug sm:items-center sm:gap-3 sm:p-6">
+              <span class="bg-muted flex size-6 shrink-0 items-center justify-center rounded-lg">
+                <Icon name="ph:upload-simple" class="size-4" />
+              </span>
+              <h3 class="text-base font-semibold tracking-tight sm:text-lg">
+                File uploads, without a second service
+              </h3>
+            </div>
+            <div class="flex flex-1 flex-col p-5 text-[0.9375rem] leading-relaxed sm:p-6 sm:text-base sm:leading-7">
+              <div class="grid gap-6 md:grid-cols-2 md:items-center md:gap-8">
+                <div class="space-y-5">
+                  <p class="m-0">
+                    <code>.files()</code> mounts upload, download, listing, and attachments over the
+                    storage you already have — no signed-URL dance, no bucket SDK leaking into your
+                    handlers.
+                  </p>
+                  <ul class="m-0 grid list-none gap-3.5 p-0">
+                    {
+                      uploadTraits.map((trait) => (
+                        <li class="flex items-start gap-3">
+                          <span class="bg-muted mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg">
+                            <Icon name={trait.icon} class="size-3.5" />
+                          </span>
+                          <span class="min-w-0">
+                            <span class="text-foreground block text-sm leading-snug font-medium">
+                              {trait.title}
+                            </span>
+                            <span class="text-muted-foreground block text-sm leading-relaxed">
+                              {trait.description}
+                            </span>
+                          </span>
+                        </li>
+                      ))
+                    }
+                  </ul>
+                </div>
+                <div class="min-w-0">
+                  <CodePanel html={filesHtml} />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="container mx-auto max-w-6xl px-5 pb-16 sm:px-6 sm:pb-24 lg:px-8">
+        <div
+          class="border-border bg-card flex flex-col gap-6 rounded-2xl border p-5 sm:p-8 md:flex-row md:items-center md:justify-between lg:p-10"
+        >
+          <div class="max-w-2xl space-y-3 sm:space-y-4">
+            <span class="bg-muted flex size-9 items-center justify-center rounded-lg">
+              <Icon name="ph:layout" class="size-5" />
+            </span>
+            <h2 class="text-xl leading-snug font-semibold tracking-tight sm:text-2xl">
+              Outer Hub: the dashboard, without the hosted lock-in.
+            </h2>
+            <p class="text-muted-foreground text-[0.9375rem] leading-[1.65] sm:text-base sm:leading-7">
+              Browse and edit tables, manage files and API tokens, and explore your API — for any
+              instance, from your browser. Hub is a static app: your instance URL lives in
+              localStorage and every request goes straight to your server, never through ours.
+            </p>
+          </div>
+          <div class="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row sm:gap-3">
+            <LinkButton
+              href="https://hub.outer.now"
+              target="_blank"
+              rel="noopener noreferrer"
+              variant="primary"
+              class="w-full sm:w-auto"
+            >
+              Open Outer Hub
+            </LinkButton>
+            <LinkButton href="/guide/hub" variant="secondary" class="w-full sm:w-auto">
+              Read the guide
+            </LinkButton>
+          </div>
+        </div>
+      </section>
+
+      <section class="container mx-auto max-w-6xl px-5 pb-16 sm:px-6 sm:pb-24 lg:px-8">
+        <div class="border-border bg-card grid gap-8 rounded-2xl border p-5 sm:p-8 md:grid-cols-2 md:items-center lg:p-10">
+          <div class="space-y-3 sm:space-y-4">
+            <span class="bg-muted flex size-9 items-center justify-center rounded-lg">
+              <Icon name="ph:shield-check" class="size-5" />
+            </span>
+            <h2 class="text-xl leading-snug font-semibold tracking-tight sm:text-2xl">
+              No codegen step. No client SDK to regenerate. Just types.
+            </h2>
+            <p class="text-muted-foreground text-[0.9375rem] leading-[1.65] sm:text-base sm:leading-7">
+              <code>InferRouter&lt;typeof server&gt;</code> hands your server's exact procedure types
+              to <code>@outerjs/sdk</code>. Rename a field on the server and every caller turns red
+              before you ship — not after a customer reports it.
+            </p>
+          </div>
+          <CodePanel html={clientHtml} />
+        </div>
+      </section>
+
+      <section class="container mx-auto max-w-6xl px-5 pb-20 sm:px-6 sm:pb-28 lg:px-8 lg:pb-32">
+        <div
+          class="border-border bg-card flex flex-col gap-6 rounded-2xl border p-5 sm:gap-8 sm:p-8 md:flex-row md:items-center md:justify-between lg:p-10"
+        >
+          <div class="max-w-2xl space-y-2.5 text-left sm:space-y-4">
+            <h2 class="text-xl leading-snug font-semibold tracking-tight sm:text-[1.75rem]">
+              Install it, write your schema, ship.
+            </h2>
+            <p class="text-muted-foreground text-[0.9375rem] leading-[1.65] sm:text-base sm:leading-7">
+              Schema, auth, permissions, files, realtime, a four-surface API, and the Outer Hub
+              dashboard are in the box today. Typed vector columns are next. MIT licensed, no
+              telemetry, nothing phoning home — the whole thing runs on hardware you already pay
+              for.
+            </p>
+          </div>
+          <div class="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row sm:gap-3">
+            <LinkButton href="/guide/getting-started" variant="primary" class="w-full sm:w-auto">
+              Start building
+            </LinkButton>
+            <LinkButton
+              variant="secondary"
+              href="https://github.com/ilhajs/outer"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="w-full sm:w-auto"
+            >
+              <Icon name="ph:github-logo" class="size-5 shrink-0" />
+              GitHub
+            </LinkButton>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer
+      class="border-border text-muted-foreground mt-auto border-t px-5 py-8 text-center text-sm leading-relaxed sm:px-6 sm:py-10"
+    >
+      Made with{" "}
+      <a href="https://ilha.build" class="text-foreground underline-offset-4 hover:underline" target="_blank" rel="noopener noreferrer">
+        Ilha
+      </a>
+      , in Europe
+    </footer>
+  </div>
+</BaseLayout>

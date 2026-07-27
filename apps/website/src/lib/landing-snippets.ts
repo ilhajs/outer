@@ -1,5 +1,3 @@
-/** Landing card samples → Shiki HTML via virtual module `imprensa/landing-shiki` (read automatically when this file exists). */
-
 export const landingSnippets = {
   hero: {
     lang: "typescript",
