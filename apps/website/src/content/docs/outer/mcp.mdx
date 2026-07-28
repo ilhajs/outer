@@ -1,8 +1,10 @@
 ---
-title: MCP
+title: .mcp()
 description: Serve your procedures as MCP tools with .mcp(), opt in per procedure, and authenticate agents with API keys.
 sidebar:
-  order: 11
+  order: 6
+previousSlug:
+  - /guide/mcp
 ---
 
 `.mcp()` serves the router you already have as an [MCP](https://modelcontextprotocol.io) server over the Streamable HTTP transport, so Claude, IDEs, and agents can call your procedures as tools. One router definition covers four surfaces: RPC, REST, OpenAPI, and MCP.
@@ -50,7 +52,7 @@ Dots are not legal in MCP tool names, so a dot-namespaced procedure is exposed w
 
 The MCP endpoint resolves a session exactly the way `/rpc/**` does, so permissions, `context.user`, and `ownerColumn` behave identically. An untagged permission is not a loophole: `{ permission: "authenticated" }` on a tool rejects an anonymous MCP client.
 
-Browsers can authenticate with a cookie. Headless clients use an [API key](/guide/auth#api-keys):
+Browsers can authenticate with a cookie. Headless clients use an [API key](/outer/auth#api-keys):
 
 ```
 POST https://your-app.com/mcp
@@ -80,5 +82,5 @@ Turn on `enableDnsRebindingProtection` when the endpoint is reachable from a bro
 
 ## Next steps
 
-- [API keys](/guide/auth#api-keys) — issue tokens for headless clients
-- [Procedures](/guide/procedures) — write the procedures you expose
+- [API keys](/outer/auth#api-keys) — issue tokens for headless clients
+- [`.procedure()`](/outer/procedure) — write the procedures you expose

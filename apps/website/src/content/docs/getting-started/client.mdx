@@ -1,0 +1,108 @@
+---
+title: Client
+description: Call your Outer server from the browser with @outerjs/sdk, or in-process during SSR with BuiltOuter.client() — same InferRouter types either way.
+sidebar:
+  order: 2
+---
+
+Every procedure you register is callable from two places: a browser (or Node) client over HTTP, and an in-process client during SSR. Both share the same router types through `InferRouter`.
+
+## Pick a client
+
+| Client     | Package / API                      | When you use it                                     |
+| ---------- | ---------------------------------- | --------------------------------------------------- |
+| HTTP       | `createClient` from `@outerjs/sdk` | Browser apps, separate frontends, scripts           |
+| In-process | `BuiltOuter.client(headers?)`      | Server Components, loaders, SSR on the same process |
+
+The HTTP client talks to `/rpc/**` (and `/api/auth/**` when you enable `.auth()`). The in-process client skips the network and still sees the caller's session when you pass request headers.
+
+## Create a typed HTTP client
+
+```ts
+import { createClient } from "@outerjs/sdk";
+import type { InferRouter } from "@outerjs/server";
+import type { outer } from "./server"; // your BuiltOuter / Outer instance
+
+export const client = createClient<InferRouter<typeof outer>>({
+  baseUrl: "http://localhost:3000",
+})
+  .auth()
+  .build();
+
+await client.user.me();
+await client.auth.signIn.email({ email, password });
+```
+
+`InferRouter<typeof outer>` pulls every procedure's input, output, and errors into the client. Rename a field on the server and the call site turns red.
+
+`.auth()` on the SDK builder merges a [Better Auth](https://better-auth.com) client as `client.auth`. Skip it when your server never called `.auth()`.
+
+| Param         | Type                 | Default                            | Description                                       |
+| ------------- | -------------------- | ---------------------------------- | ------------------------------------------------- |
+| `baseUrl`     | `string`             | —                                  | Origin of the Outer server                        |
+| `rpcPath`     | `` `/${string}` ``   | `"/rpc"`                           | Where the oRPC handler is mounted                 |
+| `credentials` | `RequestCredentials` | platform default (`"same-origin"`) | Pass `"include"` for cross-origin cookie sessions |
+
+## Call from another origin
+
+When the frontend and Outer run on different origins, pair the SDK with CORS on the server:
+
+```ts
+// client
+createClient<InferRouter<typeof outer>>({
+  baseUrl: "https://api.example.com",
+  credentials: "include",
+})
+  .auth()
+  .build();
+
+// server
+new Outer({
+  db: pglite(),
+  cors: { origins: ["https://app.example.com"], credentials: true },
+});
+```
+
+Without `credentials: "include"` on the client, the browser never sends the session cookie. Without `cors.credentials: true` and an explicit origin list on the server, the browser blocks the response. See [`new Outer()` → CORS](/outer/server#cors) and [Auth → CORS](/outer/auth#cors).
+
+## Call procedures during SSR
+
+```ts
+const server = await new Outer({ db: pglite() }).schema(v1_0).auth({ secret }).start();
+
+// In a Server Component / loader — pass the incoming request headers
+const api = server.client(request.headers);
+const user = await api.user.me();
+```
+
+Pass a `Headers` object, or a function that returns them per call, so permissions see the same session as an HTTP request. This path never hits `/rpc` — useful on [Next.js](/integrations/nextjs) and [TanStack Start](/integrations/tanstack-start).
+
+## Upload files
+
+Pass a `File` (or `Blob`) into a procedure that accepts one — the SDK switches the request to `multipart/form-data` for you:
+
+```ts
+await client.file.upload({ file: input.files[0] });
+```
+
+See [`.files()`](/outer/files#upload-from-the-client).
+
+## Realtime
+
+Async generator procedures yield over SSE. Iterate them with `for await`:
+
+```ts
+for await (const event of await client.post.onChange()) {
+  console.log(event);
+}
+```
+
+See [Realtime](/outer/realtime).
+
+## Next steps
+
+- [Introduction](/getting-started/introduction) — build the server this client talks to
+- [`new Outer()`](/outer/server) — constructor and `BuiltOuter.client()`
+- [`.procedure()`](/outer/procedure) — register endpoints and extract `InferRouter`
+- [`new Outer()`](/outer/server) — CORS, rate limits, and health checks
+- [Next.js](/integrations/nextjs) / [TanStack Start](/integrations/tanstack-start) — mount Outer and call `client()` in SSR

@@ -2,10 +2,12 @@
 title: Migrations
 description: Register schema versions with .schema(), apply them with .start() or migrateToLatest(), and understand what the diff refuses to do.
 sidebar:
-  order: 3
+  order: 2
+previousSlug:
+  - /guide/migrations
 ---
 
-You never write a migration file. You add a new [schema version](/guide/schema), register it, and Outer diffs it against the previous one.
+You never write a migration file. You add a new [schema version](/schema/defining-schema), register it, and Outer diffs it against the previous one.
 
 ## Register versions
 
@@ -20,7 +22,7 @@ new Outer({ db: pglite() })
 
 Each call also advances the type of `context.db` to `InferDB<T>`, so procedures registered after a `.schema()` call see the new columns.
 
-To avoid restating every table when only one column changed, derive the next version with [`.extend()`](/guide/schema#extend-a-previous-version):
+To avoid restating every table when only one column changed, derive the next version with [`.extend()`](/schema/defining-schema#extend-a-previous-version):
 
 ```ts
 const v1_1 = schema("1.1.0")
@@ -50,7 +52,7 @@ Outer diffs consecutive schema versions with a custom `SchemaMigrationProvider`.
 - **Up** creates new tables, adds new columns with their indexes, and drops removed columns.
 - **Down** reverses all three.
 
-Run this on startup when you self-host. On serverless, run it from a deploy-time script instead — see [Deployment](/guide/deployment).
+Run this on startup when you self-host. On serverless, run it from a deploy-time script instead — see [Deployment](/outer/deployment).
 
 ## Zero-pad version segments past 9
 
@@ -78,6 +80,6 @@ A rename reads to the diff as a drop plus an add, which it performs happily — 
 
 ## Next steps
 
-- [Schema](/guide/schema) — evolve versions with `.extend()`
-- [Resources](/guide/resources) — generate CRUD over the migrated tables
-- [Deployment](/guide/deployment) — when and where to run migrations
+- [`schema()`](/schema/defining-schema) — evolve versions with `.extend()`
+- [`.resource()`](/outer/resource) — generate CRUD over the migrated tables
+- [Deployment](/outer/deployment) — when and where to run migrations

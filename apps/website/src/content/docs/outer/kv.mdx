@@ -1,13 +1,15 @@
 ---
 title: Key/value store
-description: Reach a key/value store the same way in every runtime with context.kv — pass any unstorage instance, including Cloudflare KV and Vercel Runtime Cache, and read it with getItem/setItem plus TTL.
+description: "Reach a key/value store the same way in every runtime with context.kv — pass any unstorage instance, including Cloudflare KV and Vercel Runtime Cache, and read it with getItem/setItem plus TTL."
 sidebar:
-  order: 13
+  order: 12
+previousSlug:
+  - /guide/kv
 ---
 
 `context.kv` is a key/value store for the data that doesn't belong in your schema: cache entries, rate-limit counters, ephemeral tokens, feature flags, idempotency keys. You pass any [unstorage](https://unstorage.unjs.io) instance as `new Outer({ kv })`, and every handler reads it the same way — a VPS backed by memory or Redis, Cloudflare Workers backed by KV, or Vercel backed by its Runtime Cache. The backend difference lives in the driver, not your procedures.
 
-It's for values you want fast and optionally expiring. For anything you query, relate, or need transactions on, use [`context.db`](/guide/database) instead — the KV store has no queries, joins, or transactions.
+It's for values you want fast and optionally expiring. For anything you query, relate, or need transactions on, use [`context.db`](/outer/database) instead — the KV store has no queries, joins, or transactions.
 
 ## Pass a store on the constructor
 

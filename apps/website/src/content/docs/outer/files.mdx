@@ -1,8 +1,10 @@
 ---
-title: File uploads
+title: .files()
 description: Register the file tables with schema().files(), mount the upload surface with .files(), and store the bytes in unstorage, S3/R2, or Vercel Blob.
 sidebar:
-  order: 10
+  order: 5
+previousSlug:
+  - /guide/files
 ---
 
 Uploads take two calls. `schema().files()` registers the tables, and `.files()` on the builder chain mounts the procedures and the download route.
@@ -13,7 +15,7 @@ The bytes never live in Postgres. They go to an object store you pass as `storag
 
 You need two things in place:
 
-- The `file` tables on your schema, via [`schema().files()`](/guide/schema#file-tables).
+- The `file` tables on your schema, via [`schema().files()`](/schema/defining-schema#file-tables).
 - An `OuterStorage` on the constructor. `.files()` throws without one.
 
 ## Set up uploads
@@ -138,5 +140,5 @@ Uploads are buffered in memory, so `maxBytes` is a real ceiling rather than a su
 
 ## Next steps
 
-- [Deployment](/guide/deployment) — match the storage backend to your host
-- [Permissions](/guide/permissions) — the vocabulary `.files()` reuses
+- [Deployment](/outer/deployment) — match the storage backend to your host
+- [Permissions](/outer/permissions) — the vocabulary `.files()` reuses

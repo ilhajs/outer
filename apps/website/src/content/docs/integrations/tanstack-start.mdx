@@ -29,8 +29,10 @@ const v1_0 = schema("1.0.0")
   .table("post", (t) => ({
     id: t.serial().primaryKey(),
     title: t.text(),
-    userId: t.text(),
+    userId: t.text().references("user", "id"),
   }))
+  .relation("user", (rel) => rel.hasMany("post", { from: "id", to: "userId" }))
+  .relation("post", (rel) => rel.belongsTo("user", { from: "userId", to: "id" }))
   .build();
 
 async function startOuter() {
@@ -176,4 +178,4 @@ Route loaders call `listPosts()`. They get the in-process path during SSR and an
 - **Self-hosted (VPS, Coolify, Docker).** The `pglite()` default works as-is: it writes to local disk, so any long-lived Node or Bun process with a persistent filesystem is a zero-infra deploy. Mount the data directory — `.outer/pglite` by default — as a volume if you containerize.
 - **Serverless and edge targets.** There is no persistent disk, so swap `pglite()` for a serverless-friendly Kysely dialect: [Neon](https://neon.tech) Postgres (see `templates/vercel-neon`) or a Cloudflare Durable Object (see `templates/cloudflare`). Run migrations from a deploy-time script instead of at cold start.
 
-The same split applies to [file uploads](/guide/files): local disk via unstorage when self-hosted, an object store — R2, Vercel Blob, any S3-compatible bucket — when not. Pass either as `new Outer({ storage })`.
+The same split applies to [`.files()`](/outer/files): local disk via unstorage when self-hosted, an object store — R2, Vercel Blob, any S3-compatible bucket — when not. Pass either as `new Outer({ storage })`.

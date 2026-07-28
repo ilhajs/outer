@@ -2,7 +2,9 @@
 title: Deployment
 description: Deploy Outer with the zero-infra pglite() default, swap in a Kysely dialect for serverless platforms, and embed the handler in any host framework.
 sidebar:
-  order: 14
+  order: 13
+previousSlug:
+  - /guide/deployment
 ---
 
 `BuiltOuter.handle(request)` is a plain Fetch handler — `Request => Promise<Response>`. Outer therefore mounts as the server entry for any framework that speaks `fetch`: Nitro, Hono, H3, Next.js route handlers, and others.
@@ -54,7 +56,7 @@ const nearest = await context.db
   .execute();
 ```
 
-**`live` (reactive queries)** powers [live queries in Sola](/guide/database#live-queries). You never touch the extension directly; `pglite()` wires it up as a `LiveProvider`.
+**`live` (reactive queries)** powers [live queries in Sola](/outer/database#live-queries). You never touch the extension directly; `pglite()` wires it up as a `LiveProvider`.
 
 `pglite()` returns `{ dialect, kind, live, client }`. Sola uses `live`. `client` is the PGlite instance itself, for anything neither the query builder nor Sola covers — Kysely's `PGliteDialect` keeps its own reference private, so this is your only handle to it.
 
@@ -97,7 +99,7 @@ $ npm run deploy
 
 ## Choose storage for uploads
 
-The same persistence question applies to file bytes. [`.files()`](/guide/files) needs an `OuterStorage` on the constructor, and the right backing store is the one your host actually persists.
+The same persistence question applies to file bytes. [`.files()`](/outer/files) needs an `OuterStorage` on the constructor, and the right backing store is the one your host actually persists.
 
 | Host                   | Backing store                                      | Adapter                               |
 | ---------------------- | -------------------------------------------------- | ------------------------------------- |
@@ -179,7 +181,7 @@ const outer = new Outer(...)
 
 The pattern is the same on every host. Swap `nitro/storage` and `nitro/task` for whatever the framework provides — Cloudflare bindings, Next.js `headers()`, and so on.
 
-If your frontend is deployed on a different origin than the Outer server, add [`new Outer({ cors: { origins } })`](/guide/auth#cors). Without it, browsers block cross-origin calls to `/rpc/**` and `/api/auth/**`.
+If your frontend is deployed on a different origin than the Outer server, add [`new Outer({ cors: { origins } })`](/outer/auth#cors). Without it, browsers block cross-origin calls to `/rpc/**` and `/api/auth/**`.
 
 ## HTTP routes
 

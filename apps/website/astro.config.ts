@@ -16,14 +16,21 @@ const nimbusConfig = defineNimbusConfig({
   socialImageAlt: "Outer documentation preview",
   sidebar: {
     items: [
-      { label: "Guide", autogenerate: { directory: "guide" } },
-      { label: "Integrations", autogenerate: { directory: "integrations" } },
+      // Root autogenerate turns getting-started/, outer/, schema/, integrations/ into groups via each folder's index (or the folder name).
+      { autogenerate: { collection: "docs" } },
     ],
   },
 });
 
 export default defineConfig({
   output: "static",
+  redirects: {
+    "/outer": "/outer/server",
+    "/outer/api-reference": "/getting-started/api-reference",
+    "/outer/hub": "/getting-started/hub",
+    "/getting-started": "/getting-started/introduction",
+    "/schema": "/schema/defining-schema",
+  },
   vite: {
     plugins: [tailwindcss()],
   },

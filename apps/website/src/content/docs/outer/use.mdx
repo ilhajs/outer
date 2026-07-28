@@ -1,8 +1,10 @@
 ---
-title: Plugins
+title: .use()
 description: Package procedures, routes, and middleware behind .use() without editing Outer itself.
 sidebar:
-  order: 16
+  order: 7
+previousSlug:
+  - /guide/plugins
 ---
 
 A plugin packages procedures, raw routes, and H3 middleware behind one `.use()` call. Built-in features (`.auth()`, `.admin()`, `.files()`, `.mcp()`, `.openapi()`) stay as they are — plugins are the extension point for third-party and app-specific features.
@@ -92,5 +94,5 @@ Prefer returning procedures over mutating `resources`. Routes and middleware fro
 
 ## Next steps
 
-- [Procedures](/guide/procedures) — hand-written endpoints without a plugin
-- [API reference](/guide/api-reference#useplugin) — full `OuterPlugin` types
+- [`.procedure()`](/outer/procedure) — hand-written endpoints without a plugin
+- [API reference](/getting-started/api-reference#useplugin) — full `OuterPlugin` types

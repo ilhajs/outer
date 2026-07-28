@@ -1,11 +1,14 @@
 ---
-title: Schema
+title: Defining Schema
 description: Define tables, columns, and relations with the schema() builder, including the built-in auth and file tables.
 sidebar:
-  order: 2
+  order: 1
+previousSlug:
+  - /guide/schema
+  - /schema
 ---
 
-The `schema()` builder describes your tables and the links between them. It is also your migration history: every version you register becomes one migration step, which [Migrations](/guide/migrations) covers.
+The `schema()` builder describes your tables and the links between them. It is also your migration history: every version you register becomes one migration step, which [Migrations](/schema/migrations) covers.
 
 ## Define a schema version
 
@@ -84,7 +87,7 @@ schema("1.0.0").auth({ roles: ["user", "admin", "support"] });
 // "admin,support" ✓   "admin,root" ✗ rejected
 ```
 
-Pass `.auth({ apiKeys: true })` to also declare the `apikey` table that [API keys](/guide/auth#api-keys) need.
+Pass `.auth({ apiKeys: true })` to also declare the `apikey` table that [API keys](/outer/auth#api-keys) need.
 
 `session.userId` and `account.userId` cascade on delete, so removing a user is never blocked by their sessions.
 
@@ -104,7 +107,7 @@ const v1_0 = schema("1.0.0")
 
 `owner` defaults to `true` and adds `file.userId` plus the `user` ↔ `file` relations, so it requires `.auth()`. Pass `owner: false` for files with no per-user owner. The tables are exported as `FileTables`.
 
-The schema only registers the tables. To serve the bytes, call [`.files()`](/guide/files) on the builder chain.
+The schema only registers the tables. To serve the bytes, call [`.files()`](/outer/files) on the builder chain.
 
 ## Column types
 
@@ -182,7 +185,7 @@ Four kinds are available: `hasMany`, `hasOne`, `belongsTo`, and `manyToMany`.
 }))
 ```
 
-Relations drive `include` in both the [Sola ORM](/guide/database#include) and [resources](/guide/resources#include-relations).
+Relations drive `include` in both the [Sola ORM](/outer/database#include) and [resources](/outer/resource#include-relations).
 
 ## Type inference
 
@@ -190,6 +193,6 @@ Relations drive `include` in both the [Sola ORM](/guide/database#include) and [r
 
 ## Next steps
 
-- [Migrations](/guide/migrations) — register versions and apply them
-- [Resources](/guide/resources) — generate CRUD for a table
-- [Database](/guide/database) — query the tables you just defined
+- [Migrations](/schema/migrations) — register versions and apply them
+- [`.resource()`](/outer/resource) — generate CRUD for a table
+- [Database](/outer/database) — query the tables you just defined

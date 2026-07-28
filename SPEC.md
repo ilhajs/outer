@@ -2,6 +2,8 @@
 
 Outer is a batteries-included TypeScript backend framework built on Kysely, oRPC, and Better Auth, with [PGlite](https://pglite.dev) as the recommended zero-infra default database. It exposes a builder-chain API that produces a fetch-compatible HTTP handler.
 
+Human-oriented guides live at [outer.now](https://outer.now/getting-started/introduction) (Introduction, [Client](https://outer.now/getting-started/client), [API reference](https://outer.now/getting-started/api-reference)). This file is the machine-oriented source of truth for agents and package authors.
+
 ---
 
 ## Builder chain
@@ -657,7 +659,7 @@ type OuterKV = {
 
 Pass any unstorage instance as `new Outer({ kv })`: `createStorage()` (in-memory), `createStorage({ driver: cloudflareKVBinding({ binding: env.MY_KV }) })`, `createStorage({ driver: vercelRuntimeCacheDriver() })`, or Nitro's `useStorage()`. `ttl` is in seconds, honored by drivers that support expiry (Cloudflare KV, Vercel Runtime Cache, Redis) and ignored by the in-memory driver. `context.kv` is `undefined` when `kv` isn't passed.
 
-Unlike `OuterStorage` (a narrow byte contract `.files()` calls internally), KV has no internal consumer forcing a narrow shape, so it keeps unstorage's full API rather than being wrapped down to `get`/`set`/`delete`. Full guide: [Key/value store](/guide/kv).
+Unlike `OuterStorage` (a narrow byte contract `.files()` calls internally), KV has no internal consumer forcing a narrow shape, so it keeps unstorage's full API rather than being wrapped down to `get`/`set`/`delete`. Full guide: [Key/value store](/outer/kv).
 
 ---
 

@@ -1,8 +1,10 @@
 ---
-title: Resources
+title: .resource()
 description: Generate typed CRUD procedures for a table with .resource(), including filtering, relations, streaming, and error mapping.
 sidebar:
-  order: 4
+  order: 3
+previousSlug:
+  - /guide/resources
 ---
 
 `.resource(name, options?)` generates typed CRUD procedures for a table defined in the last `.schema()` call. It covers the endpoints you would otherwise write by hand for every table.
@@ -55,7 +57,7 @@ Dropped columns are removed from the generated input schema, so a value a caller
 
 ## Query a list
 
-`list` accepts the same query surface as the Sola ORM, described in [Database](/guide/database#where-operators):
+`list` accepts the same query surface as the Sola ORM, described in [Database](/outer/database#where-operators):
 
 - `where` — plain equality values or filter objects (`equals`, `not`, `in`, `notIn`, `isNull`, plus `lt`/`lte`/`gt`/`gte` on numeric and timestamp columns and `contains`/`startsWith`/`endsWith` on text columns), combinable with `AND`, `OR`, and `NOT`.
 - `orderBy` — an array of `{ column: "asc" | "desc" }`.
@@ -64,7 +66,7 @@ Dropped columns are removed from the generated input schema, so a value a caller
 
 `list` returns 50 rows by default and rejects a `take` above 100 with `400 BAD_REQUEST`. Pass `listLimit: { default, max }` to change either bound. The cap keeps an unqualified `.resource()` call from becoming an unbounded `SELECT *`.
 
-For cursor pagination with metadata, call `context.db.query[table].paginate(...)` in a custom [procedure](/guide/procedures) instead.
+For cursor pagination with metadata, call `context.db.query[table].paginate(...)` in a custom [procedure](/outer/procedure) instead.
 
 ## Include relations
 
@@ -86,7 +88,7 @@ Pass `live: true` to also register `{name}.live` — the same query as `list`, s
 })
 ```
 
-It reuses the **`list`** permission, owner scoping included. There is no separate `live` permission to forget, and the owner filter is applied in SQL, so a subscriber only ever receives their own rows. It needs a dialect with a `LiveProvider`; `pglite()` has one. See [live queries](/guide/database#live-queries) for the underlying Sola API.
+It reuses the **`list`** permission, owner scoping included. There is no separate `live` permission to forget, and the owner filter is applied in SQL, so a subscriber only ever receives their own rows. It needs a dialect with a `LiveProvider`; `pglite()` has one. See [live queries](/outer/database#live-queries) for the underlying Sola API.
 
 Weigh two things before you expose it publicly:
 
@@ -97,7 +99,7 @@ Weigh two things before you expose it publicly:
 
 ## Errors
 
-`create` and `update` map common Postgres constraint violations to clean errors instead of a raw 500:
+`create` and `update` map common Postgres constraint violations to clean `ORPCError` responses instead of a raw 500:
 
 | Situation                         | Response          |
 | --------------------------------- | ----------------- |
@@ -106,7 +108,9 @@ Weigh two things before you expose it publicly:
 | Row not found on update or delete | `404 NOT_FOUND`   |
 | `update` with empty `data`        | `400 BAD_REQUEST` |
 
-Unrecognized database errors still surface as a generic `500`, with no internal details leaked.
+These are deliberate application errors — [`onError`](/outer/server#unexpected-errors) is not called for them. Unrecognized database errors still surface as a generic `500`, with no internal details leaked.
+
+In hand-written procedures, throw `ORPCError` yourself the same way — see [Procedures → Throw errors](/outer/procedure#throw-errors).
 
 ## Configuration is validated at build time
 
@@ -117,6 +121,7 @@ Mistakes throw while you build the chain, not on the first request:
 
 ## Next steps
 
-- [Permissions](/guide/permissions) — what `"owner"` and the rest actually enforce
-- [Database](/guide/database) — the query surface `list` exposes
-- [Procedures](/guide/procedures) — write the endpoints CRUD does not cover
+- [Permissions](/outer/permissions) — what `"owner"` and the rest actually enforce
+- [Database](/outer/database) — the query surface `list` exposes
+- [`.procedure()`](/outer/procedure) — write the endpoints CRUD does not cover
+- [Client](/getting-started/client) — call generated CRUD from `@outerjs/sdk`

@@ -29,8 +29,10 @@ const v1_0 = schema("1.0.0")
   .table("post", (t) => ({
     id: t.serial().primaryKey(),
     title: t.text(),
-    userId: t.text(),
+    userId: t.text().references("user", "id"),
   }))
+  .relation("user", (rel) => rel.hasMany("post", { from: "id", to: "userId" }))
+  .relation("post", (rel) => rel.belongsTo("user", { from: "userId", to: "id" }))
   .build();
 
 async function startOuter() {
@@ -172,4 +174,4 @@ new Outer({
 
 On serverless, run migrations from a deploy-time script instead of at cold start. `templates/vercel-neon` has a working setup, including a `scripts/migrate.ts` you can copy.
 
-The same split applies to [file uploads](/guide/files): self-hosted can keep bytes on local disk via unstorage, while on Vercel they belong in [Vercel Blob](https://vercel.com/docs/vercel-blob). Pass either as `new Outer({ storage })`.
+The same split applies to [`.files()`](/outer/files): self-hosted can keep bytes on local disk via unstorage, while on Vercel they belong in [Vercel Blob](https://vercel.com/docs/vercel-blob). Pass either as `new Outer({ storage })`.

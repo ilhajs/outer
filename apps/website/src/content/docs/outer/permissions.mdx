@@ -1,15 +1,17 @@
 ---
 title: Permissions
-description: Guard procedures, resources, and file routes with one declarative vocabulary — public, authenticated, admin, owner, or your own function.
+description: "Guard procedures, resources, and file routes with one declarative vocabulary — public, authenticated, admin, owner, or your own function."
 sidebar:
-  order: 6
+  order: 8
+previousSlug:
+  - /guide/permissions
 ---
 
-Outer uses one permission vocabulary everywhere: on [procedures](/guide/procedures), on [resources](/guide/resources), and on [file uploads](/guide/files). You declare the guard next to the endpoint instead of writing the check inside the handler.
+Outer uses one permission vocabulary everywhere: on [procedures](/outer/procedure), on [resources](/outer/resource), and on [`.files()`](/outer/files). You declare the guard next to the endpoint instead of writing the check inside the handler.
 
 ## Before you begin
 
-Every value except `"public"` needs a session, so call [`.auth()`](/guide/auth) somewhere in the chain. Forget it and `.build()` throws at startup, listing the endpoints that need it.
+Every value except `"public"` needs a session, so call [`.auth()`](/outer/auth) somewhere in the chain. Forget it and `.build()` throws at startup, listing the endpoints that need it.
 
 ## The values
 
@@ -66,13 +68,13 @@ Three behaviors follow from it:
 
 ### Streaming resources
 
-`{name}.live` reuses the `list` permission rather than adding one of its own, so a stream can never be looser than the one-shot read. See [Stream a list with `live`](/guide/resources#stream-a-list-with-live) for how long-lived subscriptions are re-checked.
+`{name}.live` reuses the `list` permission rather than adding one of its own, so a stream can never be looser than the one-shot read. See [Stream a list with `live`](/outer/resource#stream-a-list-with-live) for how long-lived subscriptions are re-checked.
 
 ## On file routes
 
 `.files()` takes the same vocabulary for `upload`, `list`, `get`, and `delete`. It defaults to `"authenticated"` for `upload` and `list`, and `"owner"` for `get` and `delete`.
 
-One difference is worth knowing: an `"owner"`-guarded download answers **`404`, not `403`**, so file IDs cannot be probed for existence. See [File uploads](/guide/files#files-are-private-by-default).
+One difference is worth knowing: an `"owner"`-guarded download answers **`404`, not `403`**, so file IDs cannot be probed for existence. See [`.files()`](/outer/files#files-are-private-by-default).
 
 ## Checks happen at build time
 
@@ -83,5 +85,5 @@ Outer validates your permission configuration while you build the chain, not on 
 
 ## Next steps
 
-- [Auth](/guide/auth) — where the session these checks read comes from
-- [Resources](/guide/resources) — the actions you are guarding
+- [`.auth()`](/outer/auth) — where the session these checks read comes from
+- [`.resource()`](/outer/resource) — the actions you are guarding

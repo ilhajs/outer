@@ -1,0 +1,173 @@
+---
+title: new Outer()
+description: Construct an Outer instance with a database dialect, optional CORS, rate limits, health, storage, then chain .schema(), .auth(), procedures, and .start().
+sidebar:
+  order: 1
+---
+
+`Outer` is the server builder. You construct it once with `new Outer({ db, ... })`, chain methods that type the next step, then call `.start()` or `.build()` to get a fetch-compatible handler.
+
+```ts
+import { Outer } from "@outerjs/server";
+import { pglite } from "@outerjs/server/pglite";
+
+const outer = new Outer({
+  name: "My App",
+  baseUrl: "https://api.example.com",
+  db: pglite(),
+  cors: { origins: ["https://app.example.com"], credentials: true },
+});
+```
+
+`db` is required. Everything else on the constructor is optional. Builder methods such as [`.auth()`](/outer/auth) and [`.procedure()`](/outer/procedure) come after construction, before `.start()` / `.build()`.
+
+## Pass a database
+
+`db` is a Kysely dialect plus its family:
+
+| Field     | Required | Description                                                                           |
+| --------- | -------- | ------------------------------------------------------------------------------------- |
+| `dialect` | yes      | Any [Kysely `Dialect`](https://kysely.dev/docs/dialects)                              |
+| `kind`    | yes      | `"postgres"` or `"sqlite"` — drives DDL and error mapping; must match the dialect     |
+| `live`    | no       | Change feed for [live queries](/outer/database#live-queries). `pglite()` supplies one |
+
+For the zero-infra default, use [`pglite()`](/outer/deployment#run-embedded-postgres-with-pglite) from `@outerjs/server/pglite` — embedded Postgres writing to local disk. On serverless hosts, pass another dialect instead — see [Deployment](/outer/deployment#swap-in-a-dialect-for-serverless).
+
+## Other constructor options
+
+| Param       | Guide                                                           | Role                                                   |
+| ----------- | --------------------------------------------------------------- | ------------------------------------------------------ |
+| `name`      | [API reference](/getting-started/api-reference#new-outerparams) | OpenAPI title and Hub meta                             |
+| `baseUrl`   | [API reference](/getting-started/api-reference#new-outerparams) | Public origin for Better Auth and OpenAPI `servers`    |
+| `cors`      | [CORS](#cors)                                                   | Cross-origin browsers on `/rpc/**` and `/api/auth/**`  |
+| `rateLimit` | [Rate limiting](#rate-limiting)                                 | Caps on `/rpc/**` and `/rest/**`                       |
+| `health`    | [Health check](#health-check)                                   | `GET /health` probe (on by default)                    |
+| `onError`   | [Unexpected errors](#unexpected-errors)                         | Unexpected failures only — not deliberate `ORPCError`s |
+| `storage`   | [`.files()`](/outer/files#storage-adapters)                     | Object store for upload bytes                          |
+| `secrets`   | [Secrets](/outer/secrets)                                       | Typed env / bindings as `context.secrets`              |
+| `kv`        | [Key/value store](/outer/kv)                                    | Cache / ephemeral store as `context.kv`                |
+
+The full parameter table lives in the [API reference](/getting-started/api-reference#new-outerparams).
+
+## CORS
+
+```ts
+new Outer({
+  db: pglite(),
+  cors: { origins: ["https://app.example.com"], credentials: true },
+});
+```
+
+`cors` lets browser clients on other origins call `/rpc/**`, `/api/auth/**`, and the admin API. Origins are also folded into Better Auth's `trustedOrigins` when you call [`.auth()`](/outer/auth#cors).
+
+| Prop          | Type       | Default | Description                                                                          |
+| ------------- | ---------- | ------- | ------------------------------------------------------------------------------------ |
+| `origins`     | `string[]` | —       | Exact `Origin` matches. `["*"]` echoes any origin — for public, unauthenticated APIs |
+| `credentials` | `boolean`  | `false` | Sets `Access-Control-Allow-Credentials: true` for cookie sessions                    |
+
+Combining `credentials: true` with `origins: ["*"]` throws at `.build()` — list origins explicitly. Pair cross-origin cookie auth with `credentials: "include"` on [`createClient`](/getting-started/client#call-from-another-origin).
+
+Without `cors`, no `Access-Control-Allow-Origin` header is set. Same-origin and non-browser callers are unaffected.
+
+## Rate limiting
+
+```ts
+import { memoryRateLimitStore } from "@outerjs/server";
+
+new Outer({
+  db: pglite(),
+  rateLimit: {
+    max: 120,
+    windowMs: 60_000,
+    // optional: store: myRedisStore,
+  },
+});
+```
+
+`rateLimit` caps `/rpc/**` and `/rest/**` per caller. It is off by default. `/api/auth/**` is excluded — Better Auth has its own limits.
+
+| Prop       | Type                      | Default                  | Description                                          |
+| ---------- | ------------------------- | ------------------------ | ---------------------------------------------------- |
+| `max`      | `number`                  | —                        | Requests allowed per window, per key                 |
+| `windowMs` | `number`                  | —                        | Fixed window length in ms                            |
+| `key`      | `(event, user) => string` | user id, else client IP  | Identifies the caller                                |
+| `skip`     | `(event) => boolean`      | —                        | Return `true` to bypass the limit                    |
+| `store`    | `RateLimitStore`          | `memoryRateLimitStore()` | Swap Redis/Upstash to share counters across replicas |
+
+Over-limit responses are `429` with `Retry-After` and `RateLimit-*` headers.
+
+The default store is in-process, so each replica counts separately. Behind a load balancer the effective limit is `max × replicas` unless you share a store. The IP fallback reads `x-forwarded-for` / `x-real-ip` — only trust those behind a proxy you control, or pass `key` yourself.
+
+## Health check
+
+```ts
+new Outer({ db: pglite(), health: true }); // default
+new Outer({ db: pglite(), health: false }); // omit
+new Outer({ db: pglite(), health: { path: "/readyz" } });
+```
+
+When enabled (the default), Outer mounts `GET /health` with a `select 1` probe: `200 {"status":"ok","database":"up"}`, or `503` when the probe fails. A `.route()` on the same path wins. Health is not rate limited.
+
+## Unexpected errors
+
+```ts
+new Outer({
+  db: pglite(),
+  onError: (error, info) => {
+    // log to your sink — never log secrets or tokens
+    console.error(info.source, error);
+  },
+});
+```
+
+`onError` runs for unexpected failures only. Deliberate [`ORPCError`](/outer/procedure#throw-errors) responses (400, 401, 403, 404, 409, …) are application behavior and never call it. `info.source` is `"rpc" | "rest" | "route" | "mcp"`. The default is `console.error`; pass `() => {}` to silence it.
+
+## Chain methods after the constructor
+
+Order matters for typing: `.schema()` → `.middleware()` → `.procedure()` → `.start()` (or `.build()`).
+
+`.auth()`, `.openapi()`, `.mcp()`, `.admin()`, `.files()`, `.route()`, `.resource()`, and `.use()` can appear anywhere before `.start()` / `.build()`.
+
+```ts
+const server = await new Outer({ db: pglite() })
+  .schema(v1_0)
+  .auth({ secret: process.env.AUTH_SECRET! })
+  .resource("post", {
+    permissions: { list: "public", create: "authenticated" },
+    ownerColumn: "userId",
+  })
+  .procedure("user.me", (base) => base.handler(({ context }) => context.user), {
+    permission: "authenticated",
+  })
+  .start();
+
+export default { fetch: (req: Request) => server.handle(req) };
+```
+
+| Call       | Prefer when                                                                             |
+| ---------- | --------------------------------------------------------------------------------------- |
+| `.start()` | Self-hosted boot — `build()` + `migrateToLatest()`, throws on migration failure         |
+| `.build()` | Deploy scripts, logging migration `results`, or running migrations off the request path |
+
+See [Introduction → Run migrations](/getting-started/introduction#run-migrations).
+
+## What `.start()` / `.build()` returns
+
+A `BuiltOuter` instance:
+
+| Member             | Description                                                                               |
+| ------------------ | ----------------------------------------------------------------------------------------- |
+| `handle(request)`  | Plain Fetch handler for Bun, Node, srvx, Nitro, Next.js, and others                       |
+| `client(headers?)` | In-process RPC for SSR — see [Client](/getting-started/client#call-procedures-during-ssr) |
+| `migrator`         | Apply schema versions when you used `.build()` instead of `.start()`                      |
+| `router`           | Input to `InferRouter<typeof server>` for typed clients                                   |
+| `db`               | Same typed `context.db` as procedures, for seeding and scripts                            |
+| `close()`          | Release the pool / PGlite and rate-limit timers                                           |
+
+## Next steps
+
+- [`.auth()`](/outer/auth) — sessions, API keys, admin API
+- [`.resource()`](/outer/resource) — generated CRUD
+- [`.procedure()`](/outer/procedure) — custom RPC, middleware, OpenAPI
+- [Client](/getting-started/client) — call the server from the browser or SSR
+- [API reference](/getting-started/api-reference#new-outerparams) — every constructor field

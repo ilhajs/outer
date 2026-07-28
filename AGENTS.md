@@ -38,7 +38,7 @@
 
 ## Writing docs
 
-Docs live in `apps/website/src/content/docs/**/*.mdx` (guides under `guide/`, integrations under `integrations/`) and in `SPEC.md`. Sidebar order comes from each file's frontmatter `sidebar.order`. The page H1 comes from `title` — don't repeat it in the body. Adapted from the [Mintlify style & tone guide](https://www.mintlify.com/docs/guides/style-and-tone.md):
+Docs live in `apps/website/src/content/docs/**/*.mdx` (Getting started under `getting-started/`, Outer builder guides under `outer/`, schema under `schema/`, integrations under `integrations/`) and in `SPEC.md`. Sidebar order comes from each file's frontmatter `sidebar.order`. The page H1 comes from `title` — don't repeat it in the body. Adapted from the [Mintlify style & tone guide](https://www.mintlify.com/docs/guides/style-and-tone.md):
 
 - **Address the reader as "you."** Describe what they do, not what the product has: "You enable auth with `.auth()`," not "Outer provides an auth feature."
 - **Prefer active voice.** "`.build()` mounts the handler," not "the handler is mounted by `.build()`." Passive is fine only when the actor is unknown or irrelevant.
@@ -46,9 +46,9 @@ Docs live in `apps/website/src/content/docs/**/*.mdx` (guides under `guide/`, in
 - **Write headings for intent, in sentence case.** "Set up uploads," not "Upload Configuration." Don't skip heading levels. Don't put a body `# Title` H1 — Nimbus already renders `title` from frontmatter.
 - **One term per concept, used consistently.** Match the names in code and SPEC.md exactly — `procedure`, `resource`, `middleware`, `OuterStorage`, `context.db` — and don't drift between synonyms. Capitalize feature names the same way everywhere.
 - **Be direct, cut filler.** Drop "simply," "just," "in order to," "it's worth noting that." Document behavior, not impressiveness — no "powerful," "blazing fast," "seamless."
-- **Introduce terms in context** rather than linking away, then link to the deeper guide for more (`/guide/...`, `#anchor`).
+- **Introduce terms in context** rather than linking away, then link to the deeper guide for more (`/getting-started/...`, `/outer/...`, `/schema/...`, `#anchor`).
 - **Show, then explain.** Lead with a minimal, runnable code example in the surrounding style, then describe what it does. Keep examples copy-pasteable and type-correct.
-- **Every new feature updates the docs.** Add or revise the relevant guide under `apps/website/src/content/docs/`, the API reference entry, and `SPEC.md`, and run `bun run fmt` (oxfmt formats MDX). Build the site (`cd apps/website && bun run build`) and `bun run lint:docs` to confirm the page prerenders and lint is clean.
+- **Every new feature updates the docs.** Add or revise the relevant guide under `apps/website/src/content/docs/` (`getting-started/` for intro, Client/SDK, and API reference; `outer/` for `new Outer()`, builder methods, and server options; `schema/` for schema/migrations), and `SPEC.md`, and run `bun run fmt` (oxfmt formats MDX). Build the site (`cd apps/website && bun run build`) and `bun run lint:docs` to confirm the page prerenders and lint is clean.
 
 ## Agent behavior
 

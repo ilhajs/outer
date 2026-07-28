@@ -1,8 +1,13 @@
 ---
-title: Getting started
+title: Introduction
 description: Create an Outer server, define a schema, enable auth, add a procedure, and start with automatic migrations.
 sidebar:
   order: 1
+previousSlug:
+  - /guide/getting-started
+  - /outer/getting-started
+  - /outer
+  - /getting-started
 ---
 
 Outer is a TypeScript backend framework built on Kysely, oRPC, and Better Auth. You describe your database, auth, and API in one builder chain, and get back a fetch-compatible handler you can mount anywhere.
@@ -51,6 +56,8 @@ const v1_0 = schema("1.0.0")
     title: t.text(),
     userId: t.text().references("user", "id"),
   }))
+  .relation("user", (rel) => rel.hasMany("post", { from: "id", to: "userId" }))
+  .relation("post", (rel) => rel.belongsTo("user", { from: "userId", to: "id" }))
   .build();
 
 const server = await new Outer({ name: "My API", baseUrl: "http://localhost:3000", db: pglite() })
@@ -88,7 +95,16 @@ const { error, results } = await server.migrator.migrateToLatest();
 if (error) throw error;
 ```
 
-On serverless, run migrations from a deploy script instead of the request path — see [Deployment](/guide/deployment).
+| Call       | What it does                                                 | Prefer when                                   |
+| ---------- | ------------------------------------------------------------ | --------------------------------------------- |
+| `.start()` | `build()` + `migrateToLatest()`, throws on migration failure | Self-hosted boot                              |
+| `.build()` | Finalizes the chain only — you run migrations yourself       | Deploy scripts, logging `results`, serverless |
+
+On serverless, run migrations from a deploy script instead of the request path — see [Deployment](/outer/deployment).
+
+## Call it from a client
+
+After the server is up, use [`@outerjs/sdk`](/getting-started/client) in the browser, or `server.client(headers)` during SSR — both share `InferRouter` types.
 
 ## Project structure
 
@@ -100,16 +116,19 @@ my-outer-app/
 └── package.json
 ```
 
-Keep schema versions in their own file. You add versions over time and never edit old ones — or derive the next version with [`.extend()`](/guide/schema#extend-a-previous-version).
+Keep schema versions in their own file. You add versions over time and never edit old ones — or derive the next version with [`.extend()`](/schema/defining-schema#extend-a-previous-version).
 
 ## Next steps
 
-- [Schema](/guide/schema) — define tables, columns, and relations
-- [Migrations](/guide/migrations) — register versions and apply them
-- [Resources](/guide/resources) — generate CRUD for a table
-- [Auth](/guide/auth) — Better Auth, sessions, and API keys
-- [Permissions](/guide/permissions) — guard procedures and resources
-- [Procedures](/guide/procedures) — write the endpoints CRUD does not cover
-- [Plugins](/guide/plugins) — package procedures, routes, and middleware
-- [Database](/guide/database) — query with Kysely and the Sola ORM
-- [Deployment](/guide/deployment) — pick a database and a host
+- [Client](/getting-started/client) — typed `@outerjs/sdk` and `BuiltOuter.client()`
+- [`new Outer()`](/outer/server) — constructor options and what `.start()` returns
+- [`schema()`](/schema/defining-schema) — define tables, columns, and relations
+- [Migrations](/schema/migrations) — register versions and apply them
+- [`.resource()`](/outer/resource) — generate CRUD for a table
+- [`.auth()`](/outer/auth) — Better Auth, sessions, and API keys
+- [Permissions](/outer/permissions) — guard procedures and resources
+- [`.procedure()`](/outer/procedure) — write the endpoints CRUD does not cover
+- [`.use()`](/outer/use) — package procedures, routes, and middleware
+- [Database](/outer/database) — query with Kysely and the Sola ORM
+- [`new Outer()`](/outer/server) — CORS, rate limits, health, `onError`
+- [Deployment](/outer/deployment) — pick a database and a host

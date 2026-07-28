@@ -2,12 +2,15 @@
 title: API reference
 description: Every option you can pass to new Outer(...), every builder method including .start() and .use(), the schema() builder, and the built server.
 sidebar:
-  order: 17
+  order: 3
+previousSlug:
+  - /guide/api-reference
+  - /outer/api-reference
 ---
 
 Complete reference for `@outerjs/server`: the `Outer` constructor, every builder method and its config, the `schema()` builder, plugins, and the object `.build()` / `.start()` returns.
 
-For task-oriented explanations, start with the guides — [Schema](/guide/schema), [Permissions](/guide/permissions), and [Procedures](/guide/procedures).
+For task-oriented explanations, start with the guides — [`new Outer()`](/outer/server), [`schema()`](/schema/defining-schema), [Permissions](/outer/permissions), and [`.procedure()`](/outer/procedure).
 
 ## Package entry points
 
@@ -41,11 +44,11 @@ const outer = new Outer({
 | ----------- | ------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `name`      | `string`                                                                  | no       | Display name. Used as the OpenAPI spec title and reported by `_admin.meta`.                                                                                                                                                                                                    |
 | `baseUrl`   | `string`                                                                  | no       | Public origin of the server. Used as Better Auth's default `baseURL` and as `servers[].url` (`<baseUrl>/rest`) in the OpenAPI spec.                                                                                                                                            |
-| `db`        | `{ dialect: Dialect; kind: "postgres" \| "sqlite"; live?: LiveProvider }` | **yes**  | A Kysely `Dialect` plus its family. `kind` drives DDL generation, Better Auth's schema, and error mapping, so it must match the dialect. Optional `live` enables [live queries](/guide/database#live-queries). Use `pglite()` for the zero-infra default.                      |
+| `db`        | `{ dialect: Dialect; kind: "postgres" \| "sqlite"; live?: LiveProvider }` | **yes**  | A Kysely `Dialect` plus its family. `kind` drives DDL generation, Better Auth's schema, and error mapping, so it must match the dialect. Optional `live` enables [live queries](/outer/database#live-queries). Use `pglite()` for the zero-infra default.                      |
 | `cors`      | `CorsConfig`                                                              | no       | Cross-origin browser callers allowed to reach `/rpc/**`, `/api/auth/**`, and the admin API. Merged into Better Auth's `trustedOrigins` when `.auth()` is used. Without it, no `Access-Control-Allow-Origin` header is set.                                                     |
-| `storage`   | `OuterStorage`                                                            | no       | Object store for file bytes. Surfaced as `context.storage` and used by [`.files()`](#filesconfig), which throws without it. See [File uploads](/guide/files#storage-adapters).                                                                                                 |
-| `secrets`   | `OuterSecrets`                                                            | no       | Runtime-agnostic accessor for env secrets and bindings, surfaced as `context.secrets`. Build it with `fromSchema` / `fromEnv` / `fromRecord`. See [Secrets](/guide/secrets).                                                                                                   |
-| `kv`        | `OuterKV`                                                                 | no       | Key/value store, surfaced as `context.kv`. Pass any [unstorage](https://unstorage.unjs.io) instance — `createStorage(...)`, Nitro's `useStorage()`, Cloudflare KV, or Vercel Runtime Cache. Supports TTL via `setItem(key, value, { ttl })`. See [Key/value store](/guide/kv). |
+| `storage`   | `OuterStorage`                                                            | no       | Object store for file bytes. Surfaced as `context.storage` and used by [`.files()`](#filesconfig), which throws without it. See [`.files()`](/outer/files#storage-adapters).                                                                                                   |
+| `secrets`   | `OuterSecrets`                                                            | no       | Runtime-agnostic accessor for env secrets and bindings, surfaced as `context.secrets`. Build it with `fromSchema` / `fromEnv` / `fromRecord`. See [Secrets](/outer/secrets).                                                                                                   |
+| `kv`        | `OuterKV`                                                                 | no       | Key/value store, surfaced as `context.kv`. Pass any [unstorage](https://unstorage.unjs.io) instance — `createStorage(...)`, Nitro's `useStorage()`, Cloudflare KV, or Vercel Runtime Cache. Supports TTL via `setItem(key, value, { ttl })`. See [Key/value store](/outer/kv). |
 | `onError`   | `(error, info) => void`                                                   | no       | Called for unexpected failures only, never for deliberate `ORPCError` responses (400, 401, 403, 404, 409, …), which are application behavior. `info.source` is `"rpc" \| "rest" \| "route" \| "mcp"`. Defaults to `console.error`; pass `() => {}` to silence it.              |
 | `health`    | `boolean \| { path?: string }`                                            | no       | Mounts `GET /health` with a `select 1` probe — `200 {"status":"ok","database":"up"}`, or `503` when the probe fails. Enabled by default; `false` omits it. A `.route()` on the same path wins. Not rate limited.                                                               |
 | `rateLimit` | `RateLimitConfig`                                                         | no       | Per-caller limit on `/rpc/**` and `/rest/**`. Off by default. `/api/auth/**` is excluded, since Better Auth has its own.                                                                                                                                                       |
@@ -88,7 +91,7 @@ Embedded, zero-infra Postgres from `@outerjs/server/pglite`. Returns a `{ dialec
 | Extension | Package                         | Reachable from                                                                                   |
 | --------- | ------------------------------- | ------------------------------------------------------------------------------------------------ |
 | `vector`  | `@electric-sql/pglite-pgvector` | Plain SQL — `CREATE EXTENSION IF NOT EXISTS vector` runs before any query                        |
-| `live`    | `@electric-sql/pglite/live`     | [`context.db.query.<table>.live()`](/guide/database#live-queries) — wired up as a `LiveProvider` |
+| `live`    | `@electric-sql/pglite/live`     | [`context.db.query.<table>.live()`](/outer/database#live-queries) — wired up as a `LiveProvider` |
 
 Both packages are optional peers you install yourself: `bun add @electric-sql/pglite @electric-sql/pglite-pgvector`.
 
@@ -172,7 +175,7 @@ Mounts `GET /openapi.json` and a plain-JSON REST surface under `/rest/**` matchi
 
 ### `.mcp(config?)`
 
-Serves the router as an [MCP](/guide/mcp) server over Streamable HTTP, so agents can call procedures as tools. Requires the optional peers `orpc-mcp` and `@orpc/zod`.
+Serves the router as an [MCP](/outer/mcp) server over Streamable HTTP, so agents can call procedures as tools. Requires the optional peers `orpc-mcp` and `@orpc/zod`.
 
 Exposure is **opt-in per procedure**: only those tagged with the `mcp` meta helper (`mcp.tool()`, `mcp.resource()`, `mcp.prompt()`, re-exported from `@outerjs/server`) are visible. The `_admin` namespace and `file.*` routes never are. Dots become underscores in tool names, so `post.search` is called as `post_search`.
 
@@ -187,7 +190,7 @@ Exposure is **opt-in per procedure**: only those tagged with the `mcp` meta help
 
 ### `.files(config?)`
 
-Mounts the upload surface — `file.upload`, `list`, `get`, `delete`, `attach`, `detach`, plus `GET /files/:id` — over the tables [`schema().files()`](#filesoptions) registers. Requires an `OuterStorage` on the constructor or in `config`. Full guide: [File uploads](/guide/files).
+Mounts the upload surface — `file.upload`, `list`, `get`, `delete`, `attach`, `detach`, plus `GET /files/:id` — over the tables [`schema().files()`](#filesoptions) registers. Requires an `OuterStorage` on the constructor or in `config`. Full guide: [`.files()`](/outer/files).
 
 | Prop          | Type                            | Default                                             | Description                                                                                                    |
 | ------------- | ------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
@@ -212,7 +215,7 @@ type OuterStorage = {
 
 ### `OuterSecrets`
 
-Runtime-agnostic accessor for env secrets and bindings, passed as `new Outer({ secrets })` and surfaced as `context.secrets`. `fromSchema(schema, env)` (validates a Zod / Standard Schema and infers the types), `fromEnv()` (`process.env`), `fromRecord(record)` (a typed env object), and `memorySecrets(values?)` ship with the package. Full guide: [Secrets](/guide/secrets).
+Runtime-agnostic accessor for env secrets and bindings, passed as `new Outer({ secrets })` and surfaced as `context.secrets`. `fromSchema(schema, env)` (validates a Zod / Standard Schema and infers the types), `fromEnv()` (`process.env`), `fromRecord(record)` (a typed env object), and `memorySecrets(values?)` ship with the package. Full guide: [Secrets](/outer/secrets).
 
 ```ts
 type OuterSecrets<T = Record<string, string | undefined>> = {
@@ -233,7 +236,7 @@ Enables the admin API — meta and schema introspection, migration status, and t
 
 ### `.use(plugin)`
 
-Registers an [`OuterPlugin`](#outerplugin). Can appear anywhere before `.start()` / `.build()`. Double-registering the same `plugin.name` throws. Full guide: [Plugins](/guide/plugins).
+Registers an [`OuterPlugin`](#outerplugin). Can appear anywhere before `.start()` / `.build()`. Double-registering the same `plugin.name` throws. Full guide: [`.use()`](/outer/use).
 
 ### `.build()`
 
@@ -260,7 +263,7 @@ const server = await new Outer({ db: pglite() }).schema(v1_0).start();
 
 ## `OuterPlugin`
 
-Extension point for third-party and app-specific features. Pass an instance to [`.use()`](#useplugin). Full guide: [Plugins](/guide/plugins).
+Extension point for third-party and app-specific features. Pass an instance to [`.use()`](#useplugin). Full guide: [`.use()`](/outer/use).
 
 ```ts
 type OuterPlugin = {
@@ -301,6 +304,7 @@ export const v1_0_0 = schema("1.0.0")
     ...timestamps(t),
   }))
   .relation("user", (rel) => rel.hasMany("post", { from: "id", to: "authorId" }))
+  .relation("post", (rel) => rel.belongsTo("user", { from: "authorId", to: "id" }))
   .build();
 ```
 
@@ -317,7 +321,7 @@ Extend an auth table by re-declaring extra columns with `.table("user", ...)` af
 | Option    | Type       | Default | Description                                                                                                                                                 |
 | --------- | ---------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `roles`   | `string[]` | —       | Declares the recognized role set, narrowing `user.role`. A user may hold several at once, since Better Auth stores them comma-separated. Open when omitted. |
-| `apiKeys` | `boolean`  | `false` | Adds the `apikey` table required by `@better-auth/api-key` — see [API keys](/guide/auth#api-keys).                                                          |
+| `apiKeys` | `boolean`  | `false` | Adds the `apikey` table required by `@better-auth/api-key` — see [API keys](/outer/auth#api-keys).                                                          |
 
 `session.userId` and `account.userId` cascade on delete, so removing a user is never blocked by their sessions.
 
@@ -354,16 +358,16 @@ Defines a table, or extends one — re-declaring merges columns, and the later d
 
 Column modifiers chain, and each returns the column:
 
-| Modifier                               | Effect                                                                                                                                                                                |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.nullable()`                          | Allows `NULL`. Optional in inserts and typed `\| null`.                                                                                                                               |
-| `.primaryKey()`                        | Marks the primary key, which drives the `where` type of resource `get`, `update`, and `delete`.                                                                                       |
-| `.unique()`                            | Adds a unique constraint.                                                                                                                                                             |
-| `.index()`                             | Non-unique index named `{table}_{column}_idx`. A no-op on `.unique()` columns.                                                                                                        |
-| `.default(value)`                      | Literal default, quoted for you by column type: `.default("user")`, `.default(false)`, `.default(0)`. Defaulted columns are **optional** in resource create inputs.                   |
-| `.defaultSql(expr)`                    | Raw SQL default, emitted verbatim: `.defaultSql("CURRENT_TIMESTAMP")`.                                                                                                                |
-| `.references(table, column, actions?)` | Foreign key. `actions` takes `onDelete` and `onUpdate` — `"cascade" \| "set null" \| "restrict" \| "no action"`. Without one, deleting a referenced row fails with an FK violation.   |
-| `.enum(values, options?)`              | Restricts a `text` or `varchar` column to a fixed set, narrowing the TS type to the union. `{ multiple: true }` stores a comma-separated **set** — see [Schema](/guide/schema#enums). |
+| Modifier                               | Effect                                                                                                                                                                                              |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.nullable()`                          | Allows `NULL`. Optional in inserts and typed `\| null`.                                                                                                                                             |
+| `.primaryKey()`                        | Marks the primary key, which drives the `where` type of resource `get`, `update`, and `delete`.                                                                                                     |
+| `.unique()`                            | Adds a unique constraint.                                                                                                                                                                           |
+| `.index()`                             | Non-unique index named `{table}_{column}_idx`. A no-op on `.unique()` columns.                                                                                                                      |
+| `.default(value)`                      | Literal default, quoted for you by column type: `.default("user")`, `.default(false)`, `.default(0)`. Defaulted columns are **optional** in resource create inputs.                                 |
+| `.defaultSql(expr)`                    | Raw SQL default, emitted verbatim: `.defaultSql("CURRENT_TIMESTAMP")`.                                                                                                                              |
+| `.references(table, column, actions?)` | Foreign key. `actions` takes `onDelete` and `onUpdate` — `"cascade" \| "set null" \| "restrict" \| "no action"`. Without one, deleting a referenced row fails with an FK violation.                 |
+| `.enum(values, options?)`              | Restricts a `text` or `varchar` column to a fixed set, narrowing the TS type to the union. `{ multiple: true }` stores a comma-separated **set** — see [`schema()`](/schema/defining-schema#enums). |
 
 ### `timestamps(t)`
 
@@ -391,7 +395,7 @@ const v1_1 = schema("1.1.0")
   .build();
 ```
 
-Full guide: [Schema → Extend a previous version](/guide/schema#extend-a-previous-version).
+Full guide: [Schema → Extend a previous version](/schema/defining-schema#extend-a-previous-version).
 
 ### `.build()`
 
@@ -408,7 +412,7 @@ Freezes and returns the `SchemaResult` you pass to `.schema()`.
 | `FileTables`           | The table shape `schema().files()` registers — the `file` table plus any `attachTo` pivots.                                                                  |
 | `OuterStorage`         | The three-method object store contract accepted by `new Outer({ storage })`.                                                                                 |
 | `OuterSecrets<T>`      | The env accessor contract accepted by `new Outer({ secrets })` — `get`, `require`, `all`. Build it with `fromSchema` / `fromEnv` / `fromRecord`.             |
-| `OuterKV`              | The key/value store contract accepted by `new Outer({ kv })` — the slice of unstorage's `Storage` most apps use. See [Key/value store](/guide/kv).           |
+| `OuterKV`              | The key/value store contract accepted by `new Outer({ kv })` — the slice of unstorage's `Storage` most apps use. See [Key/value store](/outer/kv).           |
 | `StandardSchemaV1`     | The [Standard Schema](https://standardschema.dev) interface `fromSchema` accepts (Zod, Valibot, ArkType).                                                    |
 | `OuterRpcContext<TDB>` | The base procedure context: `{ headers, db, auth?, user, session, storage?, secrets?, kv? }`. `context.db` is Kysely plus `query` (Sola) and `transact(fn)`. |
 

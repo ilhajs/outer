@@ -8,9 +8,16 @@
 bun add @outerjs/sdk
 ```
 
-## Usage
+## Pick a client
 
-Type the client with `InferRouter<typeof outer>` from your server — every `.procedure()`'s input, output, and errors flow to the frontend:
+| Client             | API                                                | When                                     |
+| ------------------ | -------------------------------------------------- | ---------------------------------------- |
+| Browser / remote   | `createClient` from this package                   | Separate frontend origin, scripts, SPAs  |
+| Same process (SSR) | `BuiltOuter.client(headers?)` on `@outerjs/server` | Server Components, loaders — no HTTP hop |
+
+Both share `InferRouter<typeof outer>` types. Full walkthrough: [Client guide](https://outer.now/getting-started/client).
+
+## Usage
 
 ```ts
 import { createClient } from "@outerjs/sdk";
@@ -23,7 +30,7 @@ export const client = createClient<InferRouter<typeof outer>>({
   .auth()
   .build();
 
-await client.user.me(); // typed RPC call
+await client.user.me(); // typed RPC
 await client.auth.signIn.email({ email, password }); // Better Auth client
 ```
 
@@ -37,7 +44,7 @@ When the Outer server is on a different origin than the frontend, pass `credenti
 // client
 createClient<Router>({ baseUrl, credentials: "include" }).auth().build();
 
-// server
+// server — see https://outer.now/outer/server#cors
 new Outer({ cors: { origins: ["https://app.example.com"], credentials: true } });
 ```
 
@@ -51,9 +58,20 @@ for await (const event of await client.notifications.stream()) {
 }
 ```
 
+See [Realtime](https://outer.now/outer/realtime) on the server and [Client → Realtime](https://outer.now/getting-started/client#realtime) for the consumer side.
+
 ## Documentation
 
-Full reference in [SPEC.md](https://github.com/ilhajs/outer/blob/main/SPEC.md).
+| Guide                 | URL                                              |
+| --------------------- | ------------------------------------------------ |
+| Client                | <https://outer.now/getting-started/client>       |
+| Introduction          | <https://outer.now/getting-started/introduction> |
+| `new Outer()`         | <https://outer.now/outer/server>                 |
+| Procedures / OpenAPI  | <https://outer.now/outer/procedure>              |
+| Auth / CORS           | <https://outer.now/outer/auth>                   |
+| CORS / server options | <https://outer.now/outer/server#cors>            |
+
+Machine-oriented detail remains in [SPEC.md](https://github.com/ilhajs/outer/blob/main/SPEC.md).
 
 ## License
 

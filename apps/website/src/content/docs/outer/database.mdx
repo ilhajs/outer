@@ -1,8 +1,10 @@
 ---
 title: Database
-description: Read and write with context.db — raw Kysely, transactions, and the Sola ORM's finders, pagination, and live queries.
+description: "Read and write with context.db — raw Kysely, transactions, and the Sola ORM's finders, pagination, and live queries."
 sidebar:
-  order: 8
+  order: 9
+previousSlug:
+  - /guide/database
 ---
 
 Every handler receives `context.db`: the full Kysely instance, typed to your latest schema, plus `query` (the Sola ORM) and `transact` for transactions.
@@ -20,7 +22,7 @@ type OuterRpcContext<TDB> = {
 };
 ```
 
-`user` and `session` need no middleware — see [Read the session](/guide/auth#read-the-session). `storage` is the same store [`.files()`](/guide/files) writes through, so a custom procedure can read and write blobs alongside the built-in file API.
+`user` and `session` need no middleware — see [Read the session](/outer/auth#read-the-session). `storage` is the same store [`.files()`](/outer/files) writes through, so a custom procedure can read and write blobs alongside the built-in file API.
 
 Add your own fields with `.middleware()`, and they are merged into the context — and the types — of every procedure defined after it.
 
@@ -144,7 +146,7 @@ Values in a Sola query are always parameterized, so user-supplied values never l
 
 ### `include`
 
-`include` loads relations you declared with [`.relation()`](/guide/schema#relations). It runs one extra query per relation and merges the results in JS, Prisma-style.
+`include` loads relations you declared with [`.relation()`](/schema/defining-schema#relations). It runs one extra query per relation and merges the results in JS, Prisma-style.
 
 - `hasMany` and `manyToMany` return an array.
 - `belongsTo` and `hasOne` return a single object or `null`.
@@ -187,9 +189,12 @@ Two limits to know before you lean on live queries:
 
 Each subscription costs real database resources, and PGlite is a single embedded instance, so subscription count scales with connected clients. Prefer one broad subscription fanned out in your app over one per client.
 
-To expose a live query without writing a procedure, use [`live: true` on a resource](/guide/resources#stream-a-list-with-live).
+To expose a live query without writing a procedure, use [`live: true` on a resource](/outer/resource#stream-a-list-with-live).
+
+For a custom `LiveProvider` (or anything that is callback-based rather than an async generator), wrap it with `liveIterable` from `@outerjs/server` so oRPC's `eventIterator` accepts the handler return value.
 
 ## Next steps
 
-- [Realtime](/guide/realtime) — stream application events instead of rows
-- [Resources](/guide/resources) — the same query surface, generated
+- [Realtime](/outer/realtime) — stream application events (`EventPublisher`) instead of reactive row snapshots
+- [`.resource()`](/outer/resource) — the same query surface, generated
+- [Client](/getting-started/client#realtime) — consume streams from `@outerjs/sdk`

@@ -2,7 +2,9 @@
 title: Realtime
 description: Stream updates over SSE with oRPC event iterators, fan out application events with EventPublisher, and resume dropped connections.
 sidebar:
-  order: 9
+  order: 10
+previousSlug:
+  - /guide/realtime
 ---
 
 Outer streams over SSE using oRPC's built-in event iterators. The existing `/rpc/**` handler streams async generators, so you add no infrastructure.
@@ -13,10 +15,12 @@ Pick based on where the truth lives.
 
 | Approach                                         | Follows          | Use it for                                                         |
 | ------------------------------------------------ | ---------------- | ------------------------------------------------------------------ |
-| [Live queries](/guide/database#live-queries)     | The database     | Anything that is a row: lists, counts, dashboards.                 |
+| [Live queries](/outer/database#live-queries)     | The database     | Anything that is a row: lists, counts, dashboards.                 |
 | [`EventPublisher`](#fan-out-with-eventpublisher) | Your application | Events that are not row changes: a job finishing, a presence ping. |
 
 With a live query, you subscribe to a query and every change reaches subscribers whatever caused it. With `EventPublisher`, you publish explicitly.
+
+Do not mix the two up: live queries follow **rows**; realtime procedures and `EventPublisher` follow **events you emit**. Return `context.db.query.<table>.live(...)` from a procedure when the database is the source of truth — see [Database → Live queries](/outer/database#live-queries).
 
 ## Stream from a procedure
 
@@ -92,5 +96,6 @@ On multi-instance platforms — Cloudflare Workers, Vercel serverless functions,
 
 ## Next steps
 
-- [Live queries](/guide/database#live-queries) — subscribe to the database instead
-- [Deployment](/guide/deployment) — how this interacts with each host
+- [Live queries](/outer/database#live-queries) — subscribe to the database instead of emitting events
+- [Client](/getting-started/client#realtime) — consume streams from `@outerjs/sdk`
+- [Deployment](/outer/deployment) — how this interacts with each host
